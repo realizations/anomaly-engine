@@ -1,0 +1,31 @@
+{
+  "events": [
+    {
+      "id": "meteor-shower",
+      "trigger": "random",
+      "rarity": "rare",
+      "cooldown": 7200,
+      "duration": 10,
+      "conditions": ["night"],
+      "effects": ["spawn.meteor", "play.wind"]
+    },
+    {
+      "id": "observatory-signal",
+      "trigger": "time.after-midnight",
+      "rarity": "very_rare",
+      "cooldown": 86400,
+      "duration": 30,
+      "conditions": ["clear_sky"],
+      "effects": ["light.observatory", "play.radio"]
+    },
+    {
+      "id": "forest-creature",
+      "trigger": "random",
+      "rarity": "very_rare",
+      "cooldown": 43200,
+      "duration": 12,
+      "conditions": ["night", "weather != storm"],
+      "effects": ["spawn.creature", "play.forest"]
+    }
+  ]
+}

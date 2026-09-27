@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>The Town That Wasn't There</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <script>
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const stars = Array.from({ length: 150 }, () => ({
+      x: Math.random(),
+      y: Math.random() * 0.6,
+      size: Math.random() * 1.5 + 0.5,
+      twinkle: Math.random() * Math.PI * 2
+    }));
+
+    function render(time) {
+      const w = canvas.width;
+      const h = canvas.height;
+      const hour = time.getHours() + time.getMinutes() / 60;
+
+      let topR, topG, topB, botR, botG, botB, starOpacity;
+
+      if (hour >= 6 && hour < 8) {
+        const t = (hour - 6) / 2;
+        topR = 20 + t * 60; topG = 20 + t * 100; topB = 50 + t * 130;
+        botR = 60 + t * 120; botG = 40 + t * 120; botB = 70 + t * 110;
+        starOpacity = 0.6 - t * 0.5;
+      } else if (hour >= 8 && hour < 17) {
+        topR = 100; topG = 150; topB = 220;
+        botR = 180; botG = 200; botB = 230;
+        starOpacity = 0;
+      } else if (hour >= 17 && hour < 20) {
+        const t = (hour - 17) / 3;
+        topR = 120 - t * 80; topG = 100 - t * 70; topB = 180 - t * 150;
+        botR = 220 - t * 200; botG = 140 - t * 120; botB = 80 - t * 50;
+        starOpacity = t * 0.5;
+      } else {
+        topR = 5; topG = 5; topB = 20;
+        botR = 15; botG = 15; botB = 35;
+        starOpacity = 0.9;
+      }
+
+      const gradient = ctx.createLinearGradient(0, 0, 0, h);
+      gradient.addColorStop(0, `rgb(${topR|0},${topG|0},${topB|0})`);
+      gradient.addColorStop(1, `rgb(${botR|0},${botG|0},${botB|0})`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, w, h);
+
+      if (starOpacity > 0) {
+        const t = time.getTime() / 1000;
+        for (const star of stars) {
+          const alpha = starOpacity * (0.5 + 0.5 * Math.sin(t * 2 + star.twinkle));
+          ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+          ctx.beginPath();
+          ctx.arc(star.x * w, star.y * h, star.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      const horizon = h * 0.65;
+      ctx.fillStyle = 'rgba(20,30,20,0.5)';
+      ctx.beginPath();
+      ctx.moveTo(0, horizon);
+      for (let x = 0; x <= w; x += 20) {
+        const y = horizon - Math.sin(x * 0.005) * 30 - Math.sin(x * 0.01) * 15;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, h);
+      ctx.lineTo(0, h);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(15,35,15,0.7)';
+      for (let i = 0; i < 30; i++) {
+        const x = (i / 30) * w + Math.sin(i * 7) * 20;
+        const height = 40 + Math.sin(i * 13) * 20;
+        const y = horizon + 10;
+        ctx.beginPath();
+        ctx.moveTo(x, y - height);
+        ctx.lineTo(x - 12, y);
+        ctx.lineTo(x + 12, y);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      requestAnimationFrame(() => render(new Date()));
+    }
+
+    render(new Date());
+  </script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Third-Party Notices
+
+## Microsoft.Web.WebView2
+- License: MIT
+- https://github.com/MicrosoftEdge/WebView2Samples
+
+## System.Data.SQLite.Core
+- License: Public Domain
+- https://system.data.sqlite.org/
+
+## Hardcodet.NotifyIcon.Wpf
+- License: MIT
+- https://github.com/hardcodet/wpf-notifyicon
+
+## Vite
+- License: MIT
+- https://vitejs.dev/
+
+## Vitest
+- License: MIT
+- https://vitest.dev/
+
+## TypeScript
+- License: Apache 2.0
+- https://www.typescriptlang.org/

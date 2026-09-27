@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.cs text eol=crlf
+*.png binary
+*.jpg binary
+*.webp binary
+*.wav binary
+*.ogg binary
+*.webm binary

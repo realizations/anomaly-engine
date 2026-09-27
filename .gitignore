@@ -1,0 +1,12 @@
+bin/
+obj/
+node_modules/
+dist/
+*.user
+.vs/
+.vscode/
+*.world
+!worlds/*/manifest.json
+AppData/
+*.log
+coverage/

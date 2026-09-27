@@ -1,0 +1,25 @@
+{
+  "id": "the-town-that-wasnt-there",
+  "name": "The Town That Wasn't There",
+  "author": "Ali S.",
+  "version": "1.0.0",
+  "engine": ">=0.1.0",
+  "entryScene": "main",
+  "description": "A cozy mysterious town with pine forest, an old radio tower, a small cabin, and an abandoned observatory. Strange lights. A mysterious moon.",
+  "features": {
+    "weather": false,
+    "astronomy": false,
+    "systemEvents": true,
+    "audioReactive": false
+  },
+  "scenes": [
+    {
+      "id": "main",
+      "file": "scenes/main.html",
+      "description": "Main town view with day/night cycle"
+    }
+  ],
+  "events": [
+    "events/definitions.json"
+  ]
+}
