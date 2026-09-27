@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Journal — Anomaly Engine</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Space Mono', monospace;
+      background: #0a0a1a;
+      color: #e0e0ff;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #8888ff; }
+    .subtitle { color: #8888aa; margin-bottom: 2rem; }
+    .entry {
+      background: #12122a;
+      border: 1px solid #2a2a4e;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .entry-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    .entry-title { font-weight: 700; }
+    .entry-date { color: #8888aa; font-size: 0.85rem; }
+    .entry-rarity {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+    }
+    .rarity-common { background: #2a4a2a; color: #44cc88; }
+    .rarity-uncommon { background: #2a3a4a; color: #44aacc; }
+    .rarity-rare { background: #3a2a4a; color: #aa44cc; }
+    .rarity-very_rare { background: #4a3a2a; color: #ccaa44; }
+    .rarity-legendary { background: #4a2a2a; color: #cc4466; }
+    .entry-location { color: #8888aa; font-size: 0.9rem; margin-top: 0.5rem; }
+    .entry-notes { margin-top: 0.5rem; font-style: italic; }
+    .empty { text-align: center; color: #8888aa; padding: 4rem 2rem; }
+    .back { display: inline-block; margin-bottom: 2rem; color: #8888ff; text-decoration: none; }
+    .back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/" class="back">&larr; Back</a>
+    <h1>Journal</h1>
+    <p class="subtitle">A record of what has been observed.</p>
+    <div id="entries"></div>
+  </div>
+  <script>
+    const entries = [];
+    const container = document.getElementById('entries');
+
+    if (entries.length === 0) {
+      container.innerHTML = '<div class="empty">No entries yet. The world is waiting.</div>';
+    } else {
+      for (const entry of entries) {
+        const div = document.createElement('div');
+        div.className = 'entry';
+        div.innerHTML = `
+          <div class="entry-header">
+            <span class="entry-title">${entry.anomalyName}</span>
+            <span class="entry-rarity rarity-${entry.rarity}">${entry.rarity.replace('_', ' ')}</span>
+          </div>
+          <div class="entry-date">${new Date(entry.timestamp).toLocaleString()}</div>
+          <div class="entry-location">Location: ${entry.location}</div>
+          ${entry.notes ? `<div class="entry-notes">"${entry.notes}"</div>` : ''}
+        `;
+        container.appendChild(div);
+      }
+    }
+  </script>
+</body>
+</html>

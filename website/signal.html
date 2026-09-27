@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signal — Anomaly Engine</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Space Mono', monospace;
+      background: #0a0a1a;
+      color: #e0e0ff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+    }
+    .signal {
+      font-size: 3rem;
+      letter-spacing: 0.5rem;
+      color: #44cc88;
+      animation: flicker 0.1s infinite;
+    }
+    @keyframes flicker {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.8; }
+    }
+    h1 { font-size: 1.5rem; margin: 1rem 0; color: #8888ff; }
+    p { color: #8888aa; max-width: 400px; }
+    .back { display: inline-block; margin-top: 2rem; color: #8888ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="signal">73.4</div>
+  <h1>Signal Detected</h1>
+  <p>The signal is not random. It is a message. Decode it.</p>
+  <a href="/" class="back">&larr; Back</a>
+</body>
+</html>

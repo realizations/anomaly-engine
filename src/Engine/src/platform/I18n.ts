@@ -54,7 +54,16 @@ const DEFAULT_LOCALE: Locale = {
   },
 };
 
-const locales: Map<string, Locale> = new Map([['en', DEFAULT_LOCALE]]);
+const locales: Map<string, Locale> = new Map([
+  ['en', DEFAULT_LOCALE],
+  ['es', ES_LOCALE],
+  ['de', DE_LOCALE],
+  ['ja', JA_LOCALE],
+]);
+
+import { ES_LOCALE } from './locales/es.js';
+import { DE_LOCALE } from './locales/de.js';
+import { JA_LOCALE } from './locales/ja.js';
 
 export class I18n {
   private _currentLocale: Locale = DEFAULT_LOCALE;

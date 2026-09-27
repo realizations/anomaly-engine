@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>404 — Anomaly Engine</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Space Mono', monospace;
+      background: #0a0a1a;
+      color: #e0e0ff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+    }
+    h1 { font-size: 4rem; margin-bottom: 1rem; color: #4a4a8e; }
+    p { color: #8888aa; max-width: 400px; margin-bottom: 0.5rem; }
+    .hint { color: #4a4a8e; font-size: 0.85rem; margin-top: 1rem; }
+    .back { display: inline-block; margin-top: 2rem; color: #8888ff; text-decoration: none; }
+    .eye {
+      width: 40px;
+      height: 40px;
+      border: 2px solid #4a4a8e;
+      border-radius: 50%;
+      margin-bottom: 2rem;
+      position: relative;
+    }
+    .eye::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 12px;
+      height: 12px;
+      background: #4a4a8e;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div class="eye"></div>
+  <h1>404</h1>
+  <p>We looked everywhere.</p>
+  <p>It's still not here.</p>
+  <p class="hint">Something else is, though.</p>
+  <a href="/" class="back">&larr; Go back</a>
+</body>
+</html>

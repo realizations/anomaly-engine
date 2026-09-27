@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Renderer
+        run: |
+          cd src/Engine
+          npm install
+          npm run build
+
+      - name: Build Native Host
+        run: |
+          cd src/AnomalyEngine
+          dotnet build -c Release
+
+      - name: Test
+        run: |
+          cd src/Engine
+          npm test
+
+      - name: Package
+        run: |
+          cd src/AnomalyEngine
+          dotnet publish -c Release -o publish
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            src/AnomalyEngine/publish/**
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

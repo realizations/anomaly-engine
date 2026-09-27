@@ -23,6 +23,12 @@ import { I18n } from './platform/I18n.js';
 import { AccessibilitySystem } from './platform/AccessibilitySystem.js';
 import { UpdateSystem } from './platform/UpdateSystem.js';
 import { WorldLoader } from './worlds/WorldLoader.js';
+import { WorldClock } from './systems/SelfReferential.js';
+import { EasterEggSystem } from './systems/EasterEggSystem.js';
+import { HotkeySystem } from './platform/HotkeySystem.js';
+import { InteractionSystem } from './platform/InteractionSystem.js';
+import { MediaReactivitySystem } from './systems/MediaReactivity.js';
+import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
 
 class Engine {
   private _bus: EventBus;
@@ -50,6 +56,12 @@ class Engine {
   private _accessibility: AccessibilitySystem;
   public _updater: UpdateSystem;
   private _worlds: WorldLoader;
+  private _worldClock: WorldClock;
+  private _easterEggs: EasterEggSystem;
+  private _hotkeys: HotkeySystem;
+  private _interaction: InteractionSystem;
+  private _media: MediaReactivitySystem;
+  private _benchmark: BenchmarkSystem;
   private _canvas: HTMLCanvasElement;
   private _running = false;
   private _paused = false;
@@ -83,6 +95,12 @@ class Engine {
     this._accessibility = new AccessibilitySystem();
     this._updater = new UpdateSystem({ checkInterval: 3600, endpoint: '', autoCheck: false, allowMandatory: true }, '0.1.0');
     this._worlds = new WorldLoader();
+    this._worldClock = new WorldClock();
+    this._easterEggs = new EasterEggSystem();
+    this._hotkeys = new HotkeySystem();
+    this._interaction = new InteractionSystem();
+    this._media = new MediaReactivitySystem();
+    this._benchmark = new BenchmarkSystem();
 
     this._canvas = document.getElementById('wallpaper-canvas') as HTMLCanvasElement;
     this._renderer = new DayNightCycle(this._canvas);
@@ -307,6 +325,12 @@ class Engine {
   getWeather(): WeatherSystem { return this._weather; }
   getAstronomy(): AstronomySystem { return this._astronomy; }
   getNetwork(): NetworkSource { return this._network; }
+  getWorldClock(): WorldClock { return this._worldClock; }
+  getEasterEggs(): EasterEggSystem { return this._easterEggs; }
+  getHotkeys(): HotkeySystem { return this._hotkeys; }
+  getInteraction(): InteractionSystem { return this._interaction; }
+  getMedia(): MediaReactivitySystem { return this._media; }
+  getBenchmark(): BenchmarkSystem { return this._benchmark; }
 }
 
 const engine = new Engine();

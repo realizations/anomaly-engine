@@ -67,8 +67,6 @@ export class EntityManager {
 
   update(deltaMs: number): void {
     const deltaSec = deltaMs / 1000;
-    const now = Date.now();
-
     for (const entity of this._entities.values()) {
       entity.age += deltaMs;
 

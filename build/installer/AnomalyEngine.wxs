@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Anomaly Engine" Language="1033" Version="0.1.0" Manufacturer="Ali S." UpgradeCode="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Anomaly Engine is already installed." />
+    <MediaTemplate />
+
+    <Feature Id="ProductFeature" Title="Anomaly Engine" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Anomaly Engine">
+          <Component Id="MainExecutable" Guid="b2c3d4e5-f6a7-8901-bcde-f12345678901">
+            <File Id="AnomalyEngineExe" Source="$(var.AnomalyEngine.TargetPath)" KeyPath="yes" />
+          </Component>
+          <Component Id="WebView2Loader" Guid="c3d4e5f6-a7b8-9012-cdef-123456789012">
+            <File Id="WebView2LoaderDll" Source="$(var.AnomalyEngine.TargetDir)WebView2Loader.dll" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProgramMenuDir" Name="Anomaly Engine">
+          <Component Id="AppShortcut" Guid="d4e5f6a7-b8c9-0123-defa-234567890123">
+            <Shortcut Id="AppStartMenuShortcut" Name="Anomaly Engine" Target="[INSTALLFOLDER]AnomalyEngine.exe" WorkingDirectory="INSTALLFOLDER" />
+            <RemoveFolder Id="ProgramMenuDir" On="uninstall" />
+            <RegistryValue Root="HKCU" Key="Software\AnomalyEngine" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="WebView2Loader" />
+    </ComponentGroup>
+
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="WixUI_InstallDir" />
+  </Product>
+</Wix>
