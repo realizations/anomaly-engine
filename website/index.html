@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anomaly Engine</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap');
+
+    :root {
+      --bg-dark: #0a0a1a;
+      --bg-card: #12122a;
+      --bg-hover: #1a1a3e;
+      --text-primary: #e0e0ff;
+      --text-secondary: #8888aa;
+      --accent: #8888ff;
+      --accent-glow: rgba(136, 136, 255, 0.3);
+      --border: #2a2a4e;
+      --success: #44cc88;
+      --warning: #ccaa44;
+      --danger: #cc4466;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    .mono { font-family: 'Space Mono', monospace; }
+
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+      position: relative;
+      background: radial-gradient(ellipse at center, #1a1a3e 0%, var(--bg-dark) 70%);
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%238888ff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 8vw, 5rem);
+      font-weight: 300;
+      letter-spacing: -0.02em;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero .tagline {
+      font-size: clamp(1rem, 3vw, 1.5rem);
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin-bottom: 2rem;
+    }
+
+    .hero .cta {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 0.875rem 2rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg-dark);
+    }
+
+    .btn-primary:hover {
+      background: #9999ff;
+      box-shadow: 0 0 30px var(--accent-glow);
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--accent);
+      background: var(--bg-hover);
+    }
+
+    .features {
+      padding: 6rem 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .features h2 {
+      font-size: 2.5rem;
+      font-weight: 300;
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2rem;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-4px);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .feature-card h3 {
+      font-size: 1.25rem;
+      margin-bottom: 0.75rem;
+      color: var(--accent);
+    }
+
+    .feature-card p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    .world-section {
+      padding: 6rem 2rem;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .world-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+    }
+
+    .world-content h2 {
+      font-size: 2.5rem;
+      font-weight: 300;
+      margin-bottom: 1rem;
+    }
+
+    .world-content p {
+      color: var(--text-secondary);
+      margin-bottom: 1.5rem;
+    }
+
+    .world-preview {
+      background: var(--bg-dark);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      aspect-ratio: 16/9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .world-preview::before {
+      content: '';
+      position: absolute;
+      width: 100%; height: 100%;
+      background: linear-gradient(180deg, #0a0a2a 0%, #1a1a3e 50%, #0a1a0a 100%);
+    }
+
+    .world-preview .moon {
+      position: absolute;
+      top: 20%;
+      right: 25%;
+      width: 40px; height: 40px;
+      background: #e0e0ff;
+      border-radius: 50%;
+      box-shadow: 0 0 40px rgba(224, 224, 255, 0.4);
+    }
+
+    .world-preview .trees {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 40%;
+      background: linear-gradient(180deg, transparent 0%, #0a1a0a 100%);
+      clip-path: polygon(0% 100%, 5% 60%, 10% 100%, 15% 50%, 20% 100%, 25% 70%, 30% 100%, 35% 40%, 40% 100%, 45% 60%, 50% 100%, 55% 50%, 60% 100%, 65% 70%, 70% 100%, 75% 45%, 80% 100%, 85% 60%, 90% 100%, 95% 55%, 100% 100%);
+    }
+
+    .roadmap {
+      padding: 6rem 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .roadmap h2 {
+      font-size: 2.5rem;
+      font-weight: 300;
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .roadmap-timeline {
+      position: relative;
+      padding-left: 2rem;
+    }
+
+    .roadmap-timeline::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .roadmap-item {
+      position: relative;
+      padding: 1.5rem 0 1.5rem 2rem;
+    }
+
+    .roadmap-item::before {
+      content: '';
+      position: absolute;
+      left: -2rem; top: 2rem;
+      width: 12px; height: 12px;
+      background: var(--bg-dark);
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      transform: translateX(-5px);
+    }
+
+    .roadmap-item.completed::before {
+      background: var(--accent);
+    }
+
+    .roadmap-item h3 {
+      font-size: 1.1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .roadmap-item .status {
+      font-size: 0.8rem;
+      color: var(--success);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .roadmap-item .status.pending {
+      color: var(--warning);
+    }
+
+    .roadmap-item p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+
+    .secrets-section {
+      padding: 6rem 2rem;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .secrets-section h2 {
+      font-size: 2rem;
+      font-weight: 300;
+      margin-bottom: 1rem;
+    }
+
+    .secrets-section p {
+      color: var(--text-secondary);
+      max-width: 500px;
+      margin: 0 auto 2rem;
+    }
+
+    .secret-hint {
+      display: inline-block;
+      padding: 1rem 2rem;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-family: 'Space Mono', monospace;
+      font-size: 0.9rem;
+    }
+
+    footer {
+      padding: 3rem 2rem;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    .nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+      background: rgba(10, 10, 26, 0.8);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav .logo {
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--text-primary);
+      text-decoration: none;
+    }
+
+    .nav .links {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .nav .links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .nav .links a:hover {
+      color: var(--text-primary);
+    }
+
+    @media (max-width: 768px) {
+      .world-content {
+        grid-template-columns: 1fr;
+      }
+
+      .nav .links {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="logo">ANOMALY ENGINE</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#world">World</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="https://github.com/realizations/anomaly-engine">GitHub</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <h1>Anomaly Engine</h1>
+    <p class="tagline">A live wallpaper engine where the desktop behaves like a living world.</p>
+    <div class="cta">
+      <a href="https://github.com/realizations/anomaly-engine" class="btn btn-primary">Download</a>
+      <a href="#features" class="btn btn-secondary">Learn More</a>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <h2>Features</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <h3>Event-Driven World</h3>
+        <p>Everything is an event. Time, weather, astronomy, system state — all flow through a central event bus that brings the world to life.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Day/Night Cycle</h3>
+        <p>The world changes with real local time. Dawn breaks, stars emerge, and the town settles into its nocturnal rhythm.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Anomaly System</h3>
+        <p>Rare, strange events that feel intentional. A second moon. A watcher in the pines. A signal from the observatory.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Journal & Secrets</h3>
+        <p>Discoveries persist across sessions. The world remembers what you've found — and what you haven't.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Multi-Monitor</h3>
+        <p>Independent or synchronized worlds per display. Different seeds, different experiences.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Privacy First</h3>
+        <p>No telemetry. No accounts. No tracking. The weirdness comes from simulation, not surveillance.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="world-section" id="world">
+    <div class="world-content">
+      <div>
+        <h2>The Town That Wasn't There</h2>
+        <p>A cozy mysterious town with pine forest, distant mountains, an old radio tower, a small cabin, and an abandoned observatory. Strange lights. Handwritten notes. A mysterious moon.</p>
+        <p>The world should feel cozy before it feels frightening. Cute + mysterious + weird + nostalgic + funny + occasionally unsettling.</p>
+        <a href="https://github.com/realizations/anomaly-engine" class="btn btn-primary">Get the World</a>
+      </div>
+      <div class="world-preview">
+        <div class="moon"></div>
+        <div class="trees"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="roadmap" id="roadmap">
+    <h2>Roadmap</h2>
+    <div class="roadmap-timeline">
+      <div class="roadmap-item completed">
+        <span class="status">Complete</span>
+        <h3>Phase 1 — Basic Wallpaper</h3>
+        <p>Windows host, WebView2, animated scene, tray, event bus, day/night cycle.</p>
+      </div>
+      <div class="roadmap-item completed">
+        <span class="status">Complete</span>
+        <h3>Phase 2 — Living World</h3>
+        <p>Full event system, entity system, persistence, weather, astronomy, performance.</p>
+      </div>
+      <div class="roadmap-item completed">
+        <span class="status">Complete</span>
+        <h3>Phase 3 — Real World</h3>
+        <p>Network events, GitHub, RSS, media reactivity, remote event feed.</p>
+      </div>
+      <div class="roadmap-item completed">
+        <span class="status">Complete</span>
+        <h3>Phase 4 — Mystery</h3>
+        <p>Anomalies, journal, discoveries, secrets, moments, screenshots.</p>
+      </div>
+      <div class="roadmap-item completed">
+        <span class="status">Complete</span>
+        <h3>Phase 5 — Community</h3>
+        <p>World packages, creator mode, CLI, documentation.</p>
+      </div>
+      <div class="roadmap-item">
+        <span class="status pending">In Progress</span>
+        <h3>Phase 6 — Polish</h3>
+        <p>Installer, updater, accessibility, performance benchmarks, CI/CD, release automation.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="secrets-section">
+    <h2>There's more to find.</h2>
+    <p>The world contains secrets that are not documented here. Some are hidden in plain sight. Others require patience, observation, and curiosity.</p>
+    <div class="secret-hint">// TODO: find the first clue</div>
+  </section>
+
+  <footer>
+    <p>Anomaly Engine by <a href="https://github.com/realizations">Ali S. (@realizations)</a></p>
+    <p>MIT License — <a href="https://github.com/realizations/anomaly-engine">Source Code</a></p>
+  </footer>
+</body>
+</html>

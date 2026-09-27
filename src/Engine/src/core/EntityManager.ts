@@ -72,7 +72,7 @@ export class EntityManager {
     for (const entity of this._entities.values()) {
       entity.age += deltaMs;
 
-      if (entity.expiresAt !== null && now >= entity.expiresAt) {
+      if (entity.expiresAt !== null && entity.age >= (entity.expiresAt - entity.createdAt)) {
         this.remove(entity.id);
         continue;
       }
