@@ -20,4 +20,17 @@
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <RendererFiles Include="..\Engine\renderer\**\*" Condition="Exists('..\Engine\renderer\index.html')" />
+  </ItemGroup>
+
+  <Target Name="BuildRenderer" BeforeTargets="Build">
+    <Exec Command="npm run build" WorkingDirectory="..\Engine" Condition="Exists('..\Engine\package.json')" />
+  </Target>
+
+  <Target Name="CopyRendererFiles" AfterTargets="Build">
+    <Copy SourceFiles="@(RendererFiles)" DestinationFiles="@(RendererFiles->'$(OutDir)renderer\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\Engine\src\index.html" DestinationFiles="$(OutDir)renderer\index.html" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
