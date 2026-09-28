@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using AnomalyEngine.Core;
+using AnomalyEngine.SettingsWindow;
 
 namespace AnomalyEngine;
 
@@ -12,6 +13,7 @@ public class EngineApp : Application
     private PowerManager? _powerManager;
     private FullscreenDetector? _fullscreenDetector;
     private Logger? _logger;
+    private SettingsWindow.SettingsWindow? _settingsWindow;
 
     protected override void OnStartup(StartupEventArgs e)
     {

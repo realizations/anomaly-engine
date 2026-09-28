@@ -13,6 +13,7 @@ public class TrayIcon : IDisposable
     private readonly Logger _logger;
     private readonly WallpaperHost _wallpaperHost;
     private TaskbarIcon? _trayIcon;
+    private SettingsWindow.SettingsWindow? _settingsWindow;
 
     public TrayIcon(Logger logger, WallpaperHost wallpaperHost)
     {
@@ -95,7 +96,13 @@ public class TrayIcon : IDisposable
     private void OpenSettings()
     {
         _logger.Info("Opening settings...");
-        // Settings window implementation comes in Phase 2
+        if (_settingsWindow == null || !_settingsWindow.IsLoaded)
+        {
+            _settingsWindow = new SettingsWindow.SettingsWindow();
+            _settingsWindow.Closed += (s, e) => _settingsWindow = null;
+        }
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
     }
 
     private void ShowAbout()
