@@ -6,6 +6,7 @@ import { ClockSource } from './events/ClockSource.js';
 import { RandomSource } from './events/RandomSource.js';
 import { NetworkSource } from './events/NetworkSource.js';
 import { WorldRenderer } from './renderer/WorldRenderer.js';
+import type { AnomalyKind } from './renderer/WorldRenderer.js';
 import { NativeBridge } from './platform/NativeBridge.js';
 import { WeatherSystem } from './systems/WeatherSystem.js';
 import { AstronomySystem } from './systems/AstronomySystem.js';
@@ -110,6 +111,14 @@ class Engine {
     this._setupAnomalies();
     this._resize();
     window.addEventListener('resize', () => this._resize());
+
+    const boot = document.getElementById('anomaly-boot');
+    if (boot) {
+      window.setTimeout(() => {
+        boot.classList.add('gone');
+        window.setTimeout(() => boot.remove(), 800);
+      }, 900);
+    }
   }
 
   async start(): Promise<void> {
@@ -168,7 +177,7 @@ class Engine {
 
     if (!this._paused) {
       const now = new Date();
-      this._renderer.render(now);
+      this._renderer.render(this._simDate ?? now);
       this._particles.update(16);
       this._particles.render(this._canvas.getContext('2d')!, this._canvas.width, this._canvas.height);
       this._entities.update(16);
@@ -193,18 +202,60 @@ class Engine {
   }
 
   private _setupEventHandlers(): void {
+    this._weather.onUpdate((w) => {
+      this._renderer.setWeather({
+        condition: w.condition,
+        intensity: w.condition === 'clear' ? 0.2 : 0.6,
+        windSpeed: Math.min(1, w.windSpeed / 12),
+        windDirection: Math.sign(w.windDirection) || 0.3,
+      });
+      this._bus.emit({
+        id: `weather_${w.condition}_${Date.now()}`,
+        type: `weather.${w.condition}`,
+        timestamp: Date.now(),
+        source: 'weather',
+        payload: { temperature: w.temperature, windSpeed: w.windSpeed },
+        priority: 'normal',
+        rarity: 'common',
+        cooldown: 0,
+        duration: 0,
+        targetScene: 'main',
+        seed: Date.now(),
+        metadata: {},
+      });
+    });
+
     this._bus.subscribe('random.meteor', () => {
       this._renderer.triggerShootingStar();
-      this._particles.start('meteor');
-      setTimeout(() => this._particles.stop(), 2000);
+      this._pushAnomaly('meteor', 3.2, 1);
     });
 
     this._bus.subscribe('time.midnight', () => {
       this._particles.start('fireflies');
     });
 
-    this._bus.subscribe('time.sunrise', () => {
-      this._particles.stop();
+    this._bus.subscribe('time.0333', () => {
+      this._pushAnomaly('observatory-signal', 26, 1);
+    });
+
+    this._bus.subscribe('random.second_moon', () => {
+      this._pushAnomaly('second-moon', 8, 1);
+    });
+
+    this._bus.subscribe('random.red_moon', () => {
+      this._pushAnomaly('red-moon', 120, 1);
+    });
+
+    this._bus.subscribe('random.forest_creature', () => {
+      this._pushAnomaly('forest-watcher', 12, 0.9);
+    });
+
+    this._bus.subscribe('random.observatory_flash', () => {
+      this._pushAnomaly('observatory-signal', 18, 0.8);
+    });
+
+    this._bus.subscribe('weather.storm_started', () => {
+      this._renderer.triggerLightning();
     });
 
     this._bus.subscribe('*', (event) => {
@@ -241,6 +292,30 @@ class Engine {
         seed: Date.now(),
         metadata: {},
       });
+    });
+  }
+
+  private _pushAnomaly(type: AnomalyKind, duration: number, opacity: number): void {
+    this._renderer.addAnomaly({
+      type,
+      active: true,
+      opacity,
+      startedAt: performance.now(),
+      duration,
+    });
+    this._bus.emit({
+      id: `anomaly_${type}_${Date.now()}`,
+      type: `anomaly.${type}.began`,
+      timestamp: Date.now(),
+      source: 'anomaly',
+      payload: { duration },
+      priority: 'high',
+      rarity: 'rare',
+      cooldown: 0,
+      duration,
+      targetScene: 'main',
+      seed: Date.now(),
+      metadata: {},
     });
   }
 
@@ -332,6 +407,36 @@ class Engine {
   getInteraction(): InteractionSystem { return this._interaction; }
   getMedia(): MediaReactivitySystem { return this._media; }
   getBenchmark(): BenchmarkSystem { return this._benchmark; }
+
+  setSimulatedHour(hour: number): void {
+    this._simDate = new Date();
+    this._simDate.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+  }
+
+  setSimulatedWeather(condition: string): void {
+    this._renderer.setWeather({
+      condition: (condition as 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog') ?? 'clear',
+      intensity: condition === 'clear' ? 0 : 0.8,
+      windSpeed: 0.6,
+      windDirection: 0.3,
+    });
+  }
+
+  forceAnomaly(type: string): void {
+    const durations: Record<string, number> = {
+      'second-moon': 30,
+      'red-moon': 30,
+      'forest-watcher': 30,
+      'observatory-signal': 30,
+      'meteor': 4,
+      'lights-out': 10,
+    };
+    this._pushAnomaly(type as AnomalyKind, durations[type] ?? 10, 1);
+    if (type === 'meteor') this._renderer.triggerShootingStar();
+    if (type === 'lights-out') this._renderer.triggerLightning();
+  }
+
+  private _simDate: Date | null = null;
 }
 
 const engine = new Engine();

@@ -1,17 +1,16 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
 
 export default defineConfig({
   root: 'src',
+  base: './',
   build: {
-    outDir: '../renderer',
+    outDir: resolve(process.cwd(), 'renderer'),
     emptyOutDir: true,
     sourcemap: true,
+    target: 'es2022',
     rollupOptions: {
-      input: 'src/main.ts',
-      output: {
-        entryFileNames: 'main.js',
-        assetFileNames: 'assets/[name].[ext]',
-      },
+      input: resolve(process.cwd(), 'src/index.html'),
     },
   },
   server: {

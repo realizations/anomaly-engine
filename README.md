@@ -18,6 +18,18 @@
   <em>You might miss it. That's the point.</em>
 </p>
 
+## The World
+
+Everything below is drawn procedurally at runtime. No sprite sheets, no video loops.
+
+| Night | Golden Hour |
+|---|---|
+| ![Night](docs/images/01-night.png) | ![Golden](docs/images/06-golden.png) |
+
+| Storm | Second Moon (anomaly) |
+|---|---|
+| ![Storm](docs/images/10-storm.png) | ![Second moon](docs/images/13-anomaly-second-moon.png) |
+
 ---
 
 ## Table of Contents

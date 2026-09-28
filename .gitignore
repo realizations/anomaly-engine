@@ -10,3 +10,8 @@ dist/
 AppData/
 *.log
 coverage/
+
+build/preview/
+tools/node_modules/
+tools/package-lock.json
+tools/package.json
