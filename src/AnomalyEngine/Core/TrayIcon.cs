@@ -30,12 +30,20 @@ public class TrayIcon : IDisposable
             return;
         }
 
-        _trayIcon = new TaskbarIcon
+        try
         {
-            Icon = new Icon(iconStream),
-            ToolTipText = "Anomaly Engine",
-            Visibility = Visibility.Visible
-        };
+            _trayIcon = new TaskbarIcon
+            {
+                Icon = new Icon(iconStream),
+                ToolTipText = "Anomaly Engine",
+                Visibility = Visibility.Visible
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Tray icon could not be created: {ex.Message}");
+            return;
+        }
 
         var menu = new ContextMenu();
 
@@ -118,6 +126,12 @@ public class TrayIcon : IDisposable
     {
         try
         {
+            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "anomaly.ico");
+            if (File.Exists(path))
+            {
+                return File.OpenRead(path);
+            }
+
             var assembly = System.Reflection.Assembly.GetExecutingAssembly();
             return assembly.GetManifestResourceStream("AnomalyEngine.icon.ico");
         }

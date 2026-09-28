@@ -48,6 +48,9 @@ public static class NativeMethods
     public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
     public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
 
     [DllImport("user32.dll")]

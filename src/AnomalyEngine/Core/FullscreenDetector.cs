@@ -1,8 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace AnomalyEngine.Core;
 
@@ -16,13 +15,16 @@ public class FullscreenDetector : IDisposable
     private readonly Logger _logger;
     private System.Threading.Timer? _timer;
     private bool _lastState;
+    private readonly uint _ownProcessId;
 
     public event EventHandler<FullscreenStateChangedEventArgs>? FullscreenStateChanged;
 
     public FullscreenDetector(Logger logger)
     {
         _logger = logger;
-        _timer = new System.Threading.Timer(_ => CheckFullscreen(null), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+        _ownProcessId = (uint)Process.GetCurrentProcess().Id;
+        _timer = new System.Threading.Timer(
+            _ => CheckFullscreen(null), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
     }
 
     private void CheckFullscreen(object? state)
@@ -32,15 +34,29 @@ public class FullscreenDetector : IDisposable
             var hwnd = NativeMethods.GetForegroundWindow();
             if (hwnd == IntPtr.Zero) return;
 
-            NativeMethods.GetWindowRect(hwnd, out var rect);
-            var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
-            var isFullscreen = rect.Width >= screen.Bounds.Width && rect.Height >= screen.Bounds.Height;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == _ownProcessId) return;
 
-            if (isFullscreen != _lastState)
+            if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return;
+
+            var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
+            if (screen == null) return;
+
+            var bounds = screen.Bounds;
+            var coversScreen =
+                rect.Left <= bounds.Left &&
+                rect.Top <= bounds.Top &&
+                rect.Right >= bounds.Right &&
+                rect.Bottom >= bounds.Bottom;
+
+            if (coversScreen != _lastState)
             {
-                _lastState = isFullscreen;
-                _logger.Info($"Fullscreen state: {isFullscreen}");
-                FullscreenStateChanged?.Invoke(this, new FullscreenStateChangedEventArgs { IsFullscreen = isFullscreen });
+                _lastState = coversScreen;
+                _logger.Info($"Fullscreen state: {coversScreen}");
+                FullscreenStateChanged?.Invoke(this, new FullscreenStateChangedEventArgs
+                {
+                    IsFullscreen = coversScreen
+                });
             }
         }
         catch (Exception ex)
@@ -52,5 +68,6 @@ public class FullscreenDetector : IDisposable
     public void Dispose()
     {
         _timer?.Dispose();
+        _timer = null;
     }
 }

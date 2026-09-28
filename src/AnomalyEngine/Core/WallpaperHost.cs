@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,11 +14,11 @@ public class WallpaperHost : IDisposable
     private readonly Logger _logger;
     private readonly MonitorManager _monitorManager;
     private WebView2? _webView;
+    private Window? _hostWindow;
     private IntPtr _workerW;
     private bool _isPaused;
     private bool _isRunning;
-    private string _rendererPath;
-    private TaskCompletionSource<bool> _initTcs = new();
+    private readonly string _rendererPath;
 
     public WallpaperHost(Logger logger, MonitorManager monitorManager)
     {
@@ -28,17 +27,13 @@ public class WallpaperHost : IDisposable
         _rendererPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "renderer");
     }
 
+    public IntPtr WallpaperHandle => _webView?.Handle ?? IntPtr.Zero;
+
     public async Task Start()
     {
         if (_isRunning) return;
 
         _logger.Info("Starting wallpaper host...");
-
-        if (!Directory.Exists(_rendererPath))
-        {
-            _logger.Error($"Renderer directory not found: {_rendererPath}");
-            return;
-        }
 
         var indexPath = Path.Combine(_rendererPath, "index.html");
         if (!File.Exists(indexPath))
@@ -55,11 +50,145 @@ public class WallpaperHost : IDisposable
         }
 
         _workerW = hwnd;
+        _logger.Info($"WorkerW found: 0x{hwnd.ToInt64():X}");
+
         _isRunning = true;
+        await InitializeWebViewAsync(indexPath);
+    }
 
-        await InitializeWebViewAsync();
+    private async Task InitializeWebViewAsync(string indexPath)
+    {
+        try
+        {
+            _logger.Info("Initializing WebView2...");
 
-        _logger.Info("Wallpaper host started.");
+            var userDataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "AnomalyEngine", "WebView2Data");
+            Directory.CreateDirectory(userDataDir);
+
+            _webView = new WebView2();
+            _webView.NavigationCompleted += OnNavigationCompleted;
+            _webView.WebMessageReceived += OnWebMessageReceived;
+
+            _hostWindow = new Window
+            {
+                WindowStyle = WindowStyle.None,
+                ShowInTaskbar = false,
+                ResizeMode = ResizeMode.NoResize,
+                Left = -32000,
+                Top = -32000,
+                Width = 1920,
+                Height = 1080,
+                Content = _webView,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                ShowActivated = false,
+            };
+
+            _hostWindow.Show();
+            _logger.Info("Host window shown.");
+
+            var forcedHandle = _webView.Handle;
+            _logger.Info($"WebView2 HWND: 0x{forcedHandle.ToInt64():X}");
+
+            if (forcedHandle == IntPtr.Zero)
+            {
+                _logger.Error("WebView2 HWND is zero after host window shown.");
+                return;
+            }
+
+            var envTask = CoreWebView2Environment.CreateAsync(null, userDataDir);
+            var envDone = await Task.WhenAny(envTask, Task.Delay(15000));
+            if (envDone != envTask)
+            {
+                _logger.Error("WebView2 environment creation timed out.");
+                return;
+            }
+            var env = await envTask;
+            _logger.Info("WebView2 environment created.");
+
+            var initTask = _webView.EnsureCoreWebView2Async(env);
+            var initDone = await Task.WhenAny(initTask, Task.Delay(25000));
+            if (initDone != initTask)
+            {
+                _logger.Error("WebView2 core initialization timed out (25s).");
+                return;
+            }
+            await initTask;
+            _logger.Info("WebView2 core initialized.");
+
+            AttachToWorkerW();
+
+            _webView.Source = new Uri(indexPath);
+            _logger.Info("Renderer source set.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"WebView2 initialization failed: {ex.Message}");
+        }
+    }
+
+    private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+    {
+        if (!e.IsSuccess)
+        {
+            _logger.Error($"Navigation failed: {e.WebErrorStatus}");
+            return;
+        }
+
+        _logger.Info("Renderer loaded.");
+        AttachToWorkerW();
+    }
+
+    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        _logger.Debug($"Web message: {e.TryGetWebMessageAsString()}");
+    }
+
+    private void AttachToWorkerW()
+    {
+        if (_webView == null || _workerW == IntPtr.Zero) return;
+
+        try
+        {
+            var hwnd = _webView.Handle;
+            if (hwnd == IntPtr.Zero) return;
+
+            NativeMethods.SetParent(hwnd, _workerW);
+
+            var screen = Screen.PrimaryScreen;
+            if (screen == null) return;
+
+            var bounds = screen.Bounds;
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
+                bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW |
+                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+
+            _logger.Info($"Attached to WorkerW and sized to {bounds.Width}x{bounds.Height}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Failed to attach to WorkerW: {ex.Message}");
+        }
+    }
+
+    private IntPtr FindWorkerW()
+    {
+        var progman = NativeMethods.FindWindow("Progman", null);
+        if (progman == IntPtr.Zero) return IntPtr.Zero;
+
+        NativeMethods.SendMessage(progman, 0x052C, IntPtr.Zero, IntPtr.Zero);
+        Thread.Sleep(200);
+
+        var shellView = NativeMethods.FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+        if (shellView != IntPtr.Zero)
+        {
+            var underIcons = NativeMethods.FindWindowEx(shellView, IntPtr.Zero, "WorkerW", null);
+            if (underIcons != IntPtr.Zero) return underIcons;
+        }
+
+        return NativeMethods.FindWindowEx(progman, IntPtr.Zero, "WorkerW", null);
     }
 
     public void Stop()
@@ -67,11 +196,17 @@ public class WallpaperHost : IDisposable
         if (!_isRunning) return;
 
         _logger.Info("Stopping wallpaper host...");
-
         _isPaused = true;
-        _webView?.Dispose();
-        _webView = null;
 
+        if (_webView != null)
+        {
+            _webView.NavigationCompleted -= OnNavigationCompleted;
+            _webView.WebMessageReceived -= OnWebMessageReceived;
+        }
+
+        _hostWindow?.Close();
+        _hostWindow = null;
+        _webView = null;
         _isRunning = false;
         _logger.Info("Wallpaper host stopped.");
     }
@@ -102,82 +237,6 @@ public class WallpaperHost : IDisposable
         else Resume();
     }
 
-    private async Task InitializeWebViewAsync()
-    {
-        try
-        {
-            _logger.Info("Initializing WebView2...");
-
-            var userDataDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "AnomalyEngine", "WebView2Data");
-            Directory.CreateDirectory(userDataDir);
-
-            var env = await CoreWebView2Environment.CreateAsync(null, userDataDir);
-            _logger.Info("WebView2 environment created.");
-
-            _webView = new WebView2();
-            _webView.NavigationCompleted += OnNavigationCompleted;
-            _webView.WebMessageReceived += OnWebMessageReceived;
-
-            await _webView.EnsureCoreWebView2Async(env);
-            _logger.Info("WebView2 core initialized.");
-
-            _webView.Source = new Uri(Path.Combine(_rendererPath, "index.html"));
-            _logger.Info($"Renderer source set: {_rendererPath}");
-        }
-        catch (Exception ex)
-        {
-            _logger.Error($"WebView2 initialization failed: {ex.Message}");
-        }
-    }
-
-    private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
-    {
-        if (!e.IsSuccess)
-        {
-            _logger.Error($"Navigation failed: {e.WebErrorStatus}");
-            return;
-        }
-
-        _logger.Info("Renderer loaded.");
-        AttachToWorkerW();
-    }
-
-    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
-    {
-        var message = e.TryGetWebMessageAsString();
-        _logger.Debug($"Web message: {message}");
-    }
-
-    private void AttachToWorkerW()
-    {
-        if (_webView == null || _workerW == IntPtr.Zero) return;
-
-        try
-        {
-            var hwnd = _webView.Handle;
-            if (hwnd == IntPtr.Zero)
-            {
-                _logger.Error("WebView2 handle is zero.");
-                return;
-            }
-
-            NativeMethods.SetParent(hwnd, _workerW);
-
-            var screen = Screen.PrimaryScreen!;
-            NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_BOTTOM,
-                screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Width, screen.Bounds.Height,
-                NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
-
-            _logger.Info("Attached to WorkerW.");
-        }
-        catch (Exception ex)
-        {
-            _logger.Error($"Failed to attach to WorkerW: {ex.Message}");
-        }
-    }
-
     private async Task ExecuteScriptSafe(string script)
     {
         try
@@ -193,80 +252,8 @@ public class WallpaperHost : IDisposable
         }
     }
 
-    private IntPtr FindWorkerW()
-    {
-        var progman = NativeMethods.FindWindow("Progman", null);
-        if (progman == IntPtr.Zero) return IntPtr.Zero;
-
-        NativeMethods.SendMessage(progman, 0x052C, new IntPtr(0), new IntPtr(0));
-
-        IntPtr workerW = IntPtr.Zero;
-        var attempts = 0;
-        while (workerW == IntPtr.Zero && attempts < 10)
-        {
-            workerW = FindWorkerWRecursive(progman);
-            if (workerW == IntPtr.Zero)
-            {
-                Thread.Sleep(100);
-                NativeMethods.SendMessage(progman, 0x052C, new IntPtr(0), new IntPtr(0));
-            }
-            attempts++;
-        }
-
-        if (workerW == IntPtr.Zero)
-        {
-            workerW = FindWorkerWAlternative();
-        }
-
-        return workerW;
-    }
-
-    private IntPtr FindWorkerWRecursive(IntPtr parent)
-    {
-        var shellDLLDefView = NativeMethods.FindWindowEx(parent, IntPtr.Zero, "SHELLDLL_DefView", null);
-        if (shellDLLDefView != IntPtr.Zero)
-        {
-            var workerW = NativeMethods.FindWindowEx(shellDLLDefView, IntPtr.Zero, "WorkerW", null);
-            if (workerW != IntPtr.Zero) return workerW;
-        }
-
-        var child = NativeMethods.FindWindowEx(parent, IntPtr.Zero, null, null);
-        while (child != IntPtr.Zero)
-        {
-            var result = FindWorkerWRecursive(child);
-            if (result != IntPtr.Zero) return result;
-            child = NativeMethods.FindWindowEx(parent, child, null, null);
-        }
-
-        return IntPtr.Zero;
-    }
-
-    private IntPtr FindWorkerWAlternative()
-    {
-        var progman = NativeMethods.FindWindow("Progman", null);
-        if (progman == IntPtr.Zero) return IntPtr.Zero;
-
-        var shellDLLDefView = NativeMethods.FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
-        if (shellDLLDefView != IntPtr.Zero)
-        {
-            var workerWChild = NativeMethods.FindWindowEx(shellDLLDefView, IntPtr.Zero, "WorkerW", null);
-            if (workerWChild != IntPtr.Zero) return workerWChild;
-        }
-
-        var workerWDirect = NativeMethods.FindWindowEx(progman, IntPtr.Zero, "WorkerW", null);
-        if (workerWDirect != IntPtr.Zero) return workerWDirect;
-
-        return IntPtr.Zero;
-    }
-
     public void Dispose()
     {
         Stop();
-        if (_webView != null)
-        {
-            _webView.NavigationCompleted -= OnNavigationCompleted;
-            _webView.WebMessageReceived -= OnWebMessageReceived;
-            _webView.Dispose();
-        }
     }
 }
