@@ -5,7 +5,7 @@ import { StateManager } from './core/StateManager.js';
 import { ClockSource } from './events/ClockSource.js';
 import { RandomSource } from './events/RandomSource.js';
 import { NetworkSource } from './events/NetworkSource.js';
-import { DayNightCycle } from './renderer/DayNightCycle.js';
+import { WorldRenderer } from './renderer/WorldRenderer.js';
 import { NativeBridge } from './platform/NativeBridge.js';
 import { WeatherSystem } from './systems/WeatherSystem.js';
 import { AstronomySystem } from './systems/AstronomySystem.js';
@@ -38,7 +38,7 @@ class Engine {
   private _clock: ClockSource;
   private _random: RandomSource;
   private _network: NetworkSource;
-  private _renderer: DayNightCycle;
+  private _renderer: WorldRenderer;
   private _bridge: NativeBridge;
   private _weather: WeatherSystem;
   private _astronomy: AstronomySystem;
@@ -103,7 +103,7 @@ class Engine {
     this._benchmark = new BenchmarkSystem();
 
     this._canvas = document.getElementById('wallpaper-canvas') as HTMLCanvasElement;
-    this._renderer = new DayNightCycle(this._canvas);
+    this._renderer = new WorldRenderer(this._canvas);
 
     this._setupEventHandlers();
     this._setupBridge();
@@ -303,6 +303,7 @@ class Engine {
   private _resize(): void {
     this._canvas.width = window.screen.width;
     this._canvas.height = window.screen.height;
+    this._renderer.resize(this._canvas.width, this._canvas.height);
   }
 
   getFps(): number { return this._fps; }
