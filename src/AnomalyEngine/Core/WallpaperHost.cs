@@ -213,6 +213,11 @@ public class WallpaperHost : IDisposable
             attempts++;
         }
 
+        if (workerW == IntPtr.Zero)
+        {
+            workerW = FindWorkerWAlternative();
+        }
+
         return workerW;
     }
 
@@ -221,7 +226,8 @@ public class WallpaperHost : IDisposable
         var shellDLLDefView = NativeMethods.FindWindowEx(parent, IntPtr.Zero, "SHELLDLL_DefView", null);
         if (shellDLLDefView != IntPtr.Zero)
         {
-            return NativeMethods.FindWindowEx(IntPtr.Zero, shellDLLDefView, "WorkerW", null);
+            var workerW = NativeMethods.FindWindowEx(shellDLLDefView, IntPtr.Zero, "WorkerW", null);
+            if (workerW != IntPtr.Zero) return workerW;
         }
 
         var child = NativeMethods.FindWindowEx(parent, IntPtr.Zero, null, null);
@@ -231,6 +237,24 @@ public class WallpaperHost : IDisposable
             if (result != IntPtr.Zero) return result;
             child = NativeMethods.FindWindowEx(parent, child, null, null);
         }
+
+        return IntPtr.Zero;
+    }
+
+    private IntPtr FindWorkerWAlternative()
+    {
+        var progman = NativeMethods.FindWindow("Progman", null);
+        if (progman == IntPtr.Zero) return IntPtr.Zero;
+
+        var shellDLLDefView = NativeMethods.FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+        if (shellDLLDefView != IntPtr.Zero)
+        {
+            var workerWChild = NativeMethods.FindWindowEx(shellDLLDefView, IntPtr.Zero, "WorkerW", null);
+            if (workerWChild != IntPtr.Zero) return workerWChild;
+        }
+
+        var workerWDirect = NativeMethods.FindWindowEx(progman, IntPtr.Zero, "WorkerW", null);
+        if (workerWDirect != IntPtr.Zero) return workerWDirect;
 
         return IntPtr.Zero;
     }
