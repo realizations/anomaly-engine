@@ -1,60 +1,83 @@
 # Getting Started
 
-## Prerequisites
+## What is Anomaly Engine?
 
-- Windows 10/11
+Anomaly Engine is a live wallpaper engine for Windows. It renders a living world behind your desktop icons. The world changes with time, weather, and events. Sometimes strange things happen.
+
+## Quick Start
+
+### 1. Install Prerequisites
+
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 - [Node.js 20+](https://nodejs.org/)
 - [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (pre-installed on Windows 11)
 
-## Build
+### 2. Clone and Build
 
 ```bash
-# Build the web renderer
+git clone https://github.com/realizations/anomaly-engine.git
+cd anomaly-engine
+
 cd src/Engine
 npm install
 npm run build
 
-# Build the native host
 cd ../AnomalyEngine
 dotnet build
 ```
 
-## Run
+### 3. Run
 
 ```bash
 cd src/AnomalyEngine
 dotnet run
 ```
 
-The engine will attach to your desktop and render the default world.
+### 4. Enjoy
 
-## CLI
+The world will appear behind your desktop icons. Watch it change throughout the day.
 
-```bash
-# List installed worlds
-livingwall world list
+## Next Steps
 
-# Install a world
-livingwall world install path/to/world.world
+- Read the [How to Use](how-to-use.md) guide
+- Explore the [Settings](how-to-use.md#settings)
+- Discover your first [Anomaly](how-to-use.md#anomalies)
+- Start [Contributing](../CONTRIBUTING.md)
 
-# Validate a world package
-livingwall world validate path/to/world.world
+## First World
 
-# Trigger an event manually
-livingwall event trigger meteor-shower
+**The Town That Wasn't There** is the default world. It features:
 
-# Take a screenshot
-livingwall screenshot
-```
+- A cozy cabin with glowing windows
+- An abandoned observatory
+- A radio tower with a blinking beacon
+- A pine forest
+- Distant mountains
+- A mysterious moon
 
-## First Run
+The world changes throughout the day:
 
-On first launch, the engine will:
+| Time | What Happens |
+|------|-------------|
+| Dawn | Soft light, fog, birds |
+| Morning | Clear sky, clouds move |
+| Day | Bright light, wildlife |
+| Dusk | Orange sky, windows light up |
+| Night | Stars, moon, fireflies |
+| Late Night | Quiet, rare events |
+| 3:33 | Something might happen |
 
-1. Detect your monitors
-2. Load the default world ("The Town That Wasn't There")
-3. Attach the renderer behind your desktop icons
-4. Show a tray icon in the system tray
+## Tips
 
-Right-click the tray icon for options.
+- **Be patient.** Rare events are rare.
+- **Watch closely.** Some events last only seconds.
+- **Interact.** Hover and click things.
+- **Check the journal.** It remembers what you've seen.
+- **Try the Konami code.** You know the one.
+
+## Need Help?
+
+- [How to Use](how-to-use.md) — Full usage guide
+- [Contributing](../CONTRIBUTING.md) — How to contribute
+- [Issues](https://github.com/realizations/anomaly-engine/issues) — Bug reports and feature requests
+- [Discussions](https://github.com/realizations/anomaly-engine/discussions) — General questions
