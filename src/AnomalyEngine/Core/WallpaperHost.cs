@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -15,10 +16,10 @@ public class WallpaperHost : IDisposable
     private readonly MonitorManager _monitorManager;
     private WebView2? _webView;
     private IntPtr _workerW;
-    private IntPtr _originalParent;
     private bool _isPaused;
     private bool _isRunning;
     private string _rendererPath;
+    private TaskCompletionSource<bool> _initTcs = new();
 
     public WallpaperHost(Logger logger, MonitorManager monitorManager)
     {
@@ -27,11 +28,24 @@ public class WallpaperHost : IDisposable
         _rendererPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "renderer");
     }
 
-    public void Start()
+    public async Task Start()
     {
         if (_isRunning) return;
 
         _logger.Info("Starting wallpaper host...");
+
+        if (!Directory.Exists(_rendererPath))
+        {
+            _logger.Error($"Renderer directory not found: {_rendererPath}");
+            return;
+        }
+
+        var indexPath = Path.Combine(_rendererPath, "index.html");
+        if (!File.Exists(indexPath))
+        {
+            _logger.Error($"Renderer index.html not found: {indexPath}");
+            return;
+        }
 
         var hwnd = FindWorkerW();
         if (hwnd == IntPtr.Zero)
@@ -41,8 +55,9 @@ public class WallpaperHost : IDisposable
         }
 
         _workerW = hwnd;
-        InitializeWebView();
         _isRunning = true;
+
+        await InitializeWebViewAsync();
 
         _logger.Info("Wallpaper host started.");
     }
@@ -64,52 +79,57 @@ public class WallpaperHost : IDisposable
     public void Pause()
     {
         _isPaused = true;
-        _webView!.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('anomaly:pause'));");
+        _ = ExecuteScriptSafe("window.dispatchEvent(new CustomEvent('anomaly:pause'));");
         _logger.Info("Wallpaper paused.");
     }
 
     public void Resume()
     {
         _isPaused = false;
-        _webView!.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('anomaly:resume'));");
+        _ = ExecuteScriptSafe("window.dispatchEvent(new CustomEvent('anomaly:resume'));");
         _logger.Info("Wallpaper resumed.");
     }
 
     public void HandlePowerStateChange(PowerState state)
     {
-        if (state == PowerState.Sleep)
-        {
-            Pause();
-        }
-        else if (state == PowerState.Resume)
-        {
-            Resume();
-        }
+        if (state == PowerState.Sleep) Pause();
+        else if (state == PowerState.Resume) Resume();
     }
 
     public void HandleFullscreenChange(bool isFullscreen)
     {
-        if (isFullscreen)
-        {
-            Pause();
-        }
-        else
-        {
-            Resume();
-        }
+        if (isFullscreen) Pause();
+        else Resume();
     }
 
-    private void InitializeWebView()
+    private async Task InitializeWebViewAsync()
     {
-        _webView = new WebView2();
-        _webView.NavigationCompleted += OnNavigationCompleted;
-        _webView.WebMessageReceived += OnWebMessageReceived;
+        try
+        {
+            _logger.Info("Initializing WebView2...");
 
-        var env = CoreWebView2Environment.CreateAsync(null, Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "AnomalyEngine", "WebView2Data"));
+            var userDataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "AnomalyEngine", "WebView2Data");
+            Directory.CreateDirectory(userDataDir);
 
-        _webView.Source = new Uri(Path.Combine(_rendererPath, "index.html"));
+            var env = await CoreWebView2Environment.CreateAsync(null, userDataDir);
+            _logger.Info("WebView2 environment created.");
+
+            _webView = new WebView2();
+            _webView.NavigationCompleted += OnNavigationCompleted;
+            _webView.WebMessageReceived += OnWebMessageReceived;
+
+            await _webView.EnsureCoreWebView2Async(env);
+            _logger.Info("WebView2 core initialized.");
+
+            _webView.Source = new Uri(Path.Combine(_rendererPath, "index.html"));
+            _logger.Info($"Renderer source set: {_rendererPath}");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"WebView2 initialization failed: {ex.Message}");
+        }
     }
 
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -134,15 +154,43 @@ public class WallpaperHost : IDisposable
     {
         if (_webView == null || _workerW == IntPtr.Zero) return;
 
-        var hwnd = (IntPtr)_webView.Handle;
-        _originalParent = NativeMethods.SetParent(hwnd, _workerW);
+        try
+        {
+            var hwnd = _webView.Handle;
+            if (hwnd == IntPtr.Zero)
+            {
+                _logger.Error("WebView2 handle is zero.");
+                return;
+            }
 
-        var screen = System.Windows.Forms.Screen.PrimaryScreen!;
-        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_BOTTOM,
-            screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Width, screen.Bounds.Height,
-            NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
+            NativeMethods.SetParent(hwnd, _workerW);
 
-        _logger.Info("Attached to WorkerW.");
+            var screen = Screen.PrimaryScreen!;
+            NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_BOTTOM,
+                screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Width, screen.Bounds.Height,
+                NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
+
+            _logger.Info("Attached to WorkerW.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Failed to attach to WorkerW: {ex.Message}");
+        }
+    }
+
+    private async Task ExecuteScriptSafe(string script)
+    {
+        try
+        {
+            if (_webView?.CoreWebView2 != null)
+            {
+                await _webView.CoreWebView2.ExecuteScriptAsync(script);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"Script execution failed: {ex.Message}");
+        }
     }
 
     private IntPtr FindWorkerW()

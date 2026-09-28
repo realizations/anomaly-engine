@@ -15,7 +15,7 @@ public class EngineApp : Application
     private Logger? _logger;
     private SettingsWindow.SettingsWindow? _settingsWindow;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -27,7 +27,7 @@ public class EngineApp : Application
         _fullscreenDetector = new FullscreenDetector(_logger);
 
         _wallpaperHost = new WallpaperHost(_logger, _monitorManager);
-        _wallpaperHost.Start();
+        await _wallpaperHost.Start();
 
         _trayIcon = new TrayIcon(_logger, _wallpaperHost);
         _trayIcon.Show();
