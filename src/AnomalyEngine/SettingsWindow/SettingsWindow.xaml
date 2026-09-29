@@ -1,219 +1,455 @@
 <Window x:Class="AnomalyEngine.SettingsWindow.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Anomaly Engine Settings"
-        Height="600" Width="900"
+        Title="Anomaly Engine"
+        Height="680" Width="980"
+        MinHeight="520" MinWidth="800"
         WindowStartupLocation="CenterScreen"
-        Background="#1a1a2e"
-        Foreground="#e0e0ff"
-        FontFamily="Segoe UI">
+        Background="#0D1014"
+        Foreground="#E4E9F0"
+        FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Ideal"
+        SnapsToDevicePixels="True">
 
+    <!--
+        The palette is taken from the product rather than from a generic dark
+        theme. The accent is the exact phosphor of the observatory terminal
+        that sits in every world, so the settings window and the thing it
+        configures read as the same object. Everything else is a neutral ink
+        scale with checked contrast ratios rather than eyeballed greys.
+
+        The window's own Background and Foreground are duplicated as literals
+        above, because an element's attributes are resolved before its own
+        Resources are available. Those two values must stay in step with
+        BgBrush and TextBrush.
+    -->
     <Window.Resources>
+        <SolidColorBrush x:Key="BgBrush"        Color="#0D1014"/>
+        <SolidColorBrush x:Key="SurfaceBrush"   Color="#141920"/>
+        <SolidColorBrush x:Key="CardBrush"      Color="#181F27"/>
+        <SolidColorBrush x:Key="CardHoverBrush" Color="#1E2731"/>
+        <SolidColorBrush x:Key="NavBrush"       Color="#0A0D11"/>
+        <SolidColorBrush x:Key="LineBrush"      Color="#232C36"/>
+        <SolidColorBrush x:Key="TextBrush"      Color="#E4E9F0"/>
+        <SolidColorBrush x:Key="DimBrush"       Color="#94A1B2"/>
+        <SolidColorBrush x:Key="FaintBrush"     Color="#6B7887"/>
+        <!-- Terminal phosphor. Same value the CRT uses. -->
+        <SolidColorBrush x:Key="AccentBrush"    Color="#7EE2A8"/>
+        <SolidColorBrush x:Key="AccentDimBrush" Color="#3F7D5C"/>
+        <SolidColorBrush x:Key="WarnBrush"      Color="#E0B341"/>
+        <SolidColorBrush x:Key="WarnBgBrush"    Color="#1E1A10"/>
+        <SolidColorBrush x:Key="WarnLineBrush"  Color="#4A3D18"/>
+
+        <!-- Focus ring. A visible focus indicator on every interactive element:
+             this window is fully keyboard reachable and that has to be obvious,
+             not just technically present. -->
+        <SolidColorBrush x:Key="FocusBrush" Color="#7EE2A8"/>
+
         <Style TargetType="Button">
-            <Setter Property="Background" Value="#2a2a4e"/>
-            <Setter Property="Foreground" Value="#e0e0ff"/>
-            <Setter Property="BorderBrush" Value="#4a4a8e"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="MinHeight" Value="34"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#3a3a6e"/>
-                </Trigger>
-            </Style.Triggers>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentDimBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
-        <Style TargetType="TabItem">
-            <Setter Property="Background" Value="#1a1a2e"/>
-            <Setter Property="Foreground" Value="#8888aa"/>
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Foreground" Value="#e0e0ff"/>
-                    <Setter Property="Background" Value="#2a2a4e"/>
-                </Trigger>
-            </Style.Triggers>
+        <!-- Navigation buttons carry an active state so the user always knows
+             where they are, rather than having to infer it from the heading. -->
+        <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="Margin" Value="10,0,10,2"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style x:Key="NavButtonActive" TargetType="Button" BasedOn="{StaticResource NavButton}">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
         </Style>
 
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#e0e0ff"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="FontSize" Value="13"/>
+            <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
         </Style>
 
-        <Style TargetType="Slider">
-            <Setter Property="Background" Value="#2a2a4e"/>
-            <Setter Property="Foreground" Value="#8888ff"/>
+        <Style x:Key="Title" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        </Style>
+
+        <Style x:Key="Heading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+
+        <Style x:Key="Note" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource FaintBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="LineHeight" Value="18"/>
+            <Setter Property="Margin" Value="0,2,0,0"/>
+        </Style>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="16"/>
         </Style>
 
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#e0e0ff"/>
-            <Setter Property="Margin" Value="0,4"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Margin" Value="0,6"/>
+            <Setter Property="MinHeight" Value="24"/>
         </Style>
 
         <Style TargetType="ComboBox">
-            <Setter Property="Background" Value="#2a2a4e"/>
-            <Setter Property="Foreground" Value="#e0e0ff"/>
-            <Setter Property="BorderBrush" Value="#4a4a8e"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+            <Setter Property="MinWidth" Value="240"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style TargetType="ProgressBar">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Height" Value="6"/>
         </Style>
     </Window.Resources>
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="220"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Background="#12122a" BorderBrush="#2a2a4e" BorderThickness="0,0,1,0">
-            <StackPanel Margin="0,20">
-                <TextBlock Text="ANOMALY ENGINE" FontSize="16" FontWeight="Bold" Margin="16,0,16,20" Foreground="#8888ff"/>
+        <!-- ============================= NAVIGATION ============================= -->
+        <Border Grid.Column="0" Background="{StaticResource NavBrush}"
+                BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+            <DockPanel Margin="0,22,0,16" LastChildFill="True">
+                <StackPanel DockPanel.Dock="Top" Margin="20,0,20,22">
+                    <TextBlock Text="ANOMALY ENGINE" FontSize="13" FontWeight="SemiBold"
+                               Foreground="{StaticResource AccentBrush}"/>
+                    <TextBlock Text="v0.1" FontSize="11" Margin="0,3,0,0"
+                               Foreground="{StaticResource FaintBrush}"/>
+                </StackPanel>
 
-                <Button x:Name="BtnHome" Content="Home" HorizontalContentAlignment="Left" Click="BtnHome_Click"/>
-                <Button x:Name="BtnWorlds" Content="Worlds" HorizontalContentAlignment="Left" Click="BtnWorlds_Click"/>
-                <Button x:Name="BtnAppearance" Content="Appearance" HorizontalContentAlignment="Left" Click="BtnAppearance_Click"/>
-                <Button x:Name="BtnPerformance" Content="Performance" HorizontalContentAlignment="Left" Click="BtnPerformance_Click"/>
-                <Button x:Name="BtnEvents" Content="Events" HorizontalContentAlignment="Left" Click="BtnEvents_Click"/>
-                <Button x:Name="BtnAudio" Content="Audio" HorizontalContentAlignment="Left" Click="BtnAudio_Click"/>
-                <Button x:Name="BtnMonitors" Content="Monitors" HorizontalContentAlignment="Left" Click="BtnMonitors_Click"/>
-                <Button x:Name="BtnIntegrations" Content="Integrations" HorizontalContentAlignment="Left" Click="BtnIntegrations_Click"/>
-                <Button x:Name="BtnSecrets" Content="Secrets" HorizontalContentAlignment="Left" Click="BtnSecrets_Click"/>
-                <Button x:Name="BtnAbout" Content="About" HorizontalContentAlignment="Left" Click="BtnAbout_Click"/>
-            </StackPanel>
+                <!--
+                    The buttons live in a StackPanel rather than directly in the
+                    DockPanel. Undocked DockPanel children are stretched to share
+                    the remaining space, which gave each button a slice of the
+                    column and clipped every label to a few characters.
+                -->
+                <StackPanel>
+                    <Button x:Name="NavHome"   Content="Home"          Style="{StaticResource NavButton}" Click="BtnHome_Click"/>
+                    <Button x:Name="NavWorlds" Content="Worlds"         Style="{StaticResource NavButton}" Click="BtnWorlds_Click"/>
+                    <Button x:Name="NavLook"   Content="Appearance"     Style="{StaticResource NavButton}" Click="BtnAppearance_Click"/>
+                    <Button x:Name="NavPerf"   Content="Performance"    Style="{StaticResource NavButton}" Click="BtnPerformance_Click"/>
+                    <Button x:Name="NavEvents" Content="Events"         Style="{StaticResource NavButton}" Click="BtnEvents_Click"/>
+                    <Button x:Name="NavNotes"  Content="Field Notes"    Style="{StaticResource NavButton}" Click="BtnNotes_Click"/>
+                    <Button x:Name="NavMon"    Content="Displays"       Style="{StaticResource NavButton}" Click="BtnMonitors_Click"/>
+                    <Button x:Name="Net"       Content="Integrations"   Style="{StaticResource NavButton}" Click="BtnIntegrations_Click"/>
+                    <Button x:Name="NavAbout"  Content="About"          Style="{StaticResource NavButton}" Click="BtnAbout_Click"/>
+                </StackPanel>
+            </DockPanel>
         </Border>
 
-        <Grid Grid.Column="1" Margin="20">
+        <!-- ============================== CONTENT ============================== -->
+        <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock x:Name="SectionTitle" Text="Home" FontSize="24" FontWeight="Bold" Margin="0,0,0,20" Foreground="#e0e0ff"/>
+            <StackPanel Margin="32,26,32,18">
+                <TextBlock x:Name="SectionTitle" Text="Home" Style="{StaticResource Title}"/>
+                <TextBlock x:Name="SectionBlurb" Text="" Style="{StaticResource Note}" Margin="0,4,0,0"/>
+            </StackPanel>
 
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                <StackPanel x:Name="ContentPanel">
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="32,0,32,0">
+                <StackPanel>
 
+                    <!-- ============================ HOME ============================ -->
                     <StackPanel x:Name="HomeSection">
-                        <TextBlock Text="Current World" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <TextBlock Text="The Town That Wasn't There" FontSize="14" Foreground="#8888ff" Margin="0,0,0,16"/>
-
-                        <TextBlock Text="Status" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <TextBlock Text="Running" Foreground="#44cc88" Margin="0,0,0,16"/>
-
-                        <TextBlock Text="Performance" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <TextBlock Text="60 FPS | 12 MB | Low CPU" Foreground="#8888aa" Margin="0,0,0,16"/>
-
-                        <TextBlock Text="Quick Controls" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="Pause" Click="BtnPause_Click"/>
-                            <Button Content="Resume" Click="BtnResume_Click"/>
-                            <Button Content="Next World" Click="BtnNextWorld_Click"/>
-                            <Button Content="Trigger Event" Click="BtnTriggerEvent_Click"/>
-                        </StackPanel>
-                    </StackPanel>
-
-                    <StackPanel x:Name="WorldsSection" Visibility="Collapsed">
-                        <TextBlock Text="Installed Worlds" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                        <Border Background="#2a2a4e" CornerRadius="4" Padding="12" Margin="0,0,0,12">
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,24">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="The Town That Wasn't There" FontWeight="SemiBold"/>
-                                    <TextBlock Text="By Ali S. | v1.0.0" Foreground="#8888aa" FontSize="11"/>
+                                    <TextBlock x:Name="StatusWorldText" Text="Reading engine..."
+                                               FontSize="16" FontWeight="SemiBold"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="StatusPerfText" Text="" Margin="0,6,0,0"
+                                               Style="{StaticResource Note}"/>
+                                    <TextBlock x:Name="StatusQualityText" Text="" Style="{StaticResource Note}"/>
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                    <Button Content="Activate" Click="BtnActivateWorld_Click"/>
-                                    <Button Content="Preview" Click="BtnPreviewWorld_Click"/>
-                                    <Button Content="Delete" Click="BtnDeleteWorld_Click"/>
-                                </StackPanel>
+                                <Border Grid.Column="1" Background="{StaticResource BgBrush}"
+                                        CornerRadius="4" Padding="10,6" VerticalAlignment="Top">
+                                    <TextBlock Text="LIVE" FontSize="10" FontWeight="SemiBold"
+                                               Foreground="{StaticResource AccentBrush}"/>
+                                </Border>
                             </Grid>
                         </Border>
-                        <Button Content="Import World" Click="BtnImportWorld_Click"/>
-                        <Button Content="Open Worlds Folder" Click="BtnOpenFolder_Click"/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="CONTROLS"/>
+                        <WrapPanel>
+                            <Button x:Name="PauseButton" Content="Pause" Click="BtnPause_Click"/>
+                            <Button x:Name="ResumeButton" Content="Resume" Click="BtnResume_Click" IsEnabled="False"/>
+                            <Button Content="Next world" Click="BtnNextWorld_Click"/>
+                            <Button Content="Trigger an event" Click="BtnTriggerEvent_Click"/>
+                            <Button Content="Field notes" Click="BtnOpenNotes_Click"/>
+                            <Button Content="Debug overlay" Click="BtnDebug_Click"/>
+                        </WrapPanel>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="GLOBAL HOTKEYS" Margin="0,24,0,6"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="A wallpaper never holds keyboard focus, so these are registered system-wide with Windows."/>
+                        <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                            <UniformGrid Columns="2">
+                                <TextBlock Text="Ctrl+Alt+W" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" Margin="0,3"/>
+                                <TextBlock Text="Next world" Margin="0,3"/>
+                                <TextBlock Text="Ctrl+Alt+S" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" Margin="0,3"/>
+                                <TextBlock Text="Cycle art style" Margin="0,3"/>
+                                <TextBlock Text="Ctrl+Alt+P" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" Margin="0,3"/>
+                                <TextBlock Text="Pause / resume" Margin="0,3"/>
+                                <TextBlock Text="Ctrl+Alt+F" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" Margin="0,3"/>
+                                <TextBlock Text="Field notes" Margin="0,3"/>
+                                <TextBlock Text="Ctrl+Alt+D" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" Margin="0,3"/>
+                                <TextBlock Text="Debug overlay" Margin="0,3"/>
+                            </UniformGrid>
+                        </Border>
                     </StackPanel>
 
+                    <!-- =========================== WORLDS =========================== -->
+                    <StackPanel x:Name="WorldsSection" Visibility="Collapsed">
+                        <TextBlock x:Name="WorldCountText" Style="{StaticResource Note}" Margin="0,0,0,14"/>
+
+                        <ItemsControl x:Name="WorldList">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Content="Import world..." Click="BtnImportWorld_Click"/>
+                            <Button Content="Open data folder" Click="BtnOpenFolder_Click"/>
+                            <Button Content="Refresh" Click="BtnRefresh_Click"/>
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,8,0,0"
+                                   Text="A world is data, not artwork: a biome, a palette, a terrain profile and a list of structures. The renderer generates every pixel, so an imported world carries no third-party art and no licence obligations."/>
+                    </StackPanel>
+
+                    <!-- ========================= APPEARANCE ========================= -->
+                    <StackPanel x:Name="AppearanceSection" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource Heading}" Text="ART STYLE"/>
+                        <ComboBox x:Name="StyleCombo" SelectionChanged="StyleCombo_SelectionChanged" SelectedIndex="0">
+                            <ComboBoxItem>Painterly</ComboBoxItem>
+                            <ComboBoxItem>Flat</ComboBoxItem>
+                            <ComboBoxItem>Riso print</ComboBoxItem>
+                        </ComboBox>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="All three are complete renderer treatments rather than filters over one image, and each is designed to hold up across the whole day and night cycle."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="MOTION" Margin="0,28,0,10"/>
+                        <CheckBox x:Name="ReducedMotion" Content="Reduce motion (scales ambient animation to a quarter speed)"
+                                  Checked="ReducedMotion_Checked" Unchecked="ReducedMotion_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Follows the Windows reduce-motion setting when first enabled. This surface can run for hours at a time, so constant drift is a real accessibility concern rather than a preference."/>
+                    </StackPanel>
+
+                    <!-- ======================== PERFORMANCE ========================= -->
                     <StackPanel x:Name="PerformanceSection" Visibility="Collapsed">
-                        <TextBlock Text="FPS Limit" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <ComboBox x:Name="FpsCombo" Width="200" HorizontalAlignment="Left" SelectedIndex="1">
-                            <ComboBoxItem>30 FPS</ComboBoxItem>
-                            <ComboBoxItem>60 FPS</ComboBoxItem>
-                            <ComboBoxItem>120 FPS</ComboBoxItem>
+                        <TextBlock Style="{StaticResource Heading}" Text="FRAME RATE CAP"/>
+                        <ComboBox x:Name="FpsCombo" SelectionChanged="FpsCombo_SelectionChanged" SelectedIndex="1">
+                            <ComboBoxItem>30 fps</ComboBoxItem>
+                            <ComboBoxItem>60 fps</ComboBoxItem>
+                            <ComboBoxItem>120 fps</ComboBoxItem>
                             <ComboBoxItem>Unlimited</ComboBoxItem>
                         </ComboBox>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="A desktop background gains nothing from repainting at display rate, and capping is the cheapest way to leave a laptop fan alone."/>
 
-                        <TextBlock Text="Quality Preset" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8"/>
-                        <ComboBox x:Name="QualityCombo" Width="200" HorizontalAlignment="Left" SelectedIndex="2">
-                            <ComboBoxItem>Low</ComboBoxItem>
-                            <ComboBoxItem>Medium</ComboBoxItem>
-                            <ComboBoxItem>High</ComboBoxItem>
-                            <ComboBoxItem>Ultra</ComboBoxItem>
-                            <ComboBoxItem>Custom</ComboBoxItem>
+                        <TextBlock Style="{StaticResource Heading}" Text="RENDER QUALITY" Margin="0,28,0,10"/>
+                        <ComboBox x:Name="QualityCombo" SelectionChanged="QualityCombo_SelectionChanged" SelectedIndex="3">
+                            <ComboBoxItem>Low (60%)</ComboBoxItem>
+                            <ComboBoxItem>Medium (80%)</ComboBoxItem>
+                            <ComboBoxItem>High (100%)</ComboBoxItem>
+                            <ComboBoxItem>Automatic</ComboBoxItem>
                         </ComboBox>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Automatic adapts the render scale to hold a frame budget. The scene is drawn to an offscreen buffer and blitted up, so slower hardware gets a cheaper frame without the wallpaper visibly resizing."/>
 
-                        <TextBlock Text="Options" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8"/>
-                        <CheckBox x:Name="ChkFullscreenPause" Content="Pause when fullscreen application detected"/>
-                        <CheckBox x:Name="ChkBatteryPause" Content="Pause on battery power"/>
-                        <CheckBox x:Name="ChkDynamicQuality" Content="Dynamic quality adjustment"/>
-                        <CheckBox x:Name="ChkIdleReduce" Content="Reduce animation when idle"/>
+                        <TextBlock Style="{StaticResource Heading}" Text="MEASURED NOW" Margin="0,28,0,10"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Name="PerfFpsText" Text="—"/>
+                                <TextBlock x:Name="PerfRenderScaleText" Text="—" Style="{StaticResource Note}"/>
+                                <TextBlock x:Name="PerfFrameTimeText" Text="—" Style="{StaticResource Note}"/>
+                            </StackPanel>
+                        </Border>
+                        <Button Content="Open debug overlay" Click="BtnDebug_Click" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                     </StackPanel>
 
+                    <!-- =========================== EVENTS =========================== -->
                     <StackPanel x:Name="EventsSection" Visibility="Collapsed">
-                        <TextBlock Text="Event Sources" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                        <CheckBox x:Name="ChkClockEvents" Content="Clock events (hourly, midnight, special times)" IsChecked="True"/>
-                        <CheckBox x:Name="ChkRandomEvents" Content="Random events (meteors, creatures, lights)" IsChecked="True"/>
-                        <CheckBox x:Name="ChkWeatherEvents" Content="Weather events (rain, storm, fog)" IsChecked="True"/>
-                        <CheckBox x:Name="ChkSystemEvents" Content="System events (sleep, wake, fullscreen)" IsChecked="True"/>
-                        <CheckBox x:Name="ChkNetworkEvents" Content="Network events (online, offline)" IsChecked="True"/>
-                        <CheckBox x:Name="ChkGitHubEvents" Content="GitHub events (commits, releases, issues)"/>
-                        <CheckBox x:Name="ChkRSSEvents" Content="RSS feed events"/>
-                        <CheckBox x:Name="ChkRemoteEvents" Content="Remote event feed"/>
+                        <TextBlock Style="{StaticResource Heading}" Text="REGISTERED ANOMALIES"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Name="AnomalyCountText" Text="" Foreground="{StaticResource AccentBrush}"/>
+                                <TextBlock x:Name="AnomalyListText" Text="" Style="{StaticResource Note}" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock Text="Rarity" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8"/>
-                        <CheckBox x:Name="ChkRareEvents" Content="Allow rare events" IsChecked="True"/>
-                        <CheckBox x:Name="ChkVeryRareEvents" Content="Allow very rare events" IsChecked="True"/>
-                        <CheckBox x:Name="ChkLegendaryEvents" Content="Allow legendary events" IsChecked="True"/>
+                        <TextBlock Style="{StaticResource Heading}" Text="TRIGGER" Margin="0,28,0,10"/>
+                        <WrapPanel>
+                            <Button Content="Trigger a world-appropriate event" Click="BtnTriggerEvent_Click"/>
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,6,0,0"
+                                   Text="Anomalies carry rarity and cooldowns, and are scoped to biomes and structures: an event that needs an observatory will not fire in a world without one, and the engine substitutes one that fits rather than showing nothing."/>
                     </StackPanel>
 
+                    <!-- ========================= FIELD NOTES ========================= -->
+                    <StackPanel x:Name="NotesSection" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource Heading}" Text="WHAT IS RECORDED"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Name="NotesCountText" Text="" Foreground="{StaticResource AccentBrush}"/>
+                                <TextBlock x:Name="NotesListText" Text="" Style="{StaticResource Note}" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <WrapPanel Margin="0,20,0,0">
+                            <Button Content="Open field notes" Click="BtnOpenNotes_Click"/>
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,6,0,0"
+                                   Text="Everything is stored locally in a single JSON file. No account, no telemetry, and nothing leaves the machine. Every observation is recorded alongside a plausible explanation, so anything you think you saw stays dismissible."/>
+                    </StackPanel>
+
+                    <!-- ========================== DISPLAYS ========================== -->
+                    <StackPanel x:Name="MonitorsSection" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource Heading}" Text="ATTACHED DISPLAYS"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Name="MonitorCountText" Text="Detecting..."
+                                           Foreground="{StaticResource AccentBrush}"/>
+                                <TextBlock x:Name="MonitorListText" Text="" Style="{StaticResource Note}" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Background="{StaticResource WarnBgBrush}" BorderBrush="{StaticResource WarnLineBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Not built yet" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource WarnBrush}"/>
+                                <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
+                                           Text="The wallpaper is hosted on the primary display only. Per-monitor worlds need one engine per screen, so the per-pixel cost is paid once per monitor; this is the largest remaining structural gap and is documented rather than approximated."/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ======================== INTEGRATIONS ======================== -->
                     <StackPanel x:Name="IntegrationsSection" Visibility="Collapsed">
-                        <TextBlock Text="Weather" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <ComboBox x:Name="WeatherProvider" Width="300" HorizontalAlignment="Left">
-                            <ComboBoxItem>OpenWeatherMap</ComboBoxItem>
-                            <ComboBoxItem>WeatherAPI</ComboBoxItem>
-                            <ComboBoxItem>Custom</ComboBoxItem>
-                        </ComboBox>
-                        <TextBox x:Name="WeatherApiKey" Width="300" HorizontalAlignment="Left" Margin="0,4" Background="#2a2a4e" Foreground="#e0e0ff" BorderBrush="#4a4a8e" Padding="6"/>
+                        <TextBlock Style="{StaticResource Heading}" Text="EXTERNAL SOURCES"/>
+                        <Border Background="{StaticResource WarnBgBrush}" BorderBrush="{StaticResource WarnLineBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Off by default, and not ready to turn on" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource WarnBrush}"/>
+                                <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
+                                           Text="GitHub, RSS and remote event adapters exist in the engine but ship unconfigured. Before any of them can be enabled they need endpoint allow-lists, payload validation and rate limits: a remote feed must be able to select a registered effect and nothing more, never to run code or shell a command."/>
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock Text="GitHub" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8"/>
-                        <TextBox x:Name="GitHubUsername" Width="300" HorizontalAlignment="Left" Margin="0,4" Background="#2a2a4e" Foreground="#e0e0ff" BorderBrush="#4a4a8e" Padding="6" Text="realizations"/>
-
-                        <TextBlock Text="Remote Event Feed" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8"/>
-                        <TextBox x:Name="RemoteEventUrl" Width="300" HorizontalAlignment="Left" Margin="0,4" Background="#2a2a4e" Foreground="#e0e0ff" BorderBrush="#4a4a8e" Padding="6"/>
+                        <TextBlock Style="{StaticResource Heading}" Text="WEATHER" Margin="0,28,0,10"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Weather runs from a local simulation seeded by latitude and longitude. No API key is used and no request leaves the machine, so the desktop behaves consistently offline and nothing about the user's location is disclosed."/>
                     </StackPanel>
 
-                    <StackPanel x:Name="SecretsSection" Visibility="Collapsed">
-                        <TextBlock Text="Discovered Anomalies" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <TextBlock Text="0 / 5 discovered" Foreground="#8888aa" Margin="0,0,0,16"/>
-
-                        <TextBlock Text="Journal" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <TextBlock Text="No entries yet. Start observing." Foreground="#8888aa" Margin="0,0,0,16"/>
-
-                        <TextBlock Text="Progress" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <ProgressBar Value="0" Maximum="100" Height="8" Background="#2a2a4e" Foreground="#8888ff"/>
-                    </StackPanel>
-
+                    <!-- ============================= ABOUT ============================= -->
                     <StackPanel x:Name="AboutSection" Visibility="Collapsed">
-                        <TextBlock Text="Anomaly Engine" FontSize="20" FontWeight="Bold" Margin="0,0,0,8"/>
-                        <TextBlock Text="v0.1.0" Foreground="#8888aa" Margin="0,0,0,16"/>
-                        <TextBlock Text="A live wallpaper engine where the desktop behaves like a living world." TextWrapping="Wrap" Margin="0,0,0,16"/>
-                        <TextBlock Text="By Ali S. (@realizations)" Foreground="#8888ff" Margin="0,0,0,16"/>
-                        <TextBlock Text="MIT License" Foreground="#8888aa"/>
+                        <TextBlock Text="Anomaly Engine" Style="{StaticResource Title}"/>
+                        <TextBlock Text="v0.1.0" Style="{StaticResource Note}" Margin="0,4,0,20"/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="WHAT THIS IS"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="A live wallpaper engine where the desktop behaves like a living world: a seeded procedural landscape that changes with the real time of day and weather, with a quiet observatory terminal that occasionally reports something the place could plausibly explain away."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="ARTWORK AND LICENSING" Margin="0,28,0,10"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="This project ships zero third-party art. Every pixel is generated at runtime from seeded noise, so there is no asset licence to inherit and no way for a bundled file to carry terms the project would have to honour. A machine-checked gate enforces the policy if that ever changes."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="PRIVACY" Margin="0,28,0,10"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="No account, no analytics, no advertising, and no screenshot ever leaves the machine. Discovery history is a local file you can read and delete."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="NAMING" Margin="0,28,0,10"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="A rename is under consideration; docs/NAMING.md in the repository records the reasoning and the options."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="CREDITS" Margin="0,28,0,10"/>
+                        <TextBlock Style="{StaticResource Note}" Text="Ali S. (@realizations). MIT licensed."/>
                     </StackPanel>
 
                 </StackPanel>
             </ScrollViewer>
+
+            <!-- Status bar. Doubles as the live region for action feedback, so
+                 screen readers announce results rather than changes being
+                 silent. -->
+            <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="32,10">
+                <TextBlock x:Name="StatusText" Text="" Style="{StaticResource Note}"
+                           AutomationProperties.LiveSetting="Polite"/>
+            </Border>
         </Grid>
     </Grid>
 </Window>

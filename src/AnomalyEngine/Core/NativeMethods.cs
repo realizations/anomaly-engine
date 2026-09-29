@@ -6,10 +6,10 @@ namespace AnomalyEngine.Core;
 public static class NativeMethods
 {
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    public static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string? lpszClass, string? lpszWindow);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);

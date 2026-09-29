@@ -781,6 +781,21 @@ class Engine {
     });
   }
 
+  /**
+   * Fires a discharge directly. Lightning is otherwise only reachable through
+   * a storm transition, which makes it impossible to inspect on demand — and
+   * the bolt is a per-frame drawing path, so being able to trigger it from a
+   * tool is the only practical way to review it.
+   */
+  triggerLightning(): void {
+    this._renderer.triggerLightning();
+  }
+
+  /** Fires the surreal near-miss event, likewise for inspection. */
+  triggerSurreal(): void {
+    this._renderer.triggerSurreal();
+  }
+
   forceAnomaly(type: string): void {
     const durations: Record<string, number> = {
       'second-moon': 30,

@@ -164,6 +164,10 @@ export class WorldRenderer {
   private _meteor: { x: number; y: number; vx: number; vy: number; life: number } | null = null;
   private _bolt: number = 0;
   private _boltSeed: number = 0;
+  /** Geometry for the current strike, built once and held for its duration so
+   *  the shape does not re-randomise between frames. */
+  private _boltPath: number[] = [];
+  private _boltBranches: number[][] = [];
   private _t = 0;
   private _last = 0;
   private _mouse = { x: -1, y: -1, px: 0, py: 0 };
@@ -616,6 +620,8 @@ export class WorldRenderer {
   triggerLightning(): void {
     this._bolt = 1;
     this._boltSeed = Math.random() * 1000;
+    // A new strike is a new shape, not a variation on the last one.
+    this._boltPath = [];
   }
 
   render(date: Date): void {
@@ -2527,45 +2533,131 @@ export class WorldRenderer {
     g.restore();
   }
 
+  /**
+   * Lightning.
+   *
+   * The previous version derived the bolt's shape from a hash of a *constant*
+   * index, so every segment used the same step and the same drift. What it drew
+   * was a single straight diagonal line, re-stroked in the same place every
+   * time the flash toggled, which reads as a rendering glitch rather than as
+   * weather.
+   *
+   * The path is now built once per strike from a seeded random walk, so each
+   * segment differs, the shape is stable for the duration of the flash instead
+   * of strobing, and the envelope is a real decay rather than a sine on the
+   * remaining life.
+   */
   private _drawBolt(): void {
     if (this._bolt <= 0) return;
-    this._bolt -= 0.055;
+    this._bolt -= 0.03;
     const a = Math.max(0, this._bolt);
+    if (a <= 0) return;
     const g = this._ctx;
+
+    // The path is built once per strike. An empty path means this is the first
+    // frame of a new discharge; afterwards the shape is held, so the bolt does
+    // not re-randomise into a different bolt on every frame.
+    if (this._boltPath.length === 0) this._buildBoltPath();
+
+    // Flash envelope: instant on, exponential off. A sine on the countdown
+    // strobes evenly, which is not how a discharge behaves.
+    const env = Math.pow(a, 1.6);
 
     g.save();
     g.globalCompositeOperation = 'lighter';
-    g.fillStyle = `rgba(190,205,255,${a * 0.14})`;
+
+    // Sheet illumination. Wide and soft, because a bolt lights the whole sky
+    // rather than a stripe of it.
+    g.fillStyle = `rgba(196,212,255,${a * a * 0.16})`;
     g.fillRect(0, 0, this._w, this._h);
 
-    const flick = Math.sin(this._bolt * 41) > 0.1;
-    if (flick) {
-      const rnd = (n: number) => {
-        const v = Math.sin((this._boltSeed + n) * 12.9898) * 43758.5453;
-        return v - Math.floor(v);
-      };
-      let x = this._w * (0.15 + rnd(1) * 0.7);
-      let y = 0;
-      g.strokeStyle = `rgba(226,236,255,${a})`;
-      g.lineWidth = Math.max(1.2, this._h * 0.0026);
+    // Two strokes per segment: a wide dim halo and a narrow hot core, which is
+    // what makes a discharge read as bright rather than as a drawn line.
+    for (const pass of [
+      { width: Math.max(4, this._h * 0.011), colour: 'rgba(150,172,255,', alpha: 0.3 },
+      { width: Math.max(1.2, this._h * 0.0022), colour: 'rgba(238,244,255,', alpha: 1 },
+    ]) {
+      g.lineWidth = pass.width;
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.strokeStyle = `${pass.colour}${a * env * pass.alpha})`;
       g.beginPath();
-      g.moveTo(x, y);
-      while (y < this._h * 0.62) {
-        y += this._h * (0.02 + rnd(2) * 0.045);
-        x += (rnd(3) - 0.5) * this._w * 0.05;
-        g.lineTo(x, y);
+      for (let i = 0; i < this._boltPath.length; i += 2) {
+        const x = this._boltPath[i];
+        const y = this._boltPath[i + 1];
+        if (i === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
       }
       g.stroke();
 
-      const gl = g.createRadialGradient(x, y, 0, x, y, this._h * 0.2);
-      gl.addColorStop(0, `rgba(210,224,255,${a * 0.5})`);
-      gl.addColorStop(1, 'rgba(210,224,255,0)');
+      // Branches peel off the main channel and stop short.
+      for (let b = 0; b < this._boltBranches.length; b++) {
+        const br = this._boltBranches[b];
+        g.lineWidth = pass.width * 0.5;
+        g.strokeStyle = `${pass.colour}${a * env * pass.alpha * 0.7})`;
+        g.beginPath();
+        for (let i = 0; i < br.length; i += 2) {
+          if (i === 0) g.moveTo(br[i], br[i + 1]);
+          else g.lineTo(br[i], br[i + 1]);
+        }
+        g.stroke();
+      }
+    }
+
+    // Strike point: where the channel meets the ground.
+    const n = this._boltPath.length;
+    if (n >= 2) {
+      const ex = this._boltPath[n - 2];
+      const ey = this._boltPath[n - 1];
+      const r = this._h * 0.16;
+      const gl = g.createRadialGradient(ex, ey, 0, ex, ey, r);
+      gl.addColorStop(0, `rgba(226,236,255,${a * env * 0.55})`);
+      gl.addColorStop(0.4, `rgba(180,200,255,${a * env * 0.16})`);
+      gl.addColorStop(1, 'rgba(180,200,255,0)');
       g.fillStyle = gl;
       g.beginPath();
-      g.arc(x, y, this._h * 0.2, 0, Math.PI * 2);
+      g.arc(ex, ey, r, 0, Math.PI * 2);
       g.fill();
     }
+
     g.restore();
+  }
+
+  /** Builds one strike's geometry: a seeded walk down, with short branches. */
+  private _buildBoltPath(): void {
+    const rnd = mulberry32((this._boltSeed * 1000) | 0);
+    this._boltPath = [];
+    this._boltBranches = [];
+
+    let x = this._w * (0.18 + rnd() * 0.64);
+    let y = -this._h * 0.02;
+    const floor = this._h * (0.52 + rnd() * 0.18);
+    this._boltPath.push(x, y);
+
+    // Walk down in uneven steps, drifting sideways. The drift is biased back
+    // toward the centre so a bolt does not leave the frame.
+    const targetX = x;
+    while (y < floor) {
+      y += this._h * (0.018 + rnd() * 0.05);
+      const pull = (targetX - x) * 0.06;
+      x += (rnd() - 0.5) * this._w * 0.07 + pull;
+      this._boltPath.push(x, y);
+
+      // Occasionally a branch peels off and dies quickly.
+      if (rnd() > 0.72 && this._boltBranches.length < 4 && y < floor * 0.8) {
+        const branch: number[] = [x, y];
+        let bx = x;
+        let by = y;
+        const dir = rnd() > 0.5 ? 1 : -1;
+        const steps = 2 + Math.floor(rnd() * 3);
+        for (let s = 0; s < steps; s++) {
+          by += this._h * (0.02 + rnd() * 0.035);
+          bx += dir * this._w * (0.012 + rnd() * 0.03);
+          branch.push(bx, by);
+        }
+        this._boltBranches.push(branch);
+      }
+    }
   }
 
   private _drawAnomalyOverlays(): void {

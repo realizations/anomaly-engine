@@ -106,7 +106,7 @@ public static class WindowDiagnostic
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT

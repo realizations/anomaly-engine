@@ -16,8 +16,12 @@ public class EngineApp : Application
     private MonitorManager? _monitorManager;
     private PowerManager? _powerManager;
     private FullscreenDetector? _fullscreenDetector;
+    private HotkeyService? _hotkeys;
     private Logger? _logger;
-    private SettingsWindow.SettingsWindow? _settingsWindow;
+    private Core.StateStore? _stateStore;
+
+    /// <summary>Set from `--settings` so a desktop shortcut can open the window.</summary>
+    public bool ShowSettingsOnStart { get; init; }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -29,8 +33,9 @@ public class EngineApp : Application
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-        _logger = new Logger();
-        _logger.Info("Anomaly Engine starting...");
+            _logger = new Logger();
+            _logger.Info("Anomaly Engine starting...");
+            _stateStore = new Core.StateStore(_logger);
 
         IconGenerator.EnsureIconExists();
 
@@ -38,14 +43,38 @@ public class EngineApp : Application
         _powerManager = new PowerManager(_logger);
         _fullscreenDetector = new FullscreenDetector(_logger);
 
-        _wallpaperHost = new WallpaperHost(_logger, _monitorManager);
+        _wallpaperHost = new WallpaperHost(_logger, _monitorManager, _stateStore);
         await _wallpaperHost.Start();
 
         try
         {
             _trayIcon = new TrayIcon(_logger, _wallpaperHost);
-            _trayIcon.Show();
-        }
+
+    // Global hotkeys. The wallpaper has no keyboard focus, so these are the only
+    // way to drive the engine without reaching for the tray.
+    _hotkeys = new HotkeyService(_logger);
+    _hotkeys.RendererEvent += (name) =>
+    {
+        if (name == "style-next") _wallpaperHost.CycleStyle();
+        else _wallpaperHost.SendToRenderer(name);
+    };
+    _hotkeys.PauseToggled += (paused) =>
+    {
+        _logger.Info($"Hotkey: {(paused ? "paused" : "resumed")}");
+        if (paused) _wallpaperHost.Pause();
+        else _wallpaperHost.Resume();
+    };
+    _logger.Info("Global hotkeys: Ctrl+Alt+W/S/P/F/D");
+    _trayIcon.Show();
+
+    if (ShowSettingsOnStart)
+    {
+        // Dispatched rather than opened directly so the window appears after the
+        // tray icon has settled. Explicitly fire-and-forget: the result is a
+        // DispatcherOperation this code has no reason to await.
+        _ = Dispatcher.BeginInvoke(new Action(() => _trayIcon.OpenSettings()));
+    }
+    }
         catch (Exception ex)
         {
             _logger.Warn($"Tray icon failed to start: {ex.Message}");
@@ -116,8 +145,10 @@ public class EngineApp : Application
             _wallpaperHost?.Stop();
             _trayIcon?.Hide();
             _powerManager?.Dispose();
-            _fullscreenDetector?.Dispose();
-            _monitorManager?.Dispose();
+      _fullscreenDetector?.Dispose();
+      _hotkeys?.Dispose();
+      _stateStore?.Dispose();
+      _monitorManager?.Dispose();
         }
         catch (Exception ex)
         {
