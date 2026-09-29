@@ -184,11 +184,20 @@ export class WorldRenderer {
     return this._style;
   }
 
+  /** Set once by the engine at startup, when the absence was long enough. */
+  private _returnSummary: string[] | null = null;
+
   /**
-   * Feeds the observatory terminal its readout. The engine owns this state; the
-   * renderer just displays it, so the terminal never reaches into the journal
-   * or secret systems itself.
+   * Supplies the "while you were away" lines, shown once on the terminal and
+   * then released. The engine owns whether there is a gap worth reporting.
    */
+  setReturnSummary(lines: string[] | null): void {
+    this._returnSummary = lines;
+  }
+
+  /** Feeds the observatory terminal its readout. The engine owns this state; the
+   *  renderer just displays it, so the terminal never reaches into the journal
+   *  or secret systems itself. */
   setTerminalTelemetry(observations: number, secrets: number): void {
     this._telemetry.observations = observations;
     this._telemetry.secrets = secrets;
@@ -220,6 +229,7 @@ export class WorldRenderer {
       anomalyActive: !!anomaly,
       anomalyName: anomaly?.type,
       uptime: (performance.now() - this._startedAt) / 1000,
+      returnSummary: this._returnSummary ?? undefined,
     }, dt);
   }
 

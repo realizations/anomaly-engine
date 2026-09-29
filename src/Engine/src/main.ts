@@ -9,6 +9,7 @@ import { WorldRenderer } from './renderer/WorldRenderer.js';
 import type { AnomalyKind } from './renderer/WorldRenderer.js';
 import { NativeBridge } from './platform/NativeBridge.js';
 import { Persistence } from './platform/Persistence.js';
+import { buildAwaySummary, summaryToTerminalLines } from './platform/AwaySummary.js';
 import { WeatherSystem } from './systems/WeatherSystem.js';
 import { AstronomySystem } from './systems/AstronomySystem.js';
 import { PerformanceSystem } from './systems/PerformanceSystem.js';
@@ -133,6 +134,9 @@ class Engine {
       this._worlds.activate(firstWorld.id);
       this._renderer.setWorld(firstWorld);
     }
+    // After the world is settled, so the summary is written for the place the
+    // user actually came back to.
+    this._reportAbsence();
     this._worlds.onChange((id) => {
       const w = id ? this._worlds.get(id) : null;
       if (!w) return;
@@ -808,6 +812,46 @@ class Engine {
     }
     this._journal.restore(s.journal);
     this._secrets.restore(s.secrets);
+    this._renderer.setTerminalTelemetry(this._journal.getEntries().length, this._secrets.getDiscovered().length);
+  }
+
+  /**
+   * Reports what changed while the engine was not running.
+   *
+   * The whole effect depends on three things being true: the gap has to be long
+   * enough to have earned it, the copy has to be about the place rather than
+   * about the player, and it has to be shown once and then released. A summary
+   * on every launch is a notification, so short gaps report nothing at all.
+   */
+  private _reportAbsence(): void {
+    const previous = this._persistence.getPreviousSeen();
+    if (!previous) return;
+    const awayMs = Date.now() - Date.parse(previous);
+    // A timestamp in the future means a clock change, not a long absence.
+    if (!Number.isFinite(awayMs) || awayMs <= 0) return;
+
+    const world = this._worlds.getActive() ?? this._worlds.getAll()[0];
+    if (!world) return;
+    const summary = buildAwaySummary(awayMs, world, world.terrain.seed);
+    if (!summary.worthShowing) return;
+
+    const lines = summaryToTerminalLines(summary);
+    this._renderer.setReturnSummary(lines);
+    // The same moment is worth a log line, but only once per absence.
+    this._bus.emit({
+      id: `away_${Date.now()}`,
+      type: 'system.absence_reported',
+      timestamp: Date.now(),
+      source: 'system',
+      payload: { awayMs, lines: lines.length },
+      priority: 'low',
+      rarity: 'common',
+      cooldown: 0,
+      duration: 0,
+      targetScene: 'main',
+      seed: Date.now(),
+      metadata: {},
+    });
   }
 
   /** Toggles the field-notes panel, which surfaces the ARG layer on demand. */

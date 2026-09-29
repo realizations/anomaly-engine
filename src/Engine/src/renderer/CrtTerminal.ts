@@ -52,6 +52,12 @@ export interface TerminalState {
   anomalyName?: string | undefined;
   /** Uptime of the engine in seconds. */
   uptime: number;
+  /**
+   * Lines pushed once on arrival, describing what changed while the engine was
+   * off. Shown instead of the standing readout for a few seconds, then the
+   * terminal returns to idling. Empty on a short gap.
+   */
+  returnSummary?: string[] | undefined;
 }
 
 /** One line queued to be typed out. */
@@ -84,6 +90,10 @@ export class CrtTerminal {
   private _lastSignature = '';
 
   private _lines: string[] = [];
+  /** Arrival summary, shown once and then released. */
+  private _returnLines: string[] = [];
+  private _returnUntil = 0;
+  private _returnShown = false;
 
   constructor(ctx: CanvasRenderingContext2D, seed: number) {
     this._ctx = ctx;
@@ -116,9 +126,17 @@ export class CrtTerminal {
     if (w < 420 || h < 260) return;
 
     const g = this._ctx;
+    const now = performance.now();
     if (!this._booted) {
       this._booted = true;
       this._boot = 0;
+    }
+
+    // Take the arrival summary once, on the first frame it is offered.
+    if (!this._returnShown && state.returnSummary?.length) {
+      this._returnLines = state.returnSummary;
+      this._returnShown = true;
+      this._returnUntil = now + 9000;
     }
     this._boot = Math.min(1, this._boot + dt * 0.7);
     this._flicker += dt;
@@ -245,28 +263,43 @@ export class CrtTerminal {
     // Typewriter.
     this._advance(dt);
 
-    const fs = Math.max(8, Math.round(h * 0.075));
-    g.font = `${fs}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
-    g.textBaseline = 'top';
-
     const padX = w * 0.07;
     const padY = h * 0.09;
-    const lineH = fs * 1.5;
-    const maxRows = Math.floor((h - padY * 2) / lineH);
+    let fs = Math.max(8, Math.round(h * 0.075));
 
     // The readout is a stable block: every line is drawn every frame, and only
     // the single line that changed is re-typed. Re-typing the whole block on
     // every state change made the terminal flicker and often caught a blank
     // screen mid-reveal, which read as a broken prop rather than equipment.
     const shown: Array<{ text: string; warn?: boolean | undefined }> = [];
-    for (const l of this._lines) {
-      const isTyping = this._current && this._current.text === l;
-      shown.push({
-        text: isTyping ? l.slice(0, Math.floor(this._revealed)) : l,
-        warn: l.startsWith('> !!'),
-      });
+
+    // On arrival the terminal says what changed, then goes back to idling. The
+    // summary holds the screen while it is relevant and is never re-shown.
+    if (this._returnUntil > performance.now() && this._returnLines.length) {
+      for (const text of this._returnLines) shown.push({ text });
+    } else {
+      for (const l of this._lines) {
+        const isTyping = this._current && this._current.text === l;
+        shown.push({
+          text: isTyping ? l.slice(0, Math.floor(this._revealed)) : l,
+          warn: l.startsWith('> !!'),
+        });
+      }
     }
-    // Clip to the rows that fit.
+    // Clip to the rows that fit, shrinking the type first if a line is too long
+    // to fit the tube. The return summary is the one thing that must never be
+    // clipped, because the lost words would be the unsettling ones.
+    g.font = `${fs}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+    g.textBaseline = 'top';
+    const inner = w - padX * 2;
+    let longest = 0;
+    for (const row of shown) longest = Math.max(longest, g.measureText(row.text).width);
+    if (longest > inner && longest > 0) {
+      fs = Math.max(6, Math.floor(fs * (inner / longest)));
+      g.font = `${fs}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+    }
+    const lineH = fs * 1.5;
+    const maxRows = Math.floor((h - padY * 2) / lineH);
     while (shown.length > maxRows) shown.shift();
 
     // The cursor blinks on the current row regardless of typing state.

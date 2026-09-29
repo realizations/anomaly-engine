@@ -83,6 +83,14 @@ export class Persistence {
   private _bridge: NativeBridge | null;
   private _state: PersistedState = emptyState();
   private _loaded = false;
+  /** The previous session's end time, captured before load() overwrites it. */
+  private _previousSeen: string | null = null;
+
+  /** The last time the engine was running before this session, or null on a
+   *  first run. Drives the "while you were away" summary. */
+  getPreviousSeen(): string | null {
+    return this._previousSeen;
+  }
   private _flushTimer: number | null = null;
 
   constructor(bridge: NativeBridge | null) {
@@ -107,6 +115,10 @@ export class Persistence {
     this._state.totalSessions += 1;
     const now = new Date().toISOString();
     this._state.firstRun = this._state.firstRun ?? now;
+    // The last time the engine was running, before this session overwrites it.
+    // The return summary is measured against this, and once lastSeen is
+    // stamped with now the original is gone.
+    this._previousSeen = this._state.lastSeen;
     this._state.lastSeen = now;
     this._loaded = true;
     this._writeFallback(this._state);
