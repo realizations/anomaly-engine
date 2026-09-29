@@ -2,6 +2,7 @@ import { RGB, mixRgb, css, shade, mulberry32, ridged1D, fbm1D } from '../render/
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
 import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
 import { BUILT_IN_WORLDS } from '../worlds/registry.js';
+import { CrtTerminal } from './CrtTerminal.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -100,6 +101,12 @@ const DEBUG_RISO_DUMP = false;
 
 export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
+  private _crt: CrtTerminal | null = null;
+
+  /** Telemetry the terminal reports, driven by the engine so the CRT module
+   *  stays decoupled from the journal and secret systems. */
+  private _telemetry = { observations: 0, secrets: 0, uptime: 0 };
+  private _startedAt = 0;
   private _ctx: CanvasRenderingContext2D;
   private _w = 0;
   private _h = 0;
@@ -153,9 +160,47 @@ export class WorldRenderer {
     this._buildPaper();
     this._bindPointer();
   }
-
   getStyle(): RenderStyle {
     return this._style;
+  }
+
+  /**
+   * Feeds the observatory terminal its readout. The engine owns this state; the
+   * renderer just displays it, so the terminal never reaches into the journal
+   * or secret systems itself.
+   */
+  setTerminalTelemetry(observations: number, secrets: number): void {
+    this._telemetry.observations = observations;
+    this._telemetry.secrets = secrets;
+  }
+
+  /** Short code the terminal identifies the current site by. */
+  private _siteCode(): string {
+    const words = this._world.name.replace(/^(the|a|an)\s+/i, '').split(/\s+/);
+    const letters = words.map((w) => w.replace(/[^a-z0-9]/gi, '')[0] ?? '').join('');
+    return (letters || 'site').toUpperCase().slice(0, 5).padEnd(3, 'x');
+  }
+
+  private _drawTerminal(grade: SkyGrade, hour: number, dt: number): void {
+    if (!this._crt) this._crt = new CrtTerminal(this._ctx, this._seed);
+    if (this._startedAt === 0) this._startedAt = performance.now();
+
+    const hh = String(Math.floor(hour)).padStart(2, '0');
+    const mm = String(Math.floor((hour % 1) * 60)).padStart(2, '0');
+    const anomaly = this._anomalies.find((a) => a.active);
+
+    this._crt.render(this._w, this._h, grade, {
+      worldName: this._world.name,
+      worldCode: this._siteCode(),
+      biome: this._world.biome,
+      clock: `${hh}:${mm}`,
+      weather: this._weather.condition.toUpperCase(),
+      observations: this._telemetry.observations,
+      secrets: this._telemetry.secrets,
+      anomalyActive: !!anomaly,
+      anomalyName: anomaly?.type,
+      uptime: (performance.now() - this._startedAt) / 1000,
+    }, dt);
   }
 
   private _buildPaper(): void {
@@ -575,6 +620,7 @@ export class WorldRenderer {
     this._drawMeteor();
     this._drawBolt();
     this._drawAnomalyOverlays();
+    this._drawTerminal(grade, hour, dt);
     if (this._style === 'painterly') {
       this._drawGrade(grade);
       this._drawVignette();
