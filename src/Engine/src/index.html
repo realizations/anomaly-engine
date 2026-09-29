@@ -3,6 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    Content-Security-Policy. This surface renders local content and is not a
+    browser, so the policy is maximally tight: no network at all, and no inline
+    or eval'd script. The styles are inline because they are static and
+    hand-written, and the font sources are same-origin files that Vite copies
+    into the bundle.
+
+    A wallpaper that could reach the network could report the user's IP from
+    behind their desktop, which would be a privacy failure with no visible
+    symptom. 'unsafe-inline' on styles is the only concession.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'">
   <title>Anomaly Engine</title>
   <style>
     /*

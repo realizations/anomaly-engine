@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using AnomalyEngine.Tools;
@@ -30,12 +31,20 @@ public static class Program
         _mutex = new Mutex(true, MutexName, out bool createdNew);
         if (!createdNew)
         {
-            System.Windows.MessageBox.Show("Anomaly Engine is already running.", "Anomaly Engine",
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            // Another instance owns the tray. Say so plainly rather than pretending
+            // this process did anything.
+            System.Windows.MessageBox.Show(
+                "Anomaly Engine is already running.\n\nUse the tray icon to open settings.",
+                "Anomaly Engine",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
             return;
         }
 
-        var engine = new EngineApp();
+        var engine = new EngineApp
+        {
+            ShowSettingsOnStart = args.Contains("--settings"),
+        };
         engine.Run();
     }
 }

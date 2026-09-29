@@ -76,4 +76,15 @@
            Text="Deployed renderer is missing index.html. The host would start and render nothing." />
   </Target>
 
+  <!--
+    Record a digest of the deployed renderer so the host can refuse to start on a
+    modified install directory. Written after the copy, because the digest has to
+    describe what was actually deployed rather than what the build produced.
+  -->
+  <Target Name="WriteBundleDigest" AfterTargets="CopyRendererFiles">
+    <Exec Command="node ..\..\tools\write-bundle-digest.mjs &quot;$(OutDir)renderer&quot; &quot;$(OutDir)renderer.bundle.sha256&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="Exists('..\..\tools\write-bundle-digest.mjs')" />
+  </Target>
+
 </Project>

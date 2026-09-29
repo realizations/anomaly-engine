@@ -1,0 +1,16 @@
+{
+  "name": "anomaly-engine-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Verification, showcase and diagnostic tooling for Anomaly Engine. Not part of the shipped product.",
+  "scripts": {
+    "verify": "node verify.mjs",
+    "e2e": "node e2e.mjs",
+    "showcase": "node showcase.mjs",
+    "license": "node license-gate.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}

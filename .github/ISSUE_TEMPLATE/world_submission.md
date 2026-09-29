@@ -1,6 +1,6 @@
 ---
 name: World Submission
-about: Submit a world package for inclusion
+about: Submit a world for inclusion
 title: ''
 labels: world-submission
 assignees: ''
@@ -10,21 +10,26 @@ assignees: ''
 The name of your world.
 
 **World ID**
-The unique identifier (e.g. `my-mysterious-world`).
+The unique identifier. Must be lowercase kebab-case, e.g. `my-mysterious-world`.
+
+**Biome**
+One of: `temperate-forest`, `salt-marsh`, `alpine`, `high-desert`, `coast`.
 
 **Description**
-A short description of the world.
+One or two sentences about the place.
 
-**Package**
-Link to the `.world` package or the source repository.
+**Source**
+A link to the `WorldDefinition` object, or a pull request adding it to
+`src/Engine/src/worlds/registry.ts`.
 
 **Screenshots**
-If available, screenshots or a short video.
+Optional. `node tools/worlds.mjs <hour> <style>` renders every world to `build/worlds/`.
 
 **Checklist**
-- [ ] I have read `docs/world-format.md`
-- [ ] My world passes validation (`livingwall world validate`)
-- [ ] All assets are original or appropriately licensed
-- [ ] No copyrighted material is included
-- [ ] The world works offline
-- [ ] The world handles errors gracefully
+- [ ] I have read [`docs/WORLD-FORMAT.md`](../../docs/WORLD-FORMAT.md)
+- [ ] My world has a unique `terrain.seed`
+- [ ] Every structure kind I used belongs to the biome
+- [ ] `terrain.road` is `0` where a paved road makes no sense
+- [ ] The world defines at least one `lore.deniability` line
+- [ ] I did not add binary assets; a world is data, not art
+- [ ] The world works offline and degrades gracefully

@@ -6,50 +6,92 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-engine:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build Renderer
-        run: |
-          cd src/Engine
-          npm install
-          npm run build
-
-      - name: Build Native Host
-        run: |
-          cd src/AnomalyEngine
-          dotnet build
-
-      - name: Test
-        run: |
-          cd src/Engine
-          npm test
-
-  lint:
+  # The licence gate is fast and platform independent, so it fails first and
+  # cheaply. It is the check that keeps a non-commercial asset out of a repo
+  # that may later ship a paid tier.
+  license:
+    name: Asset licence gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prove the gate rejects bad licences
+        run: node tools/license-gate.mjs --selftest
+      - name: Check every shipped asset
+        run: node tools/license-gate.mjs
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+  engine:
+    name: Renderer (typecheck, lint, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        working-directory: src/Engine
+        run: npm install
+      - name: Typecheck
+        working-directory: src/Engine
+        run: npm run typecheck
+      - name: Lint
+        working-directory: src/Engine
+        run: npx eslint src/ tests/
+      - name: Unit tests
+        working-directory: src/Engine
+        run: npm test
+
+  # The host and the end-to-end suite must run on Windows: the wallpaper host is
+  # a WPF/WebView2 app, and the e2e suite loads the renderer over file://, which
+  # is the only condition that catches module and CORS regressions.
+  host:
+    name: Native host + end-to-end (file://)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Lint
+      - name: Install renderer deps
+        working-directory: src/Engine
+        run: npm install
+
+      - name: Install tooling deps
+        working-directory: tools
+        run: npm install
+
+      - name: Install Playwright Chromium
+        working-directory: tools
+        run: npx playwright install chromium
+
+      # Build from a clean tree. This is deliberate: it verifies the renderer is
+      # actually produced and deployed by `dotnet build`, which a stale committed
+      # artefact used to mask.
+      - name: Build native host (builds and deploys the renderer)
+        working-directory: src/AnomalyEngine
+        run: dotnet build
+
+      - name: Verify the deployed renderer exists
+        shell: pwsh
         run: |
-          cd src/Engine
-          npm install
-          npm run lint
+          $p = 'src/AnomalyEngine/bin/Debug/net8.0-windows/renderer/index.html'
+          if (-not (Test-Path $p)) { throw "Deployed renderer missing: $p" }
+          $html = Get-Content $p -Raw
+          if ($html -notmatch 'assets/index-') { throw "index.html does not reference a built bundle" }
+          if ($html -match 'main\.ts') { throw "index.html references raw TypeScript; the build is wrong" }
+          Write-Output "deployed renderer OK"
+
+      - name: End-to-end, licence gate and durable-state checks
+        working-directory: tools
+        run: node verify.mjs

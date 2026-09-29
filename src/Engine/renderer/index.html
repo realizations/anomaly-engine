@@ -3,8 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    Content-Security-Policy. This surface renders local content and is not a
+    browser, so the policy is maximally tight: no network at all, and no inline
+    or eval'd script. The styles are inline because they are static and
+    hand-written, and the font sources are same-origin files that Vite copies
+    into the bundle.
+
+    A wallpaper that could reach the network could report the user's IP from
+    behind their desktop, which would be a privacy failure with no visible
+    symptom. 'unsafe-inline' on styles is the only concession.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'">
   <title>Anomaly Engine</title>
   <style>
+    /*
+      Typefaces are bundled rather than fetched. Three families, all SIL OFL,
+      all unmodified: IBM Plex Mono carries the terminal readout, Inter carries
+      any prose, Space Grotesk carries display. Bundling also means the
+      wallpaper renders identically offline, which a desktop background has to
+      do: it starts before there is a network.
+    */
+    @font-face {
+      font-family: 'Plex Mono';
+      src: url('./fonts/IBMPlexMono-Regular.ttf') format('truetype');
+      font-weight: 400; font-style: normal; font-display: block;
+    }
+    @font-face {
+      font-family: 'Inter';
+      src: url('./fonts/Inter-Regular.ttf') format('truetype');
+      font-weight: 400; font-style: normal; font-display: block;
+    }
+    @font-face {
+      font-family: 'Inter';
+      src: url('./fonts/Inter-SemiBold.ttf') format('truetype');
+      font-weight: 600; font-style: normal; font-display: block;
+    }
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('./fonts/SpaceGrotesk-Medium.ttf') format('truetype');
+      font-weight: 500; font-style: normal; font-display: block;
+    }
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('./fonts/SpaceGrotesk-Bold.ttf') format('truetype');
+      font-weight: 700; font-style: normal; font-display: block;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       width: 100%;
@@ -24,18 +70,22 @@
       display: grid;
       place-items: center;
       color: #6b6b8a;
-      font: 12px/1.6 "Consolas", "Courier New", monospace;
-      letter-spacing: 0.14em;
+      font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+      font-weight: 500;
+      font-size: 15px;
+      line-height: 1.6;
+      letter-spacing: 0.34em;
       text-transform: uppercase;
+      text-indent: 0.34em;
       pointer-events: none;
       transition: opacity 0.6s ease;
     }
     #anomaly-boot.gone { opacity: 0; }
   </style>
-  <script type="module" crossorigin src="./assets/index-DhpD-9lG.js"></script>
+  <script defer src="./assets/index-D7lS36dZ.js"></script>
 </head>
 <body>
   <canvas id="wallpaper-canvas"></canvas>
-  <div id="anomaly-boot">waking the town</div>
+  <div id="anomaly-boot">waking</div>
 </body>
 </html>

@@ -14,6 +14,8 @@ public class TrayIcon : IDisposable
     private readonly WallpaperHost _wallpaperHost;
     private TaskbarIcon? _trayIcon;
     private SettingsWindow.SettingsWindow? _settingsWindow;
+    private ItemCollection? _styleItems;
+    private string _activeStyleId = "painterly";
 
     public TrayIcon(Logger logger, WallpaperHost wallpaperHost)
     {
@@ -72,12 +74,58 @@ public class TrayIcon : IDisposable
         menu.Items.Add(new Separator());
 
         var nextWorldItem = new MenuItem { Header = "Next World" };
-        nextWorldItem.Click += (s, e) => { };
+        nextWorldItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:world-next");
         menu.Items.Add(nextWorldItem);
 
+        var prevWorldItem = new MenuItem { Header = "Previous World" };
+        prevWorldItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:world-prev");
+        menu.Items.Add(prevWorldItem);
+
         var triggerEventItem = new MenuItem { Header = "Trigger Event" };
-        triggerEventItem.Click += (s, e) => { };
+        triggerEventItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:trigger");
         menu.Items.Add(triggerEventItem);
+
+        menu.Items.Add(new Separator());
+
+        var styleMenu = new MenuItem { Header = "Art Style" };
+        var styles = new (string Id, string Label)[]
+        {
+            ("painterly", "Painterly (Recommended)"),
+            ("flat", "Flat Vector"),
+            ("riso", "Riso Print"),
+        };
+
+        _activeStyleId = "painterly";
+        foreach (var (id, label) in styles)
+        {
+            var item = new MenuItem { Header = label, Tag = id, IsCheckable = true };
+            item.Click += (s, e) => SelectStyle(id);
+            styleMenu.Items.Add(item);
+        }
+        _styleItems = styleMenu.Items;
+        MarkActiveStyle("painterly");
+        menu.Items.Add(styleMenu);
+
+        var reducedItem = new MenuItem { Header = "Reduced Motion", IsCheckable = true, IsChecked = false };
+        reducedItem.Click += (s, e) =>
+        {
+            var nowOn = !reducedItem.IsChecked;
+            reducedItem.IsChecked = nowOn;
+            _wallpaperHost.SetReducedMotion(nowOn);
+        };
+        menu.Items.Add(reducedItem);
+
+        var debugItem = new MenuItem { Header = "Debug Overlay" };
+        debugItem.Click += (s, e) => _wallpaperHost.ToggleDebug();
+        menu.Items.Add(debugItem);
+
+        var creatorItem = new MenuItem { Header = "Creator Mode" };
+        creatorItem.Click += (s, e) => _wallpaperHost.OpenCreatorMode();
+        menu.Items.Add(creatorItem);
+
+        var notesItem = new MenuItem { Header = "Field Notes" };
+        notesItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:notes");
+        menu.Items.Add(notesItem);
 
         menu.Items.Add(new Separator());
 
@@ -101,12 +149,31 @@ public class TrayIcon : IDisposable
         _trayIcon = null;
     }
 
-    private void OpenSettings()
+    private void SelectStyle(string id)
+    {
+        _wallpaperHost.SetStyle(id);
+        _activeStyleId = id;
+        MarkActiveStyle(id);
+        _logger.Info($"Art style changed to {id}.");
+    }
+
+    // Without a visible marker there is no feedback confirming which style is
+    // live, so a click looks like it did nothing.
+    private void MarkActiveStyle(string id)
+    {
+        if (_styleItems == null) return;
+        foreach (MenuItem item in _styleItems)
+        {
+            if (item.Tag is string tag) item.IsChecked = tag == id;
+        }
+    }
+
+    public void OpenSettings()
     {
         _logger.Info("Opening settings...");
         if (_settingsWindow == null || !_settingsWindow.IsLoaded)
         {
-            _settingsWindow = new SettingsWindow.SettingsWindow();
+            _settingsWindow = new SettingsWindow.SettingsWindow(_wallpaperHost, _logger);
             _settingsWindow.Closed += (s, e) => _settingsWindow = null;
         }
         _settingsWindow.Show();

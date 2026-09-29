@@ -5,13 +5,25 @@ dist/
 *.user
 .vs/
 .vscode/
+desktop.ini
 *.world
 !worlds/*/manifest.json
 AppData/
 *.log
 coverage/
 
-build/preview/
+# Vite build output. This is generated, and tracking it caused a real bug: the
+# native host loads index.html from disk, so a stale committed bundle shipped
+# code that no longer matched the source.
+src/Engine/renderer/
+
+# Generated showcase and preview renders. Regenerate with `node tools/showcase.mjs`.
+build/
+!build/.gitkeep
+
 tools/node_modules/
-tools/package-lock.json
-tools/package.json
+
+# NOTE: tools/package.json is intentionally tracked. The verification and
+# showcase scripts need Playwright, and ignoring the manifest made them
+# unrunnable for anyone who cloned the repo.
+

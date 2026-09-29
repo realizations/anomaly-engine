@@ -23,6 +23,11 @@ public class WallpaperHost : IDisposable
     private bool _scriptPaused;
     private bool _isRunning;
     private readonly string _rendererPath;
+    /// Absolute path to the deployed index.html, used by the integrity check and
+    /// the navigation filter to decide what counts as the legitimate renderer.
+    private string? _indexPath;
+    /// Set when startup was refused on an integrity failure.
+    private bool _integrityFailed;
 
     public WallpaperHost(Logger logger, MonitorManager monitorManager, StateStore? stateStore = null)
     {
@@ -47,6 +52,19 @@ public class WallpaperHost : IDisposable
             return;
         }
 
+        // Retained for the integrity check and the navigation filter, both of
+        // which need to know where the legitimate renderer lives.
+        _indexPath = indexPath;
+
+        // Integrity is checked before anything touches the desktop. A wallpaper
+        // that has been tampered with should stop before it is attached behind
+        // the icons, not after it has already drawn whatever is on disk.
+        if (!VerifyRendererIntegrity())
+        {
+            _integrityFailed = true;
+            return;
+        }
+
         var hwnd = FindWorkerW();
         if (hwnd == IntPtr.Zero)
         {
@@ -57,9 +75,16 @@ public class WallpaperHost : IDisposable
         _workerW = hwnd;
         _logger.Info($"WorkerW found: 0x{hwnd.ToInt64():X}");
 
-        _isRunning = true;
+        // Only claimed after a successful init. A refused start must not be
+        // reported as a running wallpaper.
         await InitializeWebViewAsync(indexPath);
+        if (_integrityFailed) return;
+        _isRunning = true;
     }
+
+    /// True when startup was refused because the deployed bundle did not match
+    /// its recorded digest. The caller uses this to avoid reporting success.
+    public bool IntegrityFailed => _integrityFailed;
 
     private async Task InitializeWebViewAsync(string indexPath)
     {
@@ -122,7 +147,7 @@ public class WallpaperHost : IDisposable
             await initTask;
             _logger.Info("WebView2 core initialized.");
 
-            AttachToWorkerW();
+            ApplySecurityPolicy();
 
             _webView.Source = new Uri(indexPath);
             _logger.Info("Renderer source set.");
@@ -130,6 +155,162 @@ public class WallpaperHost : IDisposable
         catch (Exception ex)
         {
             _logger.Error($"WebView2 initialization failed: {ex.Message}");
+        }
+    }
+
+    /// SHA-256 of the deployed renderer bundle, recorded at build time.
+    private const string BundleHashFile = "renderer.bundle.sha256";
+
+    private string RendererDirectory =>
+        Path.GetDirectoryName(_indexPath ?? string.Empty) ?? AppContext.BaseDirectory;
+
+    /// The same directory expressed as a URI, which is the form WebView2 reports
+    /// in NavigationStarting. Comparing a file:// URI against a Windows path
+    /// fails on the separators, so the filter has to compare like with like.
+    private Uri RendererBaseUri
+    {
+        get
+        {
+            var dir = RendererDirectory;
+            if (!dir.EndsWith(Path.DirectorySeparatorChar)) dir += Path.DirectorySeparatorChar;
+            return new Uri(dir);
+        }
+    }
+
+    /**
+     * Locks the WebView2 surface down.
+     *
+     * This process renders local content and is not a browser, so the defaults
+     * are wrong in three specific ways: dev tools are open to anything that can
+     * reach the surface, navigation away from the bundle is possible, and there
+     * is no Content-Security-Policy at all. All three are tightened here rather
+     * than being left to the default posture.
+     */
+    private void ApplySecurityPolicy()
+    {
+        // Only ever called after EnsureCoreWebView2Async has completed, but the
+        // compiler cannot see through the await, and the field is nullable
+        // because it is created during initialisation.
+        if (_webView is null) return;
+        var core = _webView.CoreWebView2;
+        if (core is null) return;
+        var settings = core.Settings;
+
+        // The renderer draws pixels and reads a bridge. It needs no scripting
+        // privileges beyond running its own bundle, and giving it more means a
+        // tampered bundle has more to work with.
+        settings.AreDevToolsEnabled = false;
+        settings.AreHostObjectsAllowed = false;
+        settings.IsStatusBarEnabled = false;
+        settings.AreDefaultContextMenusEnabled = false;
+        settings.IsZoomControlEnabled = false;
+        settings.IsWebMessageEnabled = true;
+
+        // Nothing should ever navigate. A wallpaper that can be navigated is a
+        // wallpaper that can be pointed somewhere else.
+        core.NewWindowRequested += (_, e) =>
+        {
+            e.Handled = true;
+            _logger.Warn("Blocked a new-window request from the renderer.");
+        };
+
+        core.NavigationStarting += (_, e) =>
+        {
+            var target = e.Uri ?? string.Empty;
+            // Only the bundle itself may be loaded. Compared as URIs, because
+            // the navigation event reports a file:// URI while the renderer
+            // directory is a Windows path.
+            if (!target.StartsWith(RendererBaseUri.AbsoluteUri, StringComparison.OrdinalIgnoreCase))
+            {
+                e.Cancel = true;
+                _logger.Warn($"Blocked navigation to {target}");
+            }
+        };
+
+        _logger.Info("WebView2 security policy applied.");
+    }
+
+    /**
+     * Verifies the deployed renderer against the hash recorded at build time.
+     *
+     * Worlds are data and cannot execute, but the bundle that draws them is
+     * code. Recording its digest at build time and checking it at startup means a
+     * modified bundle is detected rather than executed, which is the difference
+     * between "someone edited a file in the install directory" and "something
+     * is now running as this user".
+     *
+     * A missing hash file is a warning rather than a failure: it is absent in a
+     * development build, and refusing to start there would be unhelpful. A
+     * *mismatch*, however, is fatal.
+     */
+    private bool VerifyRendererIntegrity()
+    {
+        var dir = RendererDirectory;
+        var index = Path.Combine(dir, "index.html");
+        if (!File.Exists(index))
+        {
+            _logger.Error($"Renderer index.html is missing from {dir}. Refusing to start.");
+            return false;
+        }
+
+        var hashFile = Path.Combine(AppContext.BaseDirectory, BundleHashFile);
+        if (!File.Exists(hashFile))
+        {
+            _logger.Warn("No bundle digest found. This is expected in a development build.");
+            return true;
+        }
+
+        string expected;
+        try
+        {
+            expected = File.ReadAllText(hashFile).Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Could not read the bundle digest: {ex.Message}");
+            return true;
+        }
+
+        var actual = ComputeDirectoryDigest(dir, expected.Split(';')[0]);
+        if (actual is null)
+        {
+            _logger.Warn("Could not compute the renderer digest; continuing.");
+            return true;
+        }
+        if (!string.Equals(actual, expected.Split(';')[0], StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.Error(
+                $"Renderer integrity check FAILED. Expected {expected.Split(';')[0]}, got {actual}. " +
+                "The deployed bundle has been modified. Refusing to start.");
+            return false;
+        }
+
+        _logger.Info("Renderer integrity verified.");
+        return true;
+    }
+
+    /// SHA-256 over every deployed renderer file, path and content, sorted.
+    private static string? ComputeDirectoryDigest(string dir, string algorithm)
+    {
+        try
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
+            foreach (var file in files)
+            {
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                var name = System.Text.Encoding.UTF8.GetBytes(rel);
+                sha.TransformBlock(name, 0, name.Length, null, 0);
+                var bytes = File.ReadAllBytes(file);
+                sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            }
+            sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+            return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 

@@ -27,6 +27,21 @@ public class FullscreenDetector : IDisposable
             _ => CheckFullscreen(null), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
     }
 
+    private static bool IsShellProcess(uint pid)
+    {
+        try
+        {
+            using var proc = Process.GetProcessById((int)pid);
+            var name = proc.ProcessName;
+            return name.Equals("explorer", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("dwm", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private void CheckFullscreen(object? state)
     {
         try
@@ -36,6 +51,15 @@ public class FullscreenDetector : IDisposable
 
             NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
             if (pid == _ownProcessId) return;
+
+            // The shell owns the desktop, Progman and the WorkerW we are parented into.
+            // Those cover the whole screen by definition and would make us pause ourselves.
+            if (IsShellProcess(pid)) return;
+
+            if (!NativeMethods.IsWindowVisible(hwnd)) return;
+
+            var exStyle = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
+            if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0) return;
 
             if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return;
 

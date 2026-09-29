@@ -84,6 +84,18 @@ public class EngineApp : Application
         _powerManager.PowerStateChanged += OnPowerStateChanged;
         _fullscreenDetector.FullscreenStateChanged += OnFullscreenStateChanged;
 
+        // A refused start must not be reported as a running wallpaper. The host
+        // still shows a tray icon so the failure is discoverable and the user can
+        // read the log, but the log must not claim success.
+        if (_wallpaperHost.IntegrityFailed)
+        {
+            _logger.Error(
+                "Startup refused: the deployed renderer does not match its recorded digest. " +
+                "The install directory has been modified since it was built. See the log for the " +
+                "expected and actual hashes.");
+            return;
+        }
+
         _logger.Info("Anomaly Engine started successfully.");
     }
 
