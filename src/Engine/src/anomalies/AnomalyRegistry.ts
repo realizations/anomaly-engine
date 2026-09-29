@@ -1,5 +1,7 @@
 export type AnomalyCategory = 'visual' | 'audio' | 'temporal' | 'behavioral' | 'cosmic';
 
+import type { WorldDefinition } from '../worlds/types.js';
+
 export type AnomalyState = 'idle' | 'triggering' | 'active' | 'cooldown';
 
 export interface AnomalyDefinition {
@@ -8,10 +10,23 @@ export interface AnomalyDefinition {
   description: string;
   category: AnomalyCategory;
   rarity: 'common' | 'uncommon' | 'rare' | 'very_rare' | 'legendary';
+  /** Seconds before this anomaly may fire again. Note the unit: every other
+   *  time field on this type is in milliseconds, so this one is easy to get
+   *  wrong by a factor of 1000. */
   cooldown: number;
   duration: number;
   prerequisites?: string[];
   conditions?: string[];
+  /**
+   * Biomes this anomaly can occur in. Omit for anomalies that make sense
+   * anywhere (cosmic sky events). A "something moves between the trees"
+   * anomaly firing on a salt flat with no trees is nonsense the user actually
+   * noticed, so world-fit is a first-class property of an anomaly, not an
+   * afterthought.
+   */
+  biomes?: string[];
+  /** The world must contain a structure of this kind for the anomaly to fit. */
+  requiresStructure?: string;
   effects: AnomalyEffect[];
 }
 
@@ -78,6 +93,40 @@ export class AnomalySystem {
     }
 
     return true;
+  }
+
+  /**
+   * Whether an anomaly makes sense in a given world. This is a coherence check,
+   * not a probability: a forest-watcher has nothing to hide in on a salt flat,
+   * and an observatory-signal needs an observatory to come from. World-fit is
+   * evaluated before the cooldown so an out-of-place anomaly is simply never
+   * considered rather than being allowed to fire and look wrong.
+   */
+  fitsWorld(definition: AnomalyDefinition, world: WorldDefinition): boolean {
+    if (definition.biomes && !definition.biomes.includes(world.biome)) {
+      return false;
+    }
+    if (definition.requiresStructure) {
+      const has = (world.structures ?? []).some((s) => s.kind === definition.requiresStructure);
+      if (!has) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Picks an anomaly to fire in the current world. The preferred id is used
+   * when it fits; otherwise the system falls back to any anomaly that does fit
+   * so switching to a sparse world never leaves the user with nothing
+   * happening. Returns null only if no anomaly fits at all.
+   */
+  chooseForWorld(world: WorldDefinition, preferredId?: string): AnomalyDefinition | null {
+    const fitting = this.getDefinitions().filter((d) => this.fitsWorld(d, world));
+    if (fitting.length === 0) return null;
+    if (preferredId) {
+      const preferred = fitting.find((d) => d.id === preferredId);
+      if (preferred) return preferred;
+    }
+    return fitting[Math.floor(Math.random() * fitting.length)];
   }
 
   trigger(id: string, seed?: number): boolean {

@@ -72,6 +72,32 @@ export class JournalSystem {
     return JSON.stringify(this._entries, null, 2);
   }
 
+  /**
+   * Rehydrates entries from durable state. Entries that no longer parse are
+   * dropped rather than poisoning the journal, because a corrupt save must not
+   * be able to break the engine on every subsequent launch.
+   */
+  restore(entries: ReadonlyArray<Record<string, unknown>>): void {
+    const ok: JournalEntry[] = [];
+    for (const e of entries) {
+      if (!e || typeof e.id !== 'string' || typeof e.timestamp !== 'number') continue;
+      const state = e.state;
+      ok.push({
+        id: e.id,
+        timestamp: e.timestamp,
+        anomalyId: typeof e.anomalyId === 'string' ? e.anomalyId : 'unknown',
+        anomalyName: typeof e.anomalyName === 'string' ? e.anomalyName : 'Unknown',
+        rarity: typeof e.rarity === 'string' ? e.rarity : 'rare',
+        location: typeof e.location === 'string' ? e.location : 'unknown',
+        notes: typeof e.notes === 'string' ? e.notes : '',
+        state: state === 'discovered' || state === 'solved' ? state : 'observed',
+        clues: Array.isArray(e.clues) ? e.clues.filter((c): c is string => typeof c === 'string') : [],
+      });
+    }
+    this._entries = ok.sort((a, b) => a.timestamp - b.timestamp);
+    this._notify();
+  }
+
   onEntry(listener: (entry: JournalEntry) => void): () => void {
     this._listeners.push(listener);
     return () => {

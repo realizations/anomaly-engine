@@ -1,5 +1,7 @@
 import { RGB, mixRgb, css, shade, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
+import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
+import { BUILT_IN_WORLDS } from '../worlds/registry.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -30,6 +32,71 @@ const TERRAIN_NEAR: RGB = { r: 40, g: 52, b: 64 };
 const FOREST_FAR: RGB = { r: 34, g: 46, b: 52 };
 const FOREST_MID: RGB = { r: 20, g: 30, b: 34 };
 const FOREST_NEAR: RGB = { r: 9, g: 15, b: 17 };
+const HAZE_DEFAULT: RGB = { r: 22, g: 26, b: 54 };
+const GROUND_DEFAULT: RGB = { r: 30, g: 40, b: 32 };
+const ROAD_DEFAULT: RGB = { r: 122, g: 106, b: 86 };
+
+/**
+ * Default anchor for each structure kind, as a fraction of the viewport. The
+ * dispatcher translates a structure's baked-in geometry so its anchor lands on
+ * the world's declared position, which keeps the original silhouettes intact.
+ */
+const STRUCTURE_ANCHORS: Record<string, { x: number; y: number }> = {
+  cabin: { x: 0.2, y: 0.748 },
+  observatory: { x: 0.565, y: 0.715 },
+  'radio-tower': { x: 0.775, y: 0.715 },
+  'pylon-run': { x: 0.0, y: 0.7 },
+  lighthouse: { x: 0.82, y: 0.7 },
+  well: { x: 0.36, y: 0.72 },
+  ruin: { x: 0.24, y: 0.75 },
+  dishes: { x: 0.78, y: 0.755 },
+  cairn: { x: 0.26, y: 0.79 },
+  butte: { x: 0.08, y: 0.74 },
+  'rock-field': { x: 0.45, y: 0.76 },
+  'snowbank': { x: 0.3, y: 0.76 },
+  'reed-bank': { x: 0.12, y: 0.69 },
+  'fence-line': { x: 0.5, y: 0.735 },
+};
+
+/** Base tones for the generic structures, before ambient and haze are applied. */
+const STRUCTURE_TONE: Record<string, RGB> = {
+  cabin: { r: 74, g: 52, b: 40 },
+  observatory: { r: 92, g: 94, b: 102 },
+  'radio-tower': { r: 118, g: 118, b: 122 },
+  'pylon-run': { r: 40, g: 38, b: 40 },
+  // A lighthouse reads as a dark silhouette with pale bands, not as a white
+  // object. A light tone vanished completely against a bright golden sky.
+  lighthouse: { r: 96, g: 92, b: 88 },
+  well: { r: 88, g: 76, b: 64 },
+  ruin: { r: 128, g: 112, b: 92 },
+  dishes: { r: 168, g: 166, b: 160 },
+  cairn: { r: 108, g: 104, b: 98 },
+  butte: { r: 132, g: 104, b: 80 },
+  'rock-field': { r: 92, g: 82, b: 70 },
+  snowbank: { r: 210, g: 216, b: 222 },
+  'reed-bank': { r: 96, g: 92, b: 66 },
+  'fence-line': { r: 74, g: 66, b: 56 },
+};
+
+
+export type RenderStyle = 'painterly' | 'flat' | 'riso';
+
+/**
+ * Default risograph ink pair and stock.
+ *
+ * Two spot inks only, because that is the constraint the medium actually
+ * imposes. A risograph separates the image across a small number of drums, so
+ * anything asking for more colours than this is not riso, it is a filter. The
+ * inks are bright and saturated rather than dark: a screen print is mostly
+ * paper, and even a fully flooded area of a *light* ink still reads as a
+ * printed colour rather than as a black hole.
+ */
+const RISO_WARM: RGB = { r: 208, g: 74, b: 62 };
+const RISO_COOL: RGB = { r: 46, g: 132, b: 142 };
+const RISO_PAPER: RGB = { r: 244, g: 238, b: 222 };
+
+/** Dumps the pre-separation riso buffer to `__risoSource` for offline review. */
+const DEBUG_RISO_DUMP = false;
 
 export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
@@ -38,8 +105,21 @@ export class WorldRenderer {
   private _h = 0;
   private _dpr = 1;
   private _seed = 1337;
+  private _motionScale = 1;
+  private _highContrast = false;
+  private _world: WorldDefinition = BUILT_IN_WORLDS[0];
+  private _buffer: HTMLCanvasElement | null = null;
+  private _bctx: CanvasRenderingContext2D | null = null;
+  private _outCtx: CanvasRenderingContext2D | null = null;
+  private _renderScale = 1;
+  private _frameAccum = 0;
+  private _frameSamples = 0;
+  private _budgetMs = 16.7;
+  private _qualityLocked = false;
+  private _qualityListeners: Array<(scale: number, frameMs: number) => void> = [];
 
   private _grain: HTMLCanvasElement | null = null;
+  private _dither: HTMLCanvasElement | null = null;
   private _stars: Array<{ x: number; y: number; mag: number; tw: number; hue: number }> = [];
   private _cloudBands: Array<{ y: number; scale: number; speed: number; alpha: number; thickness: number }> = [];
   private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
@@ -60,13 +140,55 @@ export class WorldRenderer {
   private _last = 0;
   private _mouse = { x: -1, y: -1, px: 0, py: 0 };
   private _grade: SkyGrade = gradeForHour(12);
+  private _style: RenderStyle;
+  private _inks: HTMLCanvasElement | null = null;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, style: RenderStyle = 'painterly') {
     this._canvas = canvas;
+    this._style = style;
     this._ctx = canvas.getContext('2d', { alpha: false })!;
+    this._outCtx = this._ctx;
     this._buildGrain();
     this._buildFeatures();
+    this._buildPaper();
     this._bindPointer();
+  }
+
+  getStyle(): RenderStyle {
+    return this._style;
+  }
+
+  private _buildPaper(): void {
+    const size = 512;
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const g = c.getContext('2d')!;
+    const rnd = mulberry32(4242);
+
+    g.fillStyle = '#f2ece0';
+    g.fillRect(0, 0, size, size);
+
+    for (let i = 0; i < 9000; i++) {
+      const x = rnd() * size;
+      const y = rnd() * size;
+      const v = rnd();
+      g.fillStyle = v > 0.5 ? 'rgba(120,108,92,0.05)' : 'rgba(255,252,244,0.07)';
+      g.fillRect(x, y, 1 + rnd() * 2, 1 + rnd() * 2);
+    }
+
+    for (let i = 0; i < 220; i++) {
+      const x = rnd() * size;
+      const y = rnd() * size;
+      g.strokeStyle = 'rgba(150,138,118,0.035)';
+      g.lineWidth = 0.7;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + (rnd() - 0.5) * 90, y + (rnd() - 0.5) * 90);
+      g.stroke();
+    }
+
+    this._inks = c;
   }
 
   private _buildGrain(): void {
@@ -88,10 +210,57 @@ export class WorldRenderer {
     this._grain = c;
   }
 
-  private _buildFeatures(): void {
-    const rnd = mulberry32(this._seed);
+  /**
+   * Builds a sub-LSB dither tile.
+   *
+   * An eight-bit gradient stretched across a wide desktop develops visible
+   * contouring ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â hard steps where the ramp crosses a quantisation boundary.
+   * That is what made the sky look broken rather than soft. A low-amplitude
+   * noise tile breaks each contour into grain, which the eye reads as film
+   * rather than as a defect.
+   */
+  private _buildDither(): void {
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const g = c.getContext('2d')!;
+    const img = g.createImageData(size, size);
+    const rnd = mulberry32(3301);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = 128 + (rnd() - 0.5) * 30;
+      img.data[i] = v;
+      img.data[i + 1] = v;
+      img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    this._dither = c;
+  }
 
-    for (let i = 0; i < 420; i++) {
+  private _buildFeatures(): void {
+    this._buildScatter();
+  }
+
+  /**
+   * Regenerates every scattered feature from the active world's seed. Called on
+   * construction and again whenever the world changes, so two worlds never share
+   * a star field, cloud layout or forest.
+   */
+  private _buildScatter(): void {
+    this._stars.length = 0;
+    this._cloudBands.length = 0;
+    this._rain.length = 0;
+    this._snow.length = 0;
+    this._motes.length = 0;
+    this._smoke.length = 0;
+    this._poles.length = 0;
+
+    const rnd = mulberry32(this._seed);
+    const starDensity = this._world.sky?.starDensity ?? 1;
+    const cloudiness = this._world.sky?.cloudiness ?? 0.22;
+
+    for (let i = 0; i < Math.round(420 * starDensity); i++) {
       this._stars.push({
         x: rnd(),
         y: Math.pow(rnd(), 1.35) * 0.72,
@@ -106,7 +275,7 @@ export class WorldRenderer {
         y: 0.06 + rnd() * 0.3,
         scale: 0.7 + rnd() * 1.5,
         speed: 0.0016 + rnd() * 0.0042,
-        alpha: 0.16 + rnd() * 0.3,
+        alpha: (0.16 + rnd() * 0.3) * (0.6 + cloudiness),
         thickness: 0.018 + rnd() * 0.05,
       });
     }
@@ -128,9 +297,15 @@ export class WorldRenderer {
       this._poles.push({ x: 0.06 + i * 0.115 + (rnd() - 0.5) * 0.02, h: 0.1 + rnd() * 0.022 });
     }
 
-    this._treesFar = this._scatterForest(3101, 118, 0.028, 0.05, 0.09, 0.028);
-    this._treesMid = this._scatterForest(7717, 66, 0.055, 0.105, 0.16, 0.02);
-    this._treesNear = this._scatterForest(4409, 15, 0.16, 0.3, 0.34, 0.05);
+    // Forest seeds are offset from the world seed so a different world produces a
+    // visibly different tree line, not just a different palette.
+    const d = this._seed;
+    const dens = this._world.terrain.forestDensity ?? [1, 1, 1];
+    const scale = (n: number, m: number) => Math.max(0, Math.round(n * m));
+
+    this._treesFar = this._scatterForest(d + 3101, scale(118, dens[0]), 0.028, 0.05, 0.09, 0.028);
+    this._treesMid = this._scatterForest(d + 7717, scale(66, dens[1]), 0.055, 0.105, 0.16, 0.02);
+    this._treesNear = this._scatterForest(d + 4409, scale(15, dens[2]), 0.16, 0.3, 0.34, 0.05);
   }
 
   private _scatterForest(
@@ -175,16 +350,152 @@ export class WorldRenderer {
     });
   }
 
+  /**
+   * Renders the scene into an offscreen buffer at `renderScale` of the display
+   * resolution, then blits it up. This decouples the cost of drawing from the
+   * cost of compositing, so a weak GPU can be given a cheaper frame without the
+   * wallpaper being letterboxed or resized.
+   */
+  private _ensureBuffer(): void {
+    if (!this._canvas.width || !this._canvas.height) return;
+    const bw = Math.max(2, Math.round(this._canvas.width * this._renderScale));
+    const bh = Math.max(2, Math.round(this._canvas.height * this._renderScale));
+    if (!this._buffer) {
+      this._buffer = document.createElement('canvas');
+      this._bctx = this._buffer.getContext('2d', { alpha: false })!;
+    }
+    if (this._buffer.width !== bw || this._buffer.height !== bh) {
+      this._buffer.width = bw;
+      this._buffer.height = bh;
+    }
+  }
+
+  /**
+   * Adapts render scale to hold a frame budget. A wallpaper that stutters is
+   * worse than one that is very slightly soft, so we trade resolution for frame
+   * time and only climb back up once there is headroom.
+   */
+  private _adaptQuality(frameMs: number): void {
+    if (this._qualityLocked) return;
+    this._frameAccum += frameMs;
+    this._frameSamples++;
+    if (this._frameSamples < 45) return;
+
+    const avg = this._frameAccum / this._frameSamples;
+    this._frameAccum = 0;
+    this._frameSamples = 0;
+
+    const before = this._renderScale;
+    if (avg > this._budgetMs * 1.15) {
+      this._renderScale = Math.max(0.5, this._renderScale - 0.1);
+    } else if (avg < this._budgetMs * 0.6) {
+      this._renderScale = Math.min(1, this._renderScale + 0.05);
+    }
+    if (before !== this._renderScale) {
+      this._ensureBuffer();
+      for (const fn of this._qualityListeners) fn(this._renderScale, avg);
+    }
+  }
+
+  /** Pins the render scale, disabling automatic adaptation. */
+  setRenderScale(scale: number | null): void {
+    if (scale === null) {
+      this._qualityLocked = false;
+      return;
+    }
+    this._qualityLocked = true;
+    this._renderScale = Math.max(0.4, Math.min(1, scale));
+    this._ensureBuffer();
+  }
+
+  getRenderScale(): number {
+    return this._renderScale;
+  }
+
+  onQualityChange(fn: (scale: number, frameMs: number) => void): () => void {
+    this._qualityListeners.push(fn);
+    return () => {
+      this._qualityListeners = this._qualityListeners.filter((f) => f !== fn);
+    };
+  }
+
   resize(w: number, h: number): void {
     this._dpr = Math.min(window.devicePixelRatio || 1, 2);
     this._w = w;
     this._h = h;
     this._canvas.width = Math.round(w * this._dpr);
     this._canvas.height = Math.round(h * this._dpr);
+    this._ensureBuffer();
   }
 
   setWeather(w: WeatherState): void {
     this._weather = w;
+  }
+
+  setStyle(style: RenderStyle): void {
+    this._style = style;
+  }
+
+  /**
+   * Swaps the active world. Worlds are pure data, so this re-parameterises the
+   * renderer rather than reloading anything. Tree scatter is reseeded from the
+   * world seed so each world gets a distinct forest layout.
+   */
+  setWorld(world: WorldDefinition): void {
+    this._world = world;
+    this._seed = world.terrain.seed;
+    this._buildScatter();
+  }
+
+  getWorld(): WorldDefinition {
+    return this._world;
+  }
+
+  private _ridges(): [RGB, RGB, RGB] {
+    return this._world.palette?.ridges ?? [TERRAIN_FAR, TERRAIN_MID, TERRAIN_NEAR];
+  }
+
+  private _forestColors(): [RGB, RGB, RGB] {
+    return this._world.palette?.forest ?? [FOREST_FAR, FOREST_MID, FOREST_NEAR];
+  }
+
+  private _haze(): RGB {
+    return this._world.palette?.haze ?? HAZE_DEFAULT;
+  }
+
+  private _groundColor(): RGB {
+    return this._world.palette?.ground ?? GROUND_DEFAULT;
+  }
+
+  private _roadColor(): RGB {
+    return this._world.palette?.road ?? ROAD_DEFAULT;
+  }
+
+  /**
+   * Detail contrast floor.
+   *
+   * `ambient` is a light level, and it falls to 0.06 after dusk. It was being
+   * used for two different jobs: how much light there is, and how much
+   * contrast a surface shows. At night the second job collapsed to nothing, so
+   * every blade, crack, pebble and tide pool faded out and left a dead slab
+   * across the bottom of the frame.
+   *
+   * Light and contrast are separate quantities. A moonlit field is dim but
+   * still clearly differentiated, so detail rides on a floor instead of
+   * following the light all the way down.
+   */
+  private _detail(grade: SkyGrade): number {
+    return Math.max(grade.ambient, 0.3);
+  }
+
+  // Scales all ambient animation (drift, twinkle, fog, motes). Used to honour
+  // the OS reduced-motion preference on a surface that runs for hours.
+  setMotionScale(scale: number): void {
+    this._motionScale = Math.max(0, Math.min(1, scale));
+  }
+
+  setHighContrast(on: boolean): void {
+    this._highContrast = on;
   }
 
   addAnomaly(a: AnomalyVisual): void {
@@ -194,6 +505,10 @@ export class WorldRenderer {
 
   removeAnomaly(type: AnomalyKind): void {
     this._anomalies = this._anomalies.filter((a) => a.type !== type);
+  }
+
+  getActiveAnomalies(): AnomalyKind[] {
+    return this._anomalies.map((a) => a.type);
   }
 
   getActiveAnomaly(type: AnomalyKind): AnomalyVisual | undefined {
@@ -219,11 +534,19 @@ export class WorldRenderer {
     const now = performance.now();
     const dt = this._last === 0 ? 16.7 : Math.min(50, now - this._last);
     this._last = now;
-    this._t += dt / 1000;
+    this._t += (dt / 1000) * this._motionScale;
+
+    // The scene is drawn into the reduced-resolution buffer, then blitted to the
+    // display canvas. At renderScale 1 this is a straight copy.
+    this._ensureBuffer();
+    const scale = this._renderScale * this._dpr;
+    this._ctx = this._bctx!;
+    this._ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
 
     const g = this._ctx;
     g.save();
-    g.scale(this._dpr, this._dpr);
+    g.scale(scale, scale);
 
     const hour = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
     const grade = gradeForHour(hour);
@@ -243,11 +566,8 @@ export class WorldRenderer {
     this._drawHazeBands(grade);
     this._drawForestFar();
     this._drawGround(grade);
-    this._drawPolesAndWires(grade);
-    this._drawObservatory(grade);
-    this._drawRadioTower(grade);
+    this._drawStructures(grade);
     this._drawForestMid();
-    this._drawCabin(grade);
     this._drawFog(grade);
     this._drawForestNear();
     this._drawMotes(grade);
@@ -255,11 +575,25 @@ export class WorldRenderer {
     this._drawMeteor();
     this._drawBolt();
     this._drawAnomalyOverlays();
-    this._drawGrade(grade);
-    this._drawVignette();
-    this._drawGrain();
+    if (this._style === 'painterly') {
+      this._drawGrade(grade);
+      this._drawVignette();
+      this._drawGrain();
+    } else {
+      this._applyStylePost();
+    }
 
     g.restore();
+
+    // Blit the buffer up to the display canvas, restoring the display context
+    // for the next frame.
+    const out = this._outCtx!;
+    out.setTransform(1, 0, 0, 1, 0, 0);
+    out.imageSmoothingEnabled = true;
+    out.imageSmoothingQuality = 'high';
+    out.drawImage(this._buffer!, 0, 0, this._canvas.width, this._canvas.height);
+    this._ctx = out;
+    this._adaptQuality(performance.now() - now);
   }
 
   private _pruneAnomalies(): void {
@@ -276,14 +610,56 @@ export class WorldRenderer {
   }
 
   private _drawSky(grade: SkyGrade): void {
+    if (this._style === 'painterly') {
+      this._drawSkyGradient(grade);
+    } else {
+      this._drawSkyFlat(grade);
+    }
+  }
+
+  private _drawSkyGradient(grade: SkyGrade): void {
     const g = this._ctx;
-    const grad = g.createLinearGradient(0, 0, 0, this._h);
-    grad.addColorStop(0, css(grade.skyTop));
-    grad.addColorStop(0.52, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.55)));
-    grad.addColorStop(0.78, css(grade.skyHorizon));
-    grad.addColorStop(1, css(shade(grade.skyHorizon, -0.22)));
-    g.fillStyle = grad;
+    const grd = g.createLinearGradient(0, 0, 0, this._h);
+    grd.addColorStop(0, css(grade.skyTop));
+    grd.addColorStop(0.5, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.5)));
+    grd.addColorStop(0.78, css(grade.skyHorizon));
+    grd.addColorStop(0.88, css(shade(grade.skyHorizon, 0.06)));
+    grd.addColorStop(1, css(shade(grade.skyHorizon, -0.3)));
+    g.fillStyle = grd;
     g.fillRect(0, 0, this._w, this._h);
+  }
+
+  private _drawSkyFlat(grade: SkyGrade): void {
+    const g = this._ctx;
+    // A real gradient, not a stack of hard strips. Six visible steps across a
+    // smooth ramp is exactly what a broken gradient looks like, which is what
+    // the banded version read as.
+    const horizonY = this._h * (this._world.terrain.groundY ?? 0.7) + 2;
+    const grd = g.createLinearGradient(0, 0, 0, horizonY);
+    grd.addColorStop(0, css(grade.skyTop));
+    grd.addColorStop(0.34, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.22)));
+    grd.addColorStop(0.62, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.6)));
+    grd.addColorStop(0.84, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.9)));
+    grd.addColorStop(1, css(grade.skyHorizon));
+    g.fillStyle = grd;
+    g.fillRect(0, 0, this._w, horizonY);
+    this._ditherRegion(0, 0, this._w, horizonY, grade);
+  }
+
+  /** Overlays the cached dither tile to dissolve gradient contouring. */
+  private _ditherRegion(x: number, y: number, w: number, h: number, grade: SkyGrade): void {
+    if (this._style === 'painterly') return;
+    if (!this._dither) this._buildDither();
+    const g = this._ctx;
+    g.save();
+    g.globalAlpha = 0.05 + (1 - grade.ambient) * 0.05;
+    g.globalCompositeOperation = 'overlay';
+    const pat = g.createPattern(this._dither!, 'repeat');
+    if (pat) {
+      g.fillStyle = pat;
+      g.fillRect(x, y, w, h);
+    }
+    g.restore();
   }
 
   private _drawStars(grade: SkyGrade): void {
@@ -380,10 +756,19 @@ export class WorldRenderer {
     const ph = moonPhase(date);
     const lit = Math.cos(ph * Math.PI * 2);
     if (lit < 0.985) {
+      // Soft terminator. A hard-edged destination-out bite read as a
+      // rendering fault sitting on top of the moon rather than as a phase,
+      // because the carved disc was slightly wider than the moon itself.
       const off = lit * r * 1.12;
+      const sr = r * 1.2;
+      const sg = g.createRadialGradient(p.x + off, p.y, 0, p.x + off, p.y, sr);
+      sg.addColorStop(0, 'rgba(0,0,0,1)');
+      sg.addColorStop(0.7, 'rgba(0,0,0,1)');
+      sg.addColorStop(1, 'rgba(0,0,0,0)');
       g.globalCompositeOperation = 'destination-out';
+      g.fillStyle = sg;
       g.beginPath();
-      g.ellipse(p.x + off, p.y, r * 1.06, r * 1.02, 0, 0, Math.PI * 2);
+      g.arc(p.x + off, p.y, sr, 0, Math.PI * 2);
       g.fill();
     }
 
@@ -470,14 +855,23 @@ export class WorldRenderer {
 
   private _drawRidges(grade: SkyGrade): void {
     const g = this._ctx;
+    const T = this._world.terrain;
+    const cols = this._ridges();
+    const baseY = T.ridgeBaseY ?? [0.665, 0.688, 0.712];
+    const amp = T.ridgeAmp ?? [0.215, 0.15, 0.085];
+    const freq = T.ridgeFreq ?? [0.0019, 0.0033, 0.0056];
+    const presence = T.ridgePresence ?? [1, 1, 1];
+    const d = T.seed;
     const layers: Array<{ base: RGB; depth: number; amp: number; baseY: number; freq: number; seed: number; oct: number }> = [
-      { base: TERRAIN_FAR, depth: 0.76, amp: 0.215, baseY: 0.665, freq: 0.0019, seed: 1201, oct: 5 },
-      { base: TERRAIN_MID, depth: 0.52, amp: 0.15, baseY: 0.688, freq: 0.0033, seed: 3307, oct: 5 },
-      { base: TERRAIN_NEAR, depth: 0.28, amp: 0.085, baseY: 0.712, freq: 0.0056, seed: 5501, oct: 6 },
+      { base: cols[0], depth: 0.76, amp: amp[0], baseY: baseY[0], freq: freq[0], seed: d + 1201, oct: 5 },
+      { base: cols[1], depth: 0.52, amp: amp[1], baseY: baseY[1], freq: freq[1], seed: d + 3307, oct: 5 },
+      { base: cols[2], depth: 0.28, amp: amp[2], baseY: baseY[2], freq: freq[2], seed: d + 5501, oct: 6 },
     ];
 
-    for (const L of layers) {
-      const col = mixRgb(mixRgb(L.base, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.55), grade.haze, L.depth);
+    for (let li = 0; li < layers.length; li++) {
+      const L = layers[li];
+      if (presence[li] <= 0.001) continue;
+      const col = mixRgb(mixRgb(L.base, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.55), this._haze(), L.depth * presence[li]);
       const step = 4;
       g.beginPath();
       g.moveTo(0, this._h);
@@ -489,6 +883,31 @@ export class WorldRenderer {
       }
       g.lineTo(this._w, this._h);
       g.closePath();
+
+      const flat = this._style !== 'painterly';
+      if (flat) {
+        g.fillStyle = css(col);
+        g.fill();
+        // The crest rim is a flat-illustration affordance. Under riso the
+        // per-channel offset turns it into coloured fringing on every ridge.
+        if (this._style === 'flat') {
+          g.save();
+          g.clip();
+          g.strokeStyle = css(shade(col, 0.22), 0.5);
+          g.lineWidth = 1.5;
+          g.beginPath();
+          for (let px = 0; px <= this._w; px += step) {
+            const r = ridged1D(px * L.freq, L.seed, L.oct);
+            const r2 = fbm1D(px * L.freq * 2.6, L.seed + 17, 3) * 0.28;
+            const y = L.baseY * this._h - (r * 0.78 + r2) * L.amp * this._h;
+            if (px === 0) g.moveTo(px, y);
+            else g.lineTo(px, y);
+          }
+          g.stroke();
+          g.restore();
+        }
+        continue;
+      }
 
       const grd = g.createLinearGradient(0, L.baseY * this._h - L.amp * this._h, 0, this._h);
       grd.addColorStop(0, css(shade(col, 0.06)));
@@ -506,16 +925,20 @@ export class WorldRenderer {
 
   private _drawHazeBands(grade: SkyGrade): void {
     const g = this._ctx;
-    const horizon = this._h * 0.63;
+    // Anchored to the real ground line and much softer than before. The old
+    // stack of three narrow bands sat at a hardcoded height and read as a lit
+    // rectangle laid over the scene rather than as air.
+    const horizon = this._h * (this._world.terrain.groundY ?? 0.7) - this._h * 0.12;
+    const d = this._detail(grade);
     for (let i = 0; i < 3; i++) {
-      const y = horizon - this._h * (0.02 + i * 0.045);
-      const hgt = this._h * (0.03 + i * 0.02);
-      const grd = g.createLinearGradient(0, y - hgt, 0, y + hgt);
+      const spread = this._h * (0.05 + i * 0.055);
+      const y = horizon - this._h * (0.01 + i * 0.05);
+      const grd = g.createLinearGradient(0, y - spread, 0, y + spread * 0.8);
       grd.addColorStop(0, css(grade.haze, 0));
-      grd.addColorStop(0.5, css(grade.haze, 0.3 - i * 0.07));
+      grd.addColorStop(0.45, css(grade.haze, (0.17 - i * 0.045) * d));
       grd.addColorStop(1, css(grade.haze, 0));
       g.fillStyle = grd;
-      g.fillRect(0, y - hgt, this._w, hgt * 2);
+      g.fillRect(0, y - spread, this._w, spread * 1.8);
     }
   }
 
@@ -536,7 +959,7 @@ export class WorldRenderer {
     g.fillStyle = css(shade(col, -0.42));
     g.fillRect(x - h * 0.014, baseY - h * 0.14, h * 0.028, h * 0.15);
 
-    const body = mixRgb(col, { r: 255, g: 255, b: 255 }, 0.045 * this._grade.ambient);
+    const body = mixRgb(col, { r: 255, g: 255, b: 255 }, 0.1 * this._detail(this._grade));
     g.fillStyle = css(body);
 
     const pt = (side: number, t: number): { x: number; y: number } => {
@@ -614,36 +1037,45 @@ export class WorldRenderer {
     base: RGB, depth: number, baseYFrac: number, detail: boolean, amp: number,
     clearing?: { x: number; halfW: number }
   ): void {
-    const ambient = this._grade.ambient;
+    const ambient = Math.max(this._grade.ambient, 0.24);
     const col = mixRgb(
       mixRgb(base, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.5),
-      this._grade.haze,
+      this._haze(),
       depth
     );
     const baseY = this._h * baseYFrac;
+    const detailAmt = this._detail(this._grade);
 
     for (const t of trees) {
       if (clearing && Math.abs(t.x - clearing.x) < clearing.halfW) continue;
       const n = fbm1D(t.x * 7.3, 4409, 3);
       const y = baseY - (n - 0.5) * amp * this._h;
       const px = t.x * this._w + this._mouse.px * (1 - depth) * 16;
-      this._drawPine(px, y, t.h * this._h, col, t.s, detail);
+      // Every tree gets its own slight value. A treeline where all the trees
+      // share one flat tone reads as wallpaper stencilling, and it is the
+      // single thing most likely to break the illusion of a real place.
+      const v = fbm1D(t.s * 1.37, 7717, 2);
+      const tone = mixRgb(col, v > 0.5 ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 }, Math.abs(v - 0.5) * 0.5 * detailAmt);
+      this._drawPine(px, y, t.h * this._h, tone, t.s, detail);
     }
   }
 
   private _drawForestFar(): void {
-    this._drawForestBand(this._treesFar, FOREST_FAR, 0.66, 0.668, false, 0.016);
+    const c = this._forestColors();
+    this._drawForestBand(this._treesFar, c[0], 0.66, 0.668, false, 0.016);
   }
 
   private _drawForestMid(): void {
-    this._drawForestBand(this._treesMid, FOREST_MID, 0.36, 0.706, true, 0.022, {
+    const c = this._forestColors();
+    this._drawForestBand(this._treesMid, c[1], 0.36, 0.706, true, 0.022, {
       x: 0.2,
       halfW: 0.052,
     });
   }
 
   private _drawForestNear(): void {
-    this._drawForestBand(this._treesNear, FOREST_NEAR, 0.05, 0.87, true, 0.03, {
+    const c = this._forestColors();
+    this._drawForestBand(this._treesNear, c[2], 0.05, 0.87, true, 0.03, {
       x: 0.2,
       halfW: 0.07,
     });
@@ -705,6 +1137,372 @@ export class WorldRenderer {
 
   private h0(frac: number): number {
     return this._h * frac;
+  }
+
+  /**
+   * Draws the world's declared structures in declaration order, so world authors
+   * control layering by ordering. Existing landmarks keep their original
+   * geometry and are repositioned with a canvas transform rather than being
+   * rewritten, which keeps the diff small and the silhouettes consistent.
+   */
+  private _drawStructures(grade: SkyGrade): void {
+    for (const s of this._world.structures ?? []) {
+      const anchor = STRUCTURE_ANCHORS[s.kind];
+      if (!anchor) continue;
+      const g = this._ctx;
+      const defX = anchor.x * this._w;
+      const defY = anchor.y * this._h;
+      const sc = s.scale ?? 1;
+      g.save();
+      g.translate(s.x * this._w, (s.y ?? anchor.y) * this._h);
+      g.scale(sc, sc);
+      g.translate(-defX, -defY);
+      this._drawStructure(s, grade);
+      g.restore();
+    }
+  }
+
+  private _drawStructure(s: WorldStructure, grade: SkyGrade): void {
+    const g = this._ctx;
+    const ambient = grade.ambient;
+    const lit = s.lit ?? false;
+    const light = s.lightColor ?? { r: 255, g: 200, b: 130 };
+    const groundY = this._h * (this._world.terrain.groundY ?? 0.7);
+
+    // Structures read as silhouettes, not as lit objects. Letting ambient lift
+    // them toward their base tone made a mid-grey lighthouse disappear against a
+    // bright golden sky, so the ambient term is damped and a darkness floor is
+    // always applied. A landmark must stay legible at every hour.
+    const body = mixRgb(
+      mixRgb(
+        mixRgb(STRUCTURE_TONE[s.kind] ?? { r: 70, g: 66, b: 64 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.35),
+        { r: 0, g: 0, b: 0 },
+        0.22
+      ),
+      this._haze(),
+      0.14
+    );
+    const dark = shade(body, -0.34);
+
+    const glow = (x: number, y: number, r: number, c: { r: number; g: number; b: number }, a: number) => {
+      if (!lit || ambient > 0.42) return;
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, css(c, a));
+      grd.addColorStop(1, css(c, 0));
+      g.fillStyle = grd;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    };
+
+    switch (s.kind) {
+      case 'cabin':
+        this._drawCabin(grade);
+        return;
+      case 'observatory':
+        this._drawObservatory(grade);
+        return;
+      case 'radio-tower':
+        this._drawRadioTower(grade);
+        return;
+      case 'pylon-run':
+        this._drawPolesAndWires(grade);
+        return;
+      case 'lighthouse': {
+        const h = this._h * 0.19;
+        const wTop = this._h * 0.011;
+        const wBase = this._h * 0.019;
+        const y0 = groundY + this._h * 0.01;
+        g.fillStyle = css(body);
+        g.beginPath();
+        g.moveTo(this._w * 0.82 - wBase, y0);
+        g.lineTo(this._w * 0.82 - wTop, y0 - h);
+        g.lineTo(this._w * 0.82 + wTop, y0 - h);
+        g.lineTo(this._w * 0.82 + wBase, y0);
+        g.closePath();
+        g.fill();
+        // Two pale bands on a dark tower: the classic reason a lighthouse reads
+        // as a lighthouse at silhouette distance.
+        g.fillStyle = css(shade(body, 0.55));
+        for (let i = 1; i <= 2; i++) {
+          const yy = y0 - (h * i) / 3;
+          const t = i / 3;
+          const hw = wBase + (wTop - wBase) * t;
+          g.fillRect(this._w * 0.82 - hw, yy, hw * 2, h * 0.075);
+        }
+        // Lit edge on the shaded side keeps it separated from a pale sky.
+        g.fillStyle = css(shade(dark, -0.3), 0.8);
+        g.beginPath();
+        g.moveTo(this._w * 0.82 + wTop * 0.15, y0 - h);
+        g.lineTo(this._w * 0.82 + wTop, y0 - h);
+        g.lineTo(this._w * 0.82 + wBase, y0);
+        g.lineTo(this._w * 0.82 + wBase * 0.2, y0);
+        g.closePath();
+        g.fill();
+        g.fillStyle = css(lit ? light : dark);
+        g.fillRect(this._w * 0.82 - wTop * 1.5, y0 - h - this._h * 0.008, wTop * 3, this._h * 0.008);
+        glow(this._w * 0.82, y0 - h - this._h * 0.004, this._h * 0.075, light, 0.5);
+        return;
+      }
+      case 'well': {
+        const w = this._w * 0.016;
+        const h = this._h * 0.026;
+        const x = this._w * 0.36;
+        const y = groundY + this._h * 0.055;
+        g.fillStyle = css(dark);
+        g.fillRect(x - w, y - h, w * 2, h);
+        g.fillStyle = css(body);
+        g.beginPath();
+        g.moveTo(x - w * 1.3, y - h);
+        g.lineTo(x, y - h - h * 0.8);
+        g.lineTo(x + w * 1.3, y - h);
+        g.closePath();
+        g.fill();
+        g.fillStyle = css(shade(dark, -0.3));
+        g.fillRect(x - w * 0.25, y - h - h * 0.75, w * 0.5, h * 0.75);
+        return;
+      }
+      case 'ruin': {
+        const x = this._w * 0.24;
+        const y = groundY + this._h * 0.05;
+        const h = this._h * 0.05;
+        g.fillStyle = css(body);
+        g.fillRect(x - this._w * 0.022, y - h, this._w * 0.044, h);
+        // Broken top edge: this is a ruin, not a building.
+        g.clearRect(x - this._w * 0.022, y - h, this._w * 0.014, h * 0.22);
+        g.clearRect(x + this._w * 0.004, y - h, this._w * 0.018, h * 0.14);
+        g.fillStyle = css(dark);
+        g.fillRect(x - this._w * 0.006, y - h * 0.55, this._w * 0.012, h * 0.55);
+        return;
+      }
+      case 'dishes': {
+        // Each dish needs a visible mast and rim, otherwise it reads as a puddle
+        // lying on the ground rather than a parabolic antenna.
+        for (const [ox, sc, tilt] of [[0.752, 1, -0.55], [0.786, 0.74, -0.42], [0.812, 0.52, -0.3]] as const) {
+          const x = this._w * ox;
+          const y = groundY + this._h * 0.055;
+          const r = this._h * 0.028 * sc;
+
+          // Lattice mast.
+          g.strokeStyle = css(dark);
+          g.lineWidth = Math.max(1, this._h * 0.0018 * sc);
+          g.beginPath();
+          g.moveTo(x - r * 0.35, y);
+          g.lineTo(x, y - r * 1.5);
+          g.lineTo(x + r * 0.35, y);
+          g.stroke();
+          g.beginPath();
+          g.moveTo(x - r * 0.2, y - r * 0.55);
+          g.lineTo(x + r * 0.2, y - r * 0.55);
+          g.moveTo(x - r * 0.1, y - r * 1.05);
+          g.lineTo(x + r * 0.1, y - r * 1.05);
+          g.stroke();
+
+          // Dish: back plate, then a bright rim arc on the lit side.
+          const cx = x;
+          const cy = y - r * 1.5;
+          g.fillStyle = css(body);
+          g.beginPath();
+          g.ellipse(cx, cy, r, r * 0.9, tilt, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = css(shade(body, -0.28));
+          g.beginPath();
+          g.ellipse(cx + r * 0.14, cy + r * 0.1, r * 0.66, r * 0.58, tilt, 0, Math.PI * 2);
+          g.fill();
+          g.strokeStyle = css(shade(body, 0.3));
+          g.lineWidth = Math.max(1, this._h * 0.0014 * sc);
+          g.beginPath();
+          g.ellipse(cx, cy, r, r * 0.9, tilt, 0, Math.PI * 2);
+          g.stroke();
+          // Feed horn on a tripod.
+          g.fillStyle = css(dark);
+          g.fillRect(cx + r * 0.3, cy - r * 0.1, r * 0.34, r * 0.16);
+        }
+        return;
+      }
+      case 'cairn': {
+        // A stacked stone marker: the classic wayfinding pile on open moor.
+        const x = this._w * 0.26;
+        const y = groundY + this._h * 0.045;
+        const rnd = mulberry32(Math.round(s.x * 1000) + 29);
+        let yy = y;
+        let w = this._h * 0.026;
+        for (let i = 0; i < 6; i++) {
+          const hh = this._h * (0.008 - i * 0.0007);
+          g.fillStyle = css(shade(body, (rnd() - 0.5) * 0.36));
+          g.beginPath();
+          g.moveTo(x - w, yy);
+          g.lineTo(x - w * 0.72, yy - hh);
+          g.lineTo(x + w * 0.68, yy - hh);
+          g.lineTo(x + w, yy);
+          g.closePath();
+          g.fill();
+          // Lit upper edge.
+          g.fillStyle = css(shade(body, 0.22), 0.8);
+          g.fillRect(x - w * 0.7, yy - hh, w * 1.4, Math.max(1, this._h * 0.0012));
+          yy -= hh;
+          w *= 0.82;
+        }
+        // Shadow at the base.
+        g.fillStyle = css(shade(body, -0.45), 0.3);
+        g.beginPath();
+        g.ellipse(x + this._h * 0.006, y, this._h * 0.03, this._h * 0.005, 0, 0, Math.PI * 2);
+        g.fill();
+        return;
+      }
+      case 'butte': {
+        // A mesa, not a box: near-vertical walls, a flat cap, visible strata and
+        // a talus skirt where the wall has fallen away.
+        const x = this._w * 0.08;
+        const y = groundY + this._h * 0.04;
+        const h = this._h * 0.13;
+        const w = this._w * 0.055;
+        const cap = w * 0.82;
+        g.fillStyle = css(mixRgb(body, dark, 0.35));
+        g.beginPath();
+        g.moveTo(x - w, y);
+        g.lineTo(x - w * 0.92, y - h * 0.18);
+        g.lineTo(x - cap, y - h);
+        g.lineTo(x + cap, y - h);
+        g.lineTo(x + w * 0.92, y - h * 0.2);
+        g.lineTo(x + w, y);
+        g.closePath();
+        g.fill();
+
+        // Strata: horizontal bands read as sedimentary rock.
+        g.save();
+        g.beginPath();
+        g.moveTo(x - w, y);
+        g.lineTo(x - w * 0.92, y - h * 0.18);
+        g.lineTo(x - cap, y - h);
+        g.lineTo(x + cap, y - h);
+        g.lineTo(x + w * 0.92, y - h * 0.2);
+        g.lineTo(x + w, y);
+        g.closePath();
+        g.clip();
+        for (let i = 0; i < 5; i++) {
+          const yy = y - h * (0.12 + i * 0.19);
+          g.fillStyle = css(shade(body, (i % 2 ? 0.12 : -0.16)), 0.55);
+          g.fillRect(x - w, yy, w * 2, h * 0.07);
+        }
+        // Shaded right face gives the form volume.
+        g.fillStyle = css(shade(dark, -0.1), 0.5);
+        g.beginPath();
+        g.moveTo(x + w * 0.18, y);
+        g.lineTo(x + cap * 0.2, y - h);
+        g.lineTo(x + cap, y - h);
+        g.lineTo(x + w * 0.92, y - h * 0.2);
+        g.lineTo(x + w, y);
+        g.closePath();
+        g.fill();
+        g.restore();
+
+        // Lit cap edge.
+        g.fillStyle = css(shade(body, 0.24));
+        g.fillRect(x - cap, y - h - this._h * 0.002, cap * 2, this._h * 0.004);
+
+        // Talus.
+        const rnd = mulberry32(Math.round(s.x * 10000) + 3);
+        for (let i = 0; i < 7; i++) {
+          const rx = x + (rnd() - 0.5) * w * 2.5;
+          const rr = this._h * (0.004 + rnd() * 0.008);
+          g.fillStyle = css(shade(body, -0.2 + rnd() * 0.2));
+          g.beginPath();
+          g.moveTo(rx - rr, y + this._h * 0.004);
+          g.lineTo(rx - rr * 0.4, y - rr);
+          g.lineTo(rx + rr * 0.6, y - rr * 0.7);
+          g.lineTo(rx + rr, y + this._h * 0.004);
+          g.closePath();
+          g.fill();
+        }
+        return;
+      }
+      case 'rock-field':
+      case 'snowbank': {
+        // Angular boulders with a lit top face and a shadow, so they read as rock
+        // rather than as flat ellipses lying on the ground.
+        const snow = s.kind === 'snowbank';
+        const rnd = mulberry32(Math.round(s.x * 10000) + 7);
+        const col = snow ? shade(body, 0.3) : body;
+        const sorted: Array<{ d: number; v: number }> = [];
+        for (let i = 0; i < 11; i++) sorted.push({ d: rnd(), v: rnd() });
+        sorted.sort((a, b) => a.d - b.d);
+
+        for (const item of sorted) {
+          const rx = this._w * (s.x + (item.d - 0.5) * 0.18);
+          const t = item.d;
+          const ry = groundY + this._h * (0.008 + t * 0.055);
+          const rr = this._h * (snow ? 0.007 : 0.013) * (0.45 + t);
+          const flat = snow ? 0.4 : 1;
+
+          g.fillStyle = css(shade(col, -0.26));
+          g.beginPath();
+          g.moveTo(rx - rr, ry + rr * 0.22 * flat);
+          g.lineTo(rx - rr * 0.5, ry - rr * 0.85 * flat);
+          g.lineTo(rx + rr * 0.35, ry - rr * flat);
+          g.lineTo(rx + rr, ry - rr * 0.1 * flat);
+          g.lineTo(rx + rr * 0.7, ry + rr * 0.24 * flat);
+          g.closePath();
+          g.fill();
+
+          // Lit facet.
+          g.fillStyle = css(shade(col, 0.18));
+          g.beginPath();
+          g.moveTo(rx - rr * 0.5, ry - rr * 0.85 * flat);
+          g.lineTo(rx + rr * 0.35, ry - rr * flat);
+          g.lineTo(rx + rr * 0.1, ry - rr * 0.3 * flat);
+          g.closePath();
+          g.fill();
+
+          // Contact shadow anchors it to the ground.
+          g.fillStyle = css(shade(col, -0.45), 0.35);
+          g.beginPath();
+          g.ellipse(rx + rr * 0.2, ry + rr * 0.26 * flat, rr * 1.1, rr * 0.2 * flat, 0, 0, Math.PI * 2);
+          g.fill();
+        }
+        return;
+      }
+      case 'reed-bank': {
+        const rnd = mulberry32(Math.round(s.x * 10000) + 13);
+        g.strokeStyle = css(shade(body, 0.05));
+        g.lineWidth = Math.max(0.8, this._h * 0.0011);
+        for (let i = 0; i < 70; i++) {
+          const rx = this._w * (s.x + (rnd() - 0.5) * 0.22);
+          const ry = groundY + this._h * (0.005 + rnd() * 0.03);
+          const rh = this._h * (0.014 + rnd() * 0.022);
+          g.beginPath();
+          g.moveTo(rx, ry);
+          g.quadraticCurveTo(rx + (rnd() - 0.5) * 4, ry - rh * 0.6, rx + (rnd() - 0.5) * 8, ry - rh);
+          g.stroke();
+        }
+        return;
+      }
+      case 'fence-line': {
+        const x0 = this._w * (s.x - 0.09);
+        const y = groundY + this._h * 0.035;
+        g.strokeStyle = css(dark);
+        g.lineWidth = Math.max(1, this._h * 0.0013);
+        g.beginPath();
+        g.moveTo(x0, y);
+        g.lineTo(x0 + this._w * 0.18, y - this._h * 0.006);
+        g.stroke();
+        for (let i = 0; i <= 7; i++) {
+          const t = i / 7;
+          const px = x0 + this._w * 0.18 * t;
+          const py = y - this._h * 0.006 * t;
+          g.beginPath();
+          g.moveTo(px, py);
+          g.lineTo(px, py - this._h * 0.016);
+          g.stroke();
+        }
+        return;
+      }
+      default:
+        return;
+    }
   }
 
   private _drawCabin(grade: SkyGrade): void {
@@ -987,17 +1785,18 @@ export class WorldRenderer {
 
   private _drawGround(grade: SkyGrade): void {
     const g = this._ctx;
+    const y0 = this._h * (this._world.terrain.groundY ?? 0.7);
+    // Ground has to sit below the sky in value at every hour. The old constant
+    // left it lighter than the sky above the horizon after dark, which inverted
+    // the scene's main depth cue and made the lower third read as a hole.
+    const dark = 0.52 + (1 - grade.ambient) * 0.26;
     const base = mixRgb(
-      mixRgb({ r: 30, g: 40, b: 32 }, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.55),
-      grade.haze,
+      mixRgb(this._groundColor(), { r: 0, g: 0, b: 0 }, dark),
+      this._haze(),
       0.1
     );
-    const y0 = this._h * 0.7;
-    const grd = g.createLinearGradient(0, y0, 0, this._h);
-    grd.addColorStop(0, css(shade(base, 0.1)));
-    grd.addColorStop(0.4, css(base));
-    grd.addColorStop(1, css(shade(base, -0.42)));
-    g.fillStyle = grd;
+
+    g.save();
     g.beginPath();
     g.moveTo(0, this._h);
     for (let px = 0; px <= this._w; px += 6) {
@@ -1006,16 +1805,92 @@ export class WorldRenderer {
     }
     g.lineTo(this._w, this._h);
     g.closePath();
-    g.fill();
+    g.clip();
 
-    this._drawRoad(grade, base, y0);
+    // Every style gets a gradient. A single flat fill across the bottom third
+    // of the screen reads as an empty slab, not as ground, whatever is drawn
+    // on top of it.
+    const grd = g.createLinearGradient(0, y0, 0, this._h);
+    grd.addColorStop(0, css(shade(base, 0.16)));
+    grd.addColorStop(0.3, css(shade(base, 0.04)));
+    grd.addColorStop(1, css(shade(base, -0.26)));
+    g.fillStyle = grd;
+    g.fillRect(0, y0 - this._h * 0.03, this._w, this._h);
+
+    this._drawSoilTexture(base, grade);
+    if (this._style !== 'painterly') this._drawGroundBands(base, grade);
+    this._drawRoad(grade, base, y0, this._world.terrain.road ?? 1);
     this._drawRocks(grade);
-    this._drawGrass(grade, base);
+    this._drawGroundDetail(grade, base);
+    g.restore();
   }
 
-  private _drawRoad(grade: SkyGrade, ground: RGB, y0: number): void {
+  /**
+   * Large-scale soil variation.
+   *
+   * Wide, soft patches of slightly different value give the surface a sense of
+   * material and depth. They ride on the detail floor, so the ground keeps
+   * reading as ground after dark instead of collapsing to one dead tone.
+   */
+  private _drawSoilTexture(base: RGB, grade: SkyGrade): void {
     const g = this._ctx;
-    const dirt = mixRgb(mixRgb(shade(ground, 0.06), { r: 122, g: 106, b: 86 }, 0.22 * grade.ambient), { r: 0, g: 0, b: 0 }, 0.12);
+    const rnd = mulberry32(this._seed ^ 0x5f3a);
+    const d = this._detail(grade);
+    const top = this._h * (this._world.terrain.groundY ?? 0.7);
+    for (let i = 0; i < 18; i++) {
+      const px = rnd() * this._w;
+      const py = top + Math.pow(rnd(), 0.72) * (this._h - top);
+      const rx = Math.max(1, this._w * (0.07 + rnd() * 0.2));
+      const ry = Math.max(1, this._h * (0.018 + rnd() * 0.05) * (0.55 + (py - top) / Math.max(1, this._h - top)));
+      const col = shade(base, (rnd() - 0.44) * 0.36 * d);
+      g.save();
+      g.translate(px, py);
+      g.scale(1, ry / rx);
+      const grd = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+      grd.addColorStop(0, css(col, 0.46));
+      grd.addColorStop(0.6, css(col, 0.18));
+      grd.addColorStop(1, css(col, 0));
+      g.fillStyle = grd;
+      g.beginPath();
+      g.arc(0, 0, rx, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+  }
+
+  private _drawGroundBands(base: RGB, grade: SkyGrade): void {
+    const g = this._ctx;
+    const d = this._detail(grade);
+    // Alternating light and dark. The old values were all near-identical and
+    // the deltas were vanishingly small, so the bands were invisible and the
+    // ground stayed a flat slab.
+    const layers: Array<{ y: number; freq: number; seed: number; amp: number; delta: number }> = [
+      { y: 0.762, freq: 0.0022, seed: 4409, amp: 0.022, delta: 0.3 },
+      { y: 0.836, freq: 0.0034, seed: 7717, amp: 0.03, delta: -0.26 },
+      { y: 0.918, freq: 0.0046, seed: 9931, amp: 0.026, delta: 0.22 },
+      { y: 0.972, freq: 0.0061, seed: 2251, amp: 0.018, delta: -0.18 },
+    ];
+
+    for (const L of layers) {
+      g.fillStyle = css(shade(base, L.delta * d), 0.85);
+      g.beginPath();
+      g.moveTo(0, this._h);
+      for (let px = 0; px <= this._w; px += 5) {
+        const n = fbm1D(px * L.freq, L.seed, 4);
+        g.lineTo(px, L.y * this._h - (n - 0.5) * L.amp * this._h);
+      }
+      g.lineTo(this._w, this._h);
+      g.closePath();
+      g.fill();
+    }
+  }
+
+  private _drawRoad(grade: SkyGrade, ground: RGB, y0: number, presence = 1): void {
+    const g = this._ctx;
+    if (presence <= 0.01) return;
+    g.save();
+    g.globalAlpha = presence;
+    const dirt = mixRgb(mixRgb(shade(ground, 0.06), this._roadColor(), 0.22 * grade.ambient), { r: 0, g: 0, b: 0 }, 0.12);
 
     const vanishX = this._w * 0.52;
     const bottomX = this._w * 0.16;
@@ -1035,11 +1910,15 @@ export class WorldRenderer {
     for (let i = 18; i >= 0; i--) g.lineTo(r(i / 18).x, r(i / 18).y);
     g.closePath();
 
-    const grd = g.createLinearGradient(0, y0, 0, this._h);
-    grd.addColorStop(0, css(shade(dirt, -0.24)));
-    grd.addColorStop(0.45, css(dirt));
-    grd.addColorStop(1, css(shade(dirt, 0.1)));
-    g.fillStyle = grd;
+    if (this._style === 'painterly') {
+      const grd = g.createLinearGradient(0, y0, 0, this._h);
+      grd.addColorStop(0, css(shade(dirt, -0.24)));
+      grd.addColorStop(0.45, css(dirt));
+      grd.addColorStop(1, css(shade(dirt, 0.1)));
+      g.fillStyle = grd;
+    } else {
+      g.fillStyle = css(shade(dirt, 0.06));
+    }
     g.fill();
 
     g.save();
@@ -1065,6 +1944,7 @@ export class WorldRenderer {
       for (let i = 1; i <= 18; i++) g.lineTo(e(i / 18).x, e(i / 18).y);
       g.stroke();
     }
+    g.restore();
   }
 
   private _drawRocks(grade: SkyGrade): void {
@@ -1116,6 +1996,267 @@ export class WorldRenderer {
         g.beginPath();
         g.moveTo(ox, py);
         g.quadraticCurveTo(ox + sway * 0.45, py - hh * 0.58, ox + sway, py - hh);
+        g.stroke();
+      }
+    }
+  }
+
+  /**
+   * Ground detail per biome. Grass belongs to a temperate forest; drawing it on
+   * a snowfield or a salt flat is what made the alpine world read as wrong, so
+   * each biome gets the surface it should actually have.
+   */
+  private _drawGroundDetail(grade: SkyGrade, base: RGB): void {
+    switch (this._world.biome) {
+      case 'temperate-forest':
+        this._drawGrass(grade, base);
+        return;
+      case 'salt-marsh':
+        this._drawSaltFlat(grade, base);
+        return;
+      case 'alpine':
+        this._drawSnowfield(grade, base);
+        return;
+      case 'coast':
+        this._drawCoast(grade, base);
+        return;
+      case 'high-desert':
+        this._drawDryCracks(grade, base);
+        return;
+      default:
+        this._drawGrass(grade, base);
+    }
+  }
+
+  /** Standing water in tide pools, plus the polygonal salt crust around it. */
+  private _drawSaltFlat(grade: SkyGrade, base: RGB): void {
+    const g = this._ctx;
+    const y0 = this._h * (this._world.terrain.groundY ?? 0.66);
+    const rnd = mulberry32(this._seed + 4241);
+
+    // Salt crust: faint pale polygons.
+    g.strokeStyle = css(shade(base, 0.26), 0.2);
+    g.lineWidth = Math.max(0.6, this._h * 0.0009);
+    for (let i = 0; i < 90; i++) {
+      const t = Math.pow(rnd(), 0.6);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.01 + t * 0.3);
+      const r = this._h * (0.008 + t * 0.03);
+      g.beginPath();
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2;
+        const rr = r * (0.7 + rnd() * 0.5);
+        const vx = px + Math.cos(a) * rr;
+        const vy = py + Math.sin(a) * rr * 0.34;
+        if (k === 0) g.moveTo(vx, vy);
+        else g.lineTo(vx, vy);
+      }
+      g.closePath();
+      g.stroke();
+    }
+
+    // Tide pools hold the sky, so they are the one bright thing down here. They
+    // are small and biased toward the horizon: a pool near your feet would be a
+    // puddle, and a foreground full of them reads as spilled mud.
+    const sky = mixRgb(grade.skyHorizon, grade.lightColor, 0.35);
+    for (let i = 0; i < 26; i++) {
+      const t = Math.pow(rnd(), 1.7); // bias toward the horizon
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.005 + t * 0.16);
+      const rx = this._w * (0.006 + t * 0.016) * (0.5 + rnd() * 0.6);
+      const ry = rx * (0.1 + rnd() * 0.07);
+
+      g.save();
+      const grd = g.createLinearGradient(0, py - ry, 0, py + ry);
+      grd.addColorStop(0, css(mixRgb(sky, grade.haze, 0.45), 0.5));
+      grd.addColorStop(1, css(mixRgb(sky, { r: 0, g: 0, b: 0 }, 0.35), 0.62));
+      g.fillStyle = grd;
+      g.beginPath();
+      g.ellipse(px, py, rx, ry, 0, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+
+      // Bright meniscus catches the low sun.
+      g.strokeStyle = css(mixRgb(sky, { r: 255, g: 255, b: 255 }, 0.4), 0.35);
+      g.lineWidth = Math.max(0.5, this._h * 0.0007);
+      g.beginPath();
+      g.ellipse(px, py, rx, ry, 0, Math.PI * 0.15, Math.PI * 0.85);
+      g.stroke();
+    }
+  }
+
+  /** Wind-carved snow: drifts, not blades. */
+  private _drawSnowfield(grade: SkyGrade, base: RGB): void {
+    const g = this._ctx;
+    const y0 = this._h * (this._world.terrain.groundY ?? 0.76);
+    const rnd = mulberry32(this._seed + 8081);
+
+    // Broad drift bands give the flat a sense of scale.
+    for (let i = 0; i < 7; i++) {
+      const t = i / 7;
+      const yy = y0 + this._h * (0.02 + t * 0.26);
+      const hgt = this._h * (0.012 + t * 0.016);
+      const grd = g.createLinearGradient(0, yy - hgt, 0, yy + hgt);
+      grd.addColorStop(0, css(shade(base, 0.24), 0));
+      grd.addColorStop(0.5, css(shade(base, 0.2), 0.85));
+      grd.addColorStop(1, css(shade(base, -0.3), 0.5));
+      g.fillStyle = grd;
+      g.fillRect(0, yy - hgt, this._w, hgt * 2);
+    }
+
+    // Blue-grey shadow pooling in the hollows, which is what makes snow read
+    // as snow rather than as an empty white rectangle.
+    for (let i = 0; i < 5; i++) {
+      const yy = y0 + this._h * (0.06 + i * 0.05);
+      const grd = g.createLinearGradient(0, yy, 0, yy + this._h * 0.03);
+      grd.addColorStop(0, css({ r: 96, g: 108, b: 132 }, 0.22));
+      grd.addColorStop(1, css({ r: 96, g: 108, b: 132 }, 0));
+      g.fillStyle = grd;
+      g.fillRect(0, yy, this._w, this._h * 0.03);
+    }
+
+    // Exposed rock breaking through the snow.
+    for (let i = 0; i < 16; i++) {
+      const t = Math.pow(rnd(), 0.6);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.01 + t * 0.28);
+      const r = this._h * (0.004 + t * 0.011);
+      g.fillStyle = css(mixRgb({ r: 62, g: 58, b: 56 }, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.5), 0.75);
+      g.beginPath();
+      g.moveTo(px - r, py);
+      g.lineTo(px - r * 0.45, py - r * 0.8);
+      g.lineTo(px + r * 0.5, py - r * 0.6);
+      g.lineTo(px + r, py);
+      g.closePath();
+      g.fill();
+    }
+  }
+
+  /** Polygonal desiccation cracks, the signature of a dried lake bed. */
+  private _drawDryCracks(grade: SkyGrade, base: RGB): void {
+    const g = this._ctx;
+    const y0 = this._h * (this._world.terrain.groundY ?? 0.68);
+    const rnd = mulberry32(this._seed + 1616);
+
+    g.strokeStyle = css(shade(base, -0.44), 0.52);
+    for (let i = 0; i < 150; i++) {
+      const t = Math.pow(rnd(), 0.55);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.012 + t * 0.29);
+      const r = this._h * (0.012 + t * 0.04);
+      g.lineWidth = Math.max(0.6, this._h * 0.0011 * (0.5 + t));
+      g.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2 + rnd() * 0.5;
+        const rr = r * (0.65 + rnd() * 0.6);
+        const vx = px + Math.cos(a) * rr;
+        const vy = py + Math.sin(a) * rr * 0.3;
+        if (k === 0) g.moveTo(vx, vy);
+        else g.lineTo(vx, vy);
+      }
+      g.closePath();
+      g.stroke();
+    }
+
+    // Sparse scrub, so the basin is not completely bare.
+    for (let i = 0; i < 40; i++) {
+      const t = Math.pow(rnd(), 0.7);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.02 + t * 0.27);
+      const hh = this._h * (0.004 + t * 0.012);
+      g.strokeStyle = css(mixRgb({ r: 96, g: 88, b: 58 }, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.5), 0.5);
+      g.lineWidth = Math.max(0.6, this._h * 0.0009);
+      for (let b = 0; b < 4; b++) {
+        const a = -Math.PI / 2 + (b - 1.5) * 0.34;
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(px + Math.cos(a) * hh, py + Math.sin(a) * hh);
+        g.stroke();
+      }
+    }
+  }
+
+  /**
+   * Coastal foreshore: wet sand that mirrors the sky, a darker waterline, and
+   * scattered shingle. The reflective band is the point: it is what makes a coast
+   * read as a coast rather than as a flat beach.
+   */
+  private _drawCoast(grade: SkyGrade, base: RGB): void {
+    const g = this._ctx;
+    const y0 = this._h * (this._world.terrain.groundY ?? 0.7);
+    const rnd = mulberry32(this._seed + 7373);
+
+    // Wet sand: a broad reflective sheet, brightest right at the waterline.
+    for (let i = 0; i < 4; i++) {
+      const t = i / 4;
+      const yy = y0 + this._h * (0.005 + t * 0.1);
+      const hgt = this._h * (0.02 + t * 0.012);
+      const sky = mixRgb(grade.skyHorizon, grade.haze, 0.4);
+      const grd = g.createLinearGradient(0, yy - hgt, 0, yy + hgt);
+      grd.addColorStop(0, css(mixRgb(sky, base, 0.45), 0.42));
+      grd.addColorStop(0.5, css(mixRgb(sky, base, 0.62), 0.26));
+      grd.addColorStop(1, css(base, 0));
+      g.fillStyle = grd;
+      g.fillRect(0, yy - hgt, this._w, hgt * 2);
+    }
+
+    // The waterline itself: a darker, slightly irregular edge.
+    g.strokeStyle = css(shade(base, -0.3), 0.4);
+    g.lineWidth = Math.max(1, this._h * 0.0012);
+    g.beginPath();
+    for (let px = 0; px <= this._w; px += 6) {
+      const n = fbm1D(px * 0.004, 3311, 3);
+      const y = y0 + (n - 0.5) * this._h * 0.012;
+      if (px === 0) g.moveTo(px, y);
+      else g.lineTo(px, y);
+    }
+    g.stroke();
+
+    // Foam lines, thinning toward the foreground.
+    g.strokeStyle = css(mixRgb(base, { r: 255, g: 255, b: 255 }, 0.5), 0.3);
+    for (let i = 0; i < 3; i++) {
+      const off = this._h * (0.012 + i * 0.03);
+      g.lineWidth = Math.max(0.6, this._h * 0.0009);
+      g.beginPath();
+      for (let px = 0; px <= this._w; px += 7) {
+        const n = fbm1D(px * 0.006 + i * 9, 5501 + i, 3);
+        const y = y0 + off + (n - 0.5) * this._h * 0.006;
+        if (px === 0) g.moveTo(px, y);
+        else g.lineTo(px, y);
+      }
+      g.stroke();
+    }
+
+    // Shingle higher up the beach.
+    for (let i = 0; i < 60; i++) {
+      const t = Math.pow(rnd(), 0.55);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.13 + t * 0.16);
+      const r = this._h * (0.0012 + t * 0.0032);
+      g.fillStyle = css(shade(base, -0.18 + rnd() * 0.4), 0.5);
+      g.beginPath();
+      g.ellipse(px, py, r * 1.6, r, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    // Marram tufts, the grass that actually grows on a foreshore.
+    for (let i = 0; i < 34; i++) {
+      const t = Math.pow(rnd(), 0.6);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.15 + t * 0.14);
+      const hh = this._h * (0.004 + t * 0.012);
+      g.strokeStyle = css(mixRgb({ r: 122, g: 118, b: 78 }, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.5), 0.55);
+      g.lineWidth = Math.max(0.6, this._h * 0.0009);
+      for (let b = 0; b < 4; b++) {
+        const a = -Math.PI / 2 + (b - 1.5) * 0.36;
+        g.beginPath();
+        g.moveTo(px, py);
+        g.quadraticCurveTo(
+          px + Math.cos(a) * hh * 0.6,
+          py + Math.sin(a) * hh * 0.7,
+          px + Math.cos(a) * hh * 1.1,
+          py + Math.sin(a) * hh
+        );
         g.stroke();
       }
     }
@@ -1356,6 +2497,17 @@ export class WorldRenderer {
   }
 
   private _drawGrain(): void {
+    // High contrast trades film grain for a stronger, flatter separation so
+    // silhouettes stay legible behind desktop text.
+    if (this._highContrast) {
+      const g = this._ctx;
+      g.save();
+      g.globalCompositeOperation = 'multiply';
+      g.fillStyle = 'rgba(12,14,24,0.16)';
+      g.fillRect(0, 0, this._w, this._h);
+      g.restore();
+      return;
+    }
     if (!this._grain) return;
     const g = this._ctx;
     g.save();
@@ -1369,6 +2521,217 @@ export class WorldRenderer {
       g.fillStyle = pat;
       g.fillRect(0, 0, this._w + 180, this._h + 180);
     }
+    g.restore();
+  }
+
+  private _applyStylePost(): void {
+    // Flat is produced by drawing natively, so it needs no pixel pass. Riso is
+    // the only style that needs a readback, and keeping it off the flat path
+    // avoids a full-frame getImageData/putImageData round trip every frame.
+    if (this._style !== 'riso') return;
+    this._applyRisoSeparation();
+  }
+
+  /** Ink pair for the active world, so each place prints in its own colours. */
+  private _risoInks(): { warm: RGB; cool: RGB; paper: RGB } {
+    const pal = this._world.palette;
+    return {
+      warm: pal?.risoWarm ?? RISO_WARM,
+      cool: pal?.risoCool ?? RISO_COOL,
+      paper: pal?.risoPaper ?? RISO_PAPER,
+    };
+  }
+
+  /**
+   * Risograph separation.
+   *
+   * The previous version posterised luminance into seven levels and then laid a
+   * uniform diagonal hatch over the whole frame. That is not how a risograph
+   * works, and it looked it: quantising a smooth sky produced hard horizontal
+   * steps, the hatch landed on sky, mountain and ground with equal weight so it
+   * read as a filter rather than as printing, and because luminance carried no
+   * hue information the result collapsed into undifferentiated pastel.
+   *
+   * This separates the frame into two spot inks chosen by the warmth of the
+   * source colour, and screens each ink on its own rotated dot grid with dot
+   * area driven by local darkness. Tonal variation becomes a halftone screen
+   * instead of a staircase, and the two inks stay legible as two inks.
+   */
+  private _applyRisoSeparation(): void {
+    const w = this._buffer?.width ?? this._canvas.width;
+    const h = this._buffer?.height ?? this._canvas.height;
+    if (w < 2 || h < 2) return;
+
+    const src = document.createElement('canvas');
+    src.width = w;
+    src.height = h;
+    const sg = src.getContext('2d', { alpha: false })!;
+    sg.drawImage(this._buffer ?? this._canvas, 0, 0);
+
+    const data = sg.getImageData(0, 0, w, h);
+    const px = data.data;
+    const ink = this._risoInks();
+
+    if (DEBUG_RISO_DUMP) {
+      const dbg = document.createElement('canvas');
+      dbg.width = w;
+      dbg.height = h;
+      dbg.getContext('2d')!.putImageData(data, 0, 0);
+      (globalThis as unknown as Record<string, unknown>).__risoSource = dbg.toDataURL('image/png');
+    }
+
+    // Measure the sheet. A riso is a print: the lightest tones stay as bare
+    // paper and only the deepest shadows approach solid ink. Anchoring the
+    // range to the frame's own percentiles is what keeps a dusk scene printing
+    // as mostly paper with dark accents, instead of turning the whole sky into
+    // a field of colour. Using raw min/max was the mistake: a single near-black
+    // foreground pixel dragged the floor down and flooded everything above it.
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < px.length; i += 4) {
+      const l = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
+      hist[l]++;
+    }
+    const total = w * h;
+    // 4th percentile for the paper end, 88th for the deepest ink. Clamped so a
+    // nearly-flat frame still has a usable range.
+    let acc = 0, lo = 0, hi = 255;
+    for (let l = 0; l < 256; l++) {
+      acc += hist[l];
+      if (acc >= total * 0.04) { lo = l; break; }
+    }
+    acc = 0;
+    for (let l = 255; l >= 0; l--) {
+      acc += hist[l];
+      if (acc >= total * 0.12) { hi = l; break; }
+    }
+    const range = Math.max(30, hi - lo);
+    // Never let the darkest source value reach full flood, or large areas
+    // collapse into solid blocks. Riso keeps paper texture even in its darks.
+    const floorTone = 0.14;
+
+    // Screen geometry. Each drum lays its own halftone at a different angle so
+    // the two dot grids interleave instead of moiring into a checkerboard. The
+    // cell has to be large enough to read as a dot pattern on screen: at three
+    // pixels the dots simply merged and the whole frame flooded to solid ink.
+    const cell = Math.max(3, Math.round(Math.min(w, h) / 130));
+    const a1 = (15 * Math.PI) / 180;
+    const a2 = (72 * Math.PI) / 180;
+    const c1 = Math.cos(a1);
+    const s1 = Math.sin(a1);
+    const c2 = Math.cos(a2);
+    const s2 = Math.sin(a2);
+    // Cap the radius well below the cell half-width. Riso reads as a screen
+    // only when paper keeps showing between the dots; at a larger radius the
+    // dots touch and every dark area fuses into one solid ink block.
+    const maxR = cell * 0.4;
+    const maxR2 = maxR * maxR;
+
+    const pr = ink.paper.r, pg = ink.paper.g, pb = ink.paper.b;
+    const wr = ink.warm.r, wg = ink.warm.g, wb = ink.warm.b;
+    const cr = ink.cool.r, cg = ink.cool.g, cb = ink.cool.b;
+
+    for (let y = 0; y < h; y++) {
+      const row1y = y * s1;
+      const row2y = y * s2;
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const r = px[i], g = px[i + 1], b = px[i + 2];
+
+        // Print tone: 0 is bare paper, 1 is solid ink. Riso is a light medium:
+        // the paper is the subject and the ink is the drawing. The sky is the
+        // brightest large area and has to land as open paper, so tone only ramps
+        // up through the shadows. A gamma past 1 keeps midtones light and
+        // reserves ink for the real dark masses.
+        let tone = 1 - (r * 0.299 + g * 0.587 + b * 0.114 - lo) / range;
+        if (tone < 0) tone = 0;
+        else if (tone > 1) tone = 1;
+        tone = Math.pow(tone, 1.35) * (1 - floorTone) + floorTone;
+
+        // Ink share: a smooth crossfade between the two drums. The previous
+        // per-pixel warm/cool switch turned any gradient that crossed the
+        // threshold into a hard horizontal seam straight across the frame.
+        let warmShare = (r - b) / 255 + (g - b) / 380;
+        if (warmShare < 0) warmShare = 0;
+        else if (warmShare > 1) warmShare = 1;
+        warmShare = warmShare * warmShare * (3 - 2 * warmShare);
+
+        // Tint strength. At high coverage the full ink lands, but at low
+        // coverage the dot only mixes the paper a little way toward the ink, so
+        // a dusk sky reads as a pale wash rather than a saturated field. This
+        // is what keeps the upper half from becoming one solid teal block.
+        const strength = 0.34 + tone * 0.66;
+
+        // Key drum: cool ink carries the structure and the shadows.
+        const coolCov = tone * (1 - warmShare * 0.88);
+        // Spot drum: warm ink rides over the lit areas and the horizon.
+        const warmCov = tone * warmShare * 0.92;
+
+        let outR = pr, outG = pg, outB = pb;
+
+        if (coolCov > 0.05) {
+          const rad2 = coolCov * maxR2;
+          const rx = (x * c1 + row1y) / cell;
+          const ry = (y * c1 - x * s1) / cell;
+          const fx = rx - Math.floor(rx) - 0.5;
+          const fy = ry - Math.floor(ry) - 0.5;
+          if (fx * fx + fy * fy < rad2) {
+            outR = outR + ((cr * strength - outR) * coolCov);
+            outG = outG + ((cg * strength - outG) * coolCov);
+            outB = outB + ((cb * strength - outB) * coolCov);
+          }
+        }
+
+        if (warmCov > 0.05) {
+          const rad2 = warmCov * maxR2;
+          const rx = (x * c2 + row2y) / cell;
+          const ry = (y * c2 - x * s2) / cell;
+          const fx = rx - Math.floor(rx) - 0.5;
+          const fy = ry - Math.floor(ry) - 0.5;
+          if (fx * fx + fy * fy < rad2) {
+            outR = outR + ((wr * strength - outR) * warmCov);
+            outG = outG + ((wg * strength - outG) * warmCov);
+            outB = outB + ((wb * strength - outB) * warmCov);
+          }
+        }
+
+        px[i] = outR;
+        px[i + 1] = outG;
+        px[i + 2] = outB;
+      }
+    }
+
+    sg.putImageData(data, 0, 0);
+
+    const g = this._ctx;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, w, h);
+    g.drawImage(src, 0, 0);
+    this._risoPaperFinish(w, h);
+    g.restore();
+  }
+
+  /** Paper fibre and a light press vignette, applied after the ink is down. */
+  private _risoPaperFinish(w: number, h: number): void {
+    const g = this._ctx;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (this._inks) {
+      g.globalCompositeOperation = 'multiply';
+      g.globalAlpha = 0.07;
+      const pat = g.createPattern(this._inks, 'repeat');
+      if (pat) {
+        g.fillStyle = pat;
+        g.fillRect(0, 0, w, h);
+      }
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'multiply';
+    const vg = g.createRadialGradient(w / 2, h / 2, h * 0.42, w / 2, h / 2, h * 1.15);
+    vg.addColorStop(0, 'rgba(255,255,255,1)');
+    vg.addColorStop(1, 'rgba(226,216,196,1)');
+    g.fillStyle = vg;
+    g.fillRect(0, 0, w, h);
     g.restore();
   }
 

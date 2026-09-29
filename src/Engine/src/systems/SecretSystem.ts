@@ -131,6 +131,20 @@ export class SecretSystem {
     };
   }
 
+  /**
+   * Rehydrates discoveries from durable state. Unknown ids are ignored so a save
+   * from a build that had more secrets cannot break this one. Validation is
+   * against the definitions, not against the discovered map, which is cleared
+   * immediately above and would otherwise reject every id.
+   */
+  restore(ids: ReadonlyArray<string>): void {
+    this._discovered.clear();
+    for (const id of ids) {
+      if (!BUILTIN_SECRETS.some((s) => s.id === id)) continue;
+      this.discover(id);
+    }
+  }
+
   onDiscover(listener: (secret: DiscoveredSecret) => void): () => void {
     this._listeners.push(listener);
     return () => {

@@ -1,3 +1,5 @@
+import type { DebugOverlay } from './DebugOverlay.js';
+
 export interface CreatorModeConfig {
   enabled: boolean;
   showDebugOverlay: boolean;
@@ -15,7 +17,7 @@ export class CreatorMode {
     allowWeatherSimulation: true,
   };
 
-  private _debugOverlay: any = null;
+  private _debugOverlay: DebugOverlay | null = null;
   private _panel: HTMLElement | null = null;
 
   enable(): void {
@@ -60,7 +62,10 @@ export class CreatorMode {
   }
 
   private _showDebugOverlay(): void {
-    this._debugOverlay = { show: () => {}, hide: () => {}, toggle: () => {}, update: () => {}, dispose: () => {} };
+    // Creator mode does not own a real DebugOverlay; the engine holds the single
+    // instance so there is one source of truth for overlay state. This no-op
+    // satisfies the interface without creating a second, unowned overlay.
+    this._debugOverlay = null;
   }
 
   private _hideDebugOverlay(): void {
