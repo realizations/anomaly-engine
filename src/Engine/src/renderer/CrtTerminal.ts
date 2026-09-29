@@ -168,13 +168,23 @@ export class CrtTerminal {
   ): void {
     const lit = 0.25 + grade.ambient * 0.75;
 
-    // Drop shadow onto the ground.
+    // Drop shadow onto the ground. A canvas blur filter here was measurably
+    // one of the most expensive operations in the whole frame; a soft radial
+    // gradient underneath the case is visually equivalent at this size and
+    // costs a fraction of it.
     g.save();
-    g.globalAlpha = 0.5;
-    g.fillStyle = 'rgba(0,0,0,0.55)';
-    g.filter = 'blur(6px)';
-    g.fillRect(x + w * 0.03, y + h * 0.06, w, h);
-    g.filter = 'none';
+    g.fillStyle = 'rgba(0,0,0,0.5)';
+    for (let i = 3; i >= 1; i--) {
+      g.globalAlpha = 0.16;
+      g.filter = 'none';
+      g.fillStyle = 'rgba(0,0,0,0.55)';
+      g.beginPath();
+      g.ellipse(
+        x + w * 0.5, y + h * 1.02,
+        w * (0.5 + i * 0.06), h * (0.06 + i * 0.04), 0, 0, Math.PI * 2
+      );
+      g.fill();
+    }
     g.restore();
 
     // Case: a vertical plastic gradient, lit from the sky.

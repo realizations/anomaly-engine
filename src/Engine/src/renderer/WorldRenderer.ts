@@ -107,6 +107,24 @@ export class WorldRenderer {
   private _liminal: LiminalInterior | null = null;
   private _uncanny: UncannyLayer | null = null;
 
+  /** Cached riso print. The separation is far too expensive to run per frame. */
+  private _risoCache: HTMLCanvasElement | null = null;
+  private _risoCacheValid = false;
+  private _risoCacheAge = 0;
+  /** Frames to hold the cache before re-checking the scene. */
+  private _risoCacheHold = 6;
+  /** Frames after which the cache is refreshed even if nothing changed, so
+   *  slow drift like weather and cloud motion eventually prints. */
+  private _risoCacheMaxAge = 90;
+  private _risoBucket = -1;
+  private _weatherTick = 0;
+
+  /** Phase timing samples, in ms, read by the perf tool. */
+  private _phases = { scene: 0, grade: 0, post: 0, blit: 0, total: 0 };
+  private _profile = false;
+  /** Baked painterly finish layer, and the ambient it was baked at. */
+  private _finish: HTMLCanvasElement | null = null;
+
   /** Telemetry the terminal reports, driven by the engine so the CRT module
    *  stays decoupled from the journal and secret systems. */
   private _telemetry = { observations: 0, secrets: 0, uptime: 0 };
@@ -129,7 +147,6 @@ export class WorldRenderer {
   private _qualityLocked = false;
   private _qualityListeners: Array<(scale: number, frameMs: number) => void> = [];
 
-  private _grain: HTMLCanvasElement | null = null;
   private _dither: HTMLCanvasElement | null = null;
   private _stars: Array<{ x: number; y: number; mag: number; tw: number; hue: number }> = [];
   private _cloudBands: Array<{ y: number; scale: number; speed: number; alpha: number; thickness: number }> = [];
@@ -159,7 +176,6 @@ export class WorldRenderer {
     this._style = style;
     this._ctx = canvas.getContext('2d', { alpha: false })!;
     this._outCtx = this._ctx;
-    this._buildGrain();
     this._buildFeatures();
     this._buildPaper();
     this._bindPointer();
@@ -240,30 +256,12 @@ export class WorldRenderer {
     this._inks = c;
   }
 
-  private _buildGrain(): void {
-    const size = 180;
-    const c = document.createElement('canvas');
-    c.width = size;
-    c.height = size;
-    const g = c.getContext('2d')!;
-    const img = g.createImageData(size, size);
-    const rnd = mulberry32(9187);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const v = 128 + (rnd() - 0.5) * 92;
-      img.data[i] = v;
-      img.data[i + 1] = v;
-      img.data[i + 2] = v;
-      img.data[i + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-    this._grain = c;
-  }
 
   /**
    * Builds a sub-LSB dither tile.
    *
    * An eight-bit gradient stretched across a wide desktop develops visible
-   * contouring ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â hard steps where the ramp crosses a quantisation boundary.
+   * contouring ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â hard steps where the ramp crosses a quantisation boundary.
    * That is what made the sky look broken rather than soft. A low-amplitude
    * noise tile breaks each contour into grain, which the eye reads as film
    * rather than as a defect.
@@ -475,13 +473,23 @@ export class WorldRenderer {
     this._canvas.width = Math.round(w * this._dpr);
     this._canvas.height = Math.round(h * this._dpr);
     this._ensureBuffer();
+    // A print is sized to the sheet, and so is the finish layer.
+    this._risoCacheValid = false;
+    this._finish = null;
   }
 
   setWeather(w: WeatherState): void {
+    if (w.condition !== this._weather.condition) {
+      // A real change of condition invalidates the print; the tick also lets
+      // the cache re-check the scene so a shift eventually prints.
+      this._weatherTick++;
+      this._risoCacheValid = false;
+    }
     this._weather = w;
   }
 
   setStyle(style: RenderStyle): void {
+    if (style !== this._style) this._risoCacheValid = false;
     this._style = style;
   }
 
@@ -499,6 +507,7 @@ export class WorldRenderer {
     // same location with different wallpaper.
     this._uncanny = new UncannyLayer(world);
     this._liminal = world.biome === 'liminal-interior' ? new LiminalInterior(world) : null;
+    this._risoCacheValid = false;
   }
 
   /**
@@ -561,7 +570,10 @@ export class WorldRenderer {
   }
 
   setHighContrast(on: boolean): void {
+    if (on === this._highContrast) return;
     this._highContrast = on;
+    // The grain is baked into the finish layer, so it has to be re-baked.
+    this._finish = null;
   }
 
   addAnomaly(a: AnomalyVisual): void {
@@ -605,6 +617,7 @@ export class WorldRenderer {
     // The scene is drawn into the reduced-resolution buffer, then blitted to the
     // display canvas. At renderScale 1 this is a straight copy.
     this._ensureBuffer();
+    if (this._profile) this._phases.scene = now;
     const scale = this._renderScale * this._dpr;
     this._ctx = this._bctx!;
     this._ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -658,25 +671,61 @@ export class WorldRenderer {
     this._uncanny.render(g, this._w, this._h, this._world, grade, this._detail(grade));
 
     this._drawTerminal(grade, hour, dt);
+
+    // Phase timings, sampled rather than accumulated. The expensive parts of
+    // this renderer are full-screen composite passes, and knowing which one
+    // costs what is the only way to optimise it honestly rather than by
+    // guessing. Exposed through the status object so the tools can read it.
+    const mark = (name: keyof typeof this._phases) => {
+      if (!this._profile) return;
+      this._phases[name] = performance.now();
+    };
+    mark('scene');
+
     if (this._style === 'painterly') {
+      // The finish layer is a property of the canvas, so it is built once per
+      // size rather than per frame or per time bucket.
+      if (!this._finish) this._buildFinish();
       this._drawGrade(grade);
+      mark('grade');
       this._drawVignette();
       this._drawGrain();
     } else {
-      this._applyStylePost();
+      this._applyStylePost(hour);
     }
+    mark('post');
 
     g.restore();
 
     // Blit the buffer up to the display canvas, restoring the display context
     // for the next frame.
     const out = this._outCtx!;
+    const blitStart = this._profile ? performance.now() : 0;
     out.setTransform(1, 0, 0, 1, 0, 0);
     out.imageSmoothingEnabled = true;
     out.imageSmoothingQuality = 'high';
     out.drawImage(this._buffer!, 0, 0, this._canvas.width, this._canvas.height);
     this._ctx = out;
+    if (this._profile) {
+      const t = performance.now();
+      this._phases.blit = t - blitStart;
+      this._phases.post = this._phases.post - blitStart;
+      this._phases.total = t - now;
+    }
     this._adaptQuality(performance.now() - now);
+  }
+
+  /**
+   * Phase timings for the last frame, in ms. Only collected when
+   * `setProfiling` is on, because `performance.now()` in the hot path is not
+   * free and this runs on a surface that is expected to sit idle for hours.
+   */
+  getPhaseTimings(): Record<string, number> {
+    return { ...this._phases };
+  }
+
+  setProfiling(on: boolean): void {
+    this._profile = on;
   }
 
   private _pruneAnomalies(): void {
@@ -2549,70 +2598,167 @@ export class WorldRenderer {
     }
   }
 
-  private _drawGrade(grade: SkyGrade): void {
+  /**
+   * Builds the painterly finish layer.
+   *
+   * Painterly used to composite four full-screen passes every frame: an
+   * `overlay` warm cast, a `multiply` exposure ramp, a radial vignette, and an
+   * `overlay` film grain. Measured at 119ms a frame, because the pending blend
+   * work is deferred and then flushed inside whichever call syncs the pipeline.
+   *
+   * The vignette and the grain are properties of the *canvas*, not of the time
+   * of day, so they are baked once per resize into a single layer. What remains
+   * per frame is the exposure and the warm/cool cast, and both are a single flat
+   * `multiply` fill, which costs almost nothing. Four full-screen composites
+   * become one image blit and one solid fill.
+   *
+   * Multiply semantics: result = base * src/255.
+   */
+  private _buildFinish(): void {
+    const w = this._canvas.width;
+    const h = this._canvas.height;
+    if (!this._finish || this._finish.width !== w || this._finish.height !== h) {
+      this._finish = document.createElement('canvas');
+      this._finish.width = w;
+      this._finish.height = h;
+    }
+    const g = this._finish.getContext('2d')!;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+
+    const img = g.createImageData(w, h);
+    const d = img.data;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const vInner = h * 0.22;
+    const vOuter = h * 0.95;
+    const grain = this._highContrast ? 0 : 11;
+    const flat = this._highContrast ? 0.86 : 1;
+    const inv = 1 / Math.max(1, vOuter - vInner);
+    const rnd = mulberry32(6021);
+
+    for (let y = 0; y < h; y++) {
+      const dy = y - cy * 1.09;
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const dx = x - cx;
+        // Squared distance, not hypot: this runs over every pixel on the
+        // screen, and Math.hypot is markedly slower than a multiply-add.
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        let t = (dist - vInner) * inv;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
+        const vig = 1 - 0.5 * t * t;
+        const n = grain ? (rnd() - 0.5) * grain : 0;
+        const base = 255 * vig * flat + n;
+        d[i] = base;
+        d[i + 1] = base;
+        d[i + 2] = base;
+        d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  }
+
+  private _applyFinish(): void {
+    if (!this._finish) return;
     const g = this._ctx;
     g.save();
-    g.globalCompositeOperation = 'overlay';
-    const warm = grade.lightColor.r > grade.lightColor.b;
-    g.fillStyle = warm ? 'rgba(255,170,90,0.055)' : 'rgba(90,150,255,0.05)';
-    g.fillRect(0, 0, this._w, this._h);
+    g.globalCompositeOperation = 'multiply';
+    g.imageSmoothingEnabled = false;
+    g.drawImage(this._finish, 0, 0);
     g.restore();
+  }
 
+  /**
+   * Exposure and the warm/cool cast, as one flat multiply. A solid fill is
+   * effectively free; a gradient or a pattern here was not.
+   */
+  private _drawGrade(grade: SkyGrade): void {
+    this._applyFinish();
+    const g = this._ctx;
+    const v = 0.5 + grade.ambient * 0.5;
+    const warm = grade.lightColor.r > grade.lightColor.b;
+    const r = Math.min(255, 255 * v * (warm ? 1.03 : 0.985));
+    const gg = Math.min(255, 255 * v);
+    const b = Math.min(255, 255 * v * (warm ? 0.97 : 1.045));
     g.save();
     g.globalCompositeOperation = 'multiply';
-    const v = 0.5 + grade.ambient * 0.5;
-    g.fillStyle = `rgba(${(255 * v) | 0},${(255 * v * 0.99) | 0},${(255 * v * 0.96) | 0},1)`;
+    g.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
     g.fillRect(0, 0, this._w, this._h);
     g.restore();
   }
 
   private _drawVignette(): void {
-    const g = this._ctx;
-    const grd = g.createRadialGradient(
-      this._w * 0.5, this._h * 0.46, this._h * 0.22,
-      this._w * 0.5, this._h * 0.5, this.h0(0.95)
-    );
-    grd.addColorStop(0, 'rgba(0,0,0,0)');
-    grd.addColorStop(0.62, 'rgba(0,0,0,0.1)');
-    grd.addColorStop(1, 'rgba(0,0,0,0.5)');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, this._w, this._h);
+    // Baked into the finish layer. See _buildFinish.
   }
 
   private _drawGrain(): void {
-    // High contrast trades film grain for a stronger, flatter separation so
-    // silhouettes stay legible behind desktop text.
-    if (this._highContrast) {
-      const g = this._ctx;
-      g.save();
-      g.globalCompositeOperation = 'multiply';
-      g.fillStyle = 'rgba(12,14,24,0.16)';
-      g.fillRect(0, 0, this._w, this._h);
-      g.restore();
-      return;
-    }
-    if (!this._grain) return;
-    const g = this._ctx;
-    g.save();
-    g.globalCompositeOperation = 'overlay';
-    g.globalAlpha = 0.045;
-    const ox = -Math.floor(Math.random() * 180);
-    const oy = -Math.floor(Math.random() * 180);
-    const pat = g.createPattern(this._grain, 'repeat');
-    if (pat) {
-      g.translate(ox, oy);
-      g.fillStyle = pat;
-      g.fillRect(0, 0, this._w + 180, this._h + 180);
-    }
-    g.restore();
+    // Baked into the finish layer. See _buildFinish.
   }
 
-  private _applyStylePost(): void {
+  private _applyStylePost(hour: number): void {
     // Flat is produced by drawing natively, so it needs no pixel pass. Riso is
-    // the only style that needs a readback, and keeping it off the flat path
-    // avoids a full-frame getImageData/putImageData round trip every frame.
-    if (this._style !== 'riso') return;
+    // the only style that needs a readback.
+    if (this._style !== 'riso') {
+      this._risoCacheValid = false;
+      return;
+    }
+
+    // The separation costs a full-frame readback plus a per-pixel halftone
+    // over every dot cell, which measured at 181ms a frame: seven frames a
+    // second, and the only thing in the engine that was genuinely too slow.
+    //
+    // It does not need to run every frame. A screen print is a static object;
+    // what changes between frames is the weather and the scan bar, none of
+    // which move a dot by a visible amount. So the separation is cached and
+    // only recomputed when the scene has actually shifted enough to matter,
+    // with a short minimum lifetime so precipitation and drifting cloud still
+    // get printed onto the sheet.
+    if (this._risoCacheValid) {
+      this._risoCacheAge += 1;
+      if (this._risoCacheAge < this._risoCacheHold) {
+        this._blitRisoCache();
+        return;
+      }
+    }
+
+    if (!this._sceneChanged(hour) && this._risoCacheValid && this._risoCacheAge < this._risoCacheMaxAge) {
+      this._risoCacheAge += 1;
+      this._blitRisoCache();
+      return;
+    }
+
     this._applyRisoSeparation();
+    this._risoCacheValid = true;
+    this._risoCacheAge = 0;
+  }
+
+  /**
+   * Whether the scene has drifted far enough to be worth re-printing.
+   *
+   * Compared in steps rather than continuously, because a printed image that
+   * updates a little all the time reads as noise, and one that updates only on
+   * the hour reads as broken. A small step every couple of seconds is the
+   * behaviour a real drum printer would have.
+   */
+  private _sceneChanged(hour: number): boolean {
+    // A quarter-hour step. The sun moves slowly enough that finer buckets only
+    // cost frames.
+    const bucket = Math.floor(hour * 4) + this._weatherTick;
+    if (bucket !== this._risoBucket) {
+      this._risoBucket = bucket;
+      return true;
+    }
+    return false;
+  }
+
+  private _blitRisoCache(): void {
+    const g = this._ctx;
+    if (!this._risoCache) return;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(this._risoCache, 0, 0);
+    g.restore();
   }
 
   /** Ink pair for the active world, so each place prints in its own colours. */
@@ -2711,7 +2857,7 @@ export class WorldRenderer {
 
     const pr = ink.paper.r, pg = ink.paper.g, pb = ink.paper.b;
     const wr = ink.warm.r, wg = ink.warm.g, wb = ink.warm.b;
-    const cr = ink.cool.r, cg = ink.cool.g, cb = ink.cool.b;
+    const cr = ink.cool.r, inkCg = ink.cool.g, cb = ink.cool.b;
 
     for (let y = 0; y < h; y++) {
       const row1y = y * s1;
@@ -2759,7 +2905,7 @@ export class WorldRenderer {
           const fy = ry - Math.floor(ry) - 0.5;
           if (fx * fx + fy * fy < rad2) {
             outR = outR + ((cr * strength - outR) * coolCov);
-            outG = outG + ((cg * strength - outG) * coolCov);
+            outG = outG + ((inkCg * strength - outG) * coolCov);
             outB = outB + ((cb * strength - outB) * coolCov);
           }
         }
@@ -2792,6 +2938,21 @@ export class WorldRenderer {
     g.drawImage(src, 0, 0);
     this._risoPaperFinish(w, h);
     g.restore();
+
+    // Keep the print so the next frames can blit it instead of re-running the
+    // whole halftone separation. It has to be captured from the *buffer*, which
+    // is where the separated output actually lands; the display canvas still
+    // holds the previous frame at this point, so capturing that caches a
+    // stale, unprinted image and the style silently loses its dots.
+    if (!this._risoCache || this._risoCache.width !== w || this._risoCache.height !== h) {
+      this._risoCache = document.createElement('canvas');
+      this._risoCache.width = w;
+      this._risoCache.height = h;
+    }
+    const cacheCtx = this._risoCache.getContext('2d', { alpha: false })!;
+    cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
+    cacheCtx.clearRect(0, 0, w, h);
+    cacheCtx.drawImage(this._buffer ?? this._canvas, 0, 0, w, h);
   }
 
   /** Paper fibre and a light press vignette, applied after the ink is down. */

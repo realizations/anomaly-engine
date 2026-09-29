@@ -71,6 +71,7 @@ class Engine {
   private _canvas: HTMLCanvasElement;
   private _running = false;
   private _paused = false;
+  private _profiling = false;
   private _frameCount = 0;
   private _lastFpsTime = 0;
   private _fps = 0;
@@ -662,6 +663,8 @@ class Engine {
     secretsFound: number;
     secretsTotal: number;
     anomalyKinds: number;
+    /** Per-phase render timings in ms, present only while profiling is on. */
+    phases?: Record<string, number> | undefined;
   } {
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     return {
@@ -679,7 +682,15 @@ class Engine {
       secretsFound: this._secrets.getDiscovered().length,
       secretsTotal: this._secrets.getProgress().total,
       anomalyKinds: this._anomalies.getDefinitions().length,
+      phases: this._profiling ? this._renderer.getPhaseTimings() : undefined,
     };
+  }
+
+  /** Turns render phase profiling on or off. Off by default: it is a
+   *  diagnostic, and this process is expected to sit idle for hours. */
+  setProfiling(on: boolean): void {
+    this._profiling = on;
+    this._renderer.setProfiling(on);
   }
 
   /** Caps the frame rate. 0 means unlimited. A wallpaper does not need 144 fps,
