@@ -32,6 +32,56 @@ a 2.25x change in pixel count, which is what fill-rate bound looks like and is
 the reason the adaptive quality scaler is the primary defence rather than a
 fallback.
 
+## Per-monitor
+
+The renderer composes the scene **once per display** and blits each into its own
+rectangle on a canvas the size of the whole virtual desktop. That is what makes
+a mixed aspect-ratio setup correct: a single wide viewport would put the focal
+point in the gap between two monitors, and each screen would get a crop rather
+than a framing.
+
+One engine, not one per monitor. A wallpaper does not need interactivity, and a
+WebView2 is a separate JavaScript context, so N engines would mean N event loops,
+N world clocks and N copies of the same state.
+
+Measured cost, CPU-rasterised, 1920x1080 per monitor:
+
+| Monitors | frame ms | fps | ns/pixel | render scale |
+|---|---|---|---|---|
+| 1 | 102.6 | 10 | 49 | 1.00 |
+| 2 | 193.0 | 5 | 47 | 1.00 |
+| 3 | 302.2 | 4 | 49 | 1.00 |
+
+Cost per pixel holds flat at roughly 49ns whatever the monitor count, which is
+the definition of fill-rate bound. Total time is therefore linear in the number
+of displays, and that is the honest trade.
+
+## The quality controller
+
+Adaptive scale used to be a fixed 0.1 step per 45-frame window, with a floor of
+0.5. Against a two-monitor layout running at 3fps that was useless: it took about
+twelve seconds to move one step, and the floor was not low enough to recover even
+once it arrived.
+
+Two changes fixed it.
+
+The correction is now **proportional**. Because cost is fill, time is roughly
+proportional to area, so area has to scale with the budget and the linear
+dimension with its square root. One correction therefore lands close to the right
+scale in a single step instead of creeping toward it. Climbing back is
+deliberately slower than dropping, so the scale cannot oscillate.
+
+The window is also shorter, and a settle counter that was re-arming after every
+window — discarding three frames out of every twenty-three, and stretching the
+cycle to nearly six seconds — was fixed to apply only after a real change.
+
+Measured on a two-monitor layout, software rasterised: scale reaches 0.5 within
+five seconds of the layout being applied, then settles around 0.45. It no longer
+sits at full resolution on hardware that cannot sustain it.
+
+The floor is now 0.34 rather than 0.5, so genuinely weak hardware has somewhere
+to go.
+
 ## What was fixed
 
 **Riso was running at seven frames a second.** 181ms a frame, against 5-6ms for
@@ -75,9 +125,9 @@ the terminal's size.
 
 ## Not yet done
 
-- **Per-monitor worlds** remain the largest structural gap. They mean several
-  WebViews each running an engine, so the per-pixel cost is paid once per
-  monitor. Doing this before the frame-cost work above would have multiplied the
-  problem rather than fixed it.
 - The **liminal interior** is fill-heavy by nature: floor, walls, ceiling, doors
   and lights are all full-height quads. It has not been profiled separately.
+- **No frame rate has been measured on real GPU-composited hardware.** Every
+  figure in this document is CPU-rasterised and should be treated as a floor. A
+  pass on a real machine is the missing measurement, and it should be recorded
+  here when it exists.

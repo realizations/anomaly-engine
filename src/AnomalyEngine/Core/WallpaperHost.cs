@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -108,8 +109,11 @@ public class WallpaperHost : IDisposable
                 ResizeMode = ResizeMode.NoResize,
                 Left = -32000,
                 Top = -32000,
-                Width = 1920,
-                Height = 1080,
+                // Sized to the virtual desktop so the WebView2 surface is never
+                // smaller than the space it has to cover. The real bounds are
+                // applied in AttachToWorkerW, once the handle is parented.
+                Width = Math.Max(1920, GetVirtualDesktopBounds().Width),
+                Height = Math.Max(1080, GetVirtualDesktopBounds().Height),
                 Content = _webView,
                 WindowStartupLocation = WindowStartupLocation.Manual,
                 ShowActivated = false,
@@ -117,6 +121,13 @@ public class WallpaperHost : IDisposable
 
             _hostWindow.Show();
             _logger.Info("Host window shown.");
+
+            // A monitor can be plugged in or unplugged while the wallpaper is
+            // running, and the surface has to follow. SystemEvents rather than
+            // WM_DISPLAYCHANGE because the latter is only delivered to windows
+            // that opt in, and this window deliberately has no message pump of
+            // its own once it is parented to WorkerW.
+            SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
             var forcedHandle = _webView.Handle;
             _logger.Info($"WebView2 HWND: 0x{forcedHandle.ToInt64():X}");
@@ -375,6 +386,44 @@ public class WallpaperHost : IDisposable
         }
     }
 
+    /// Re-reads the display configuration and re-poses the surface.
+    ///
+    /// Marshalled onto the UI thread because SystemEvents raises this on a
+    /// thread-pool thread, and touching WPF or WebView2 from off-thread is not
+    /// safe.
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            var dispatcher = _hostWindow?.Dispatcher;
+            if (dispatcher is null) return;
+            if (!dispatcher.CheckAccess())
+            {
+                dispatcher.BeginInvoke(new Action(OnDisplaySettingsChangedProxy));
+                return;
+            }
+            OnDisplaySettingsChangedProxy();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Display configuration change failed: {ex.Message}");
+        }
+    }
+
+    private void OnDisplaySettingsChangedProxy()
+    {
+        _logger.Info("Display configuration changed; re-posposing the wallpaper.");
+        var bounds = GetVirtualDesktopBounds();
+        if (_webView?.Handle is { } hwnd && hwnd != IntPtr.Zero)
+        {
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
+                bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW |
+                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+        }
+        ReportMonitors();
+    }
+
     private void AttachToWorkerW()
     {
         if (_webView == null || _workerW == IntPtr.Zero) return;
@@ -386,16 +435,23 @@ public class WallpaperHost : IDisposable
 
             NativeMethods.SetParent(hwnd, _workerW);
 
+            // The whole virtual desktop, not just the primary. Windows clips the
+            // surface per monitor, so one window spanning the virtual desktop
+            // covers every display and the renderer composes each one itself.
+            var bounds = GetVirtualDesktopBounds();
             var screen = Screen.PrimaryScreen;
             if (screen == null) return;
 
-            var bounds = screen.Bounds;
             NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
                 bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW |
                 NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
 
-            _logger.Info($"Attached to WorkerW and sized to {bounds.Width}x{bounds.Height}.");
+            ReportMonitors();
+
+            _logger.Info(
+                $"Attached to WorkerW and sized to the virtual desktop {bounds.Width}x{bounds.Height} " +
+                $"at ({bounds.X},{bounds.Y}) across {Screen.AllScreens.Length} monitor(s).");
         }
         catch (Exception ex)
         {
@@ -487,6 +543,58 @@ public class WallpaperHost : IDisposable
     public void SendToRenderer(string eventName)
     {
         _ = ExecuteScriptSafe($"window.dispatchEvent(new CustomEvent('anomaly:{eventName}'));");
+    }
+
+    /// Bounds of every attached display, in virtual-desktop coordinates.
+    public static List<System.Drawing.Rectangle> GetMonitorBounds()
+    {
+        var result = new List<System.Drawing.Rectangle>();
+        foreach (var screen in Screen.AllScreens)
+        {
+            var b = screen.Bounds;
+            if (b.Width > 0 && b.Height > 0) result.Add(b);
+        }
+        return result;
+    }
+
+    /// Bounding box of the whole virtual desktop, which may have a negative
+    /// origin when a secondary sits to the left of or above the primary.
+    public static System.Drawing.Rectangle GetVirtualDesktopBounds()
+    {
+        var all = Screen.AllScreens;
+        if (all.Length == 0) return new System.Drawing.Rectangle(0, 0, 1920, 1080);
+        int left = all.Min(s => s.Bounds.Left);
+        int top = all.Min(s => s.Bounds.Top);
+        int right = all.Max(s => s.Bounds.Right);
+        int bottom = all.Max(s => s.Bounds.Bottom);
+        return new System.Drawing.Rectangle(left, top, right - left, bottom - top);
+    }
+
+    /// Tells the renderer the real monitor layout.
+    ///
+    /// The browser's window.screen describes the primary display only and knows
+    /// nothing about the others attached to this machine, so the host has to
+    /// report it. Sent on load and again whenever the display configuration
+    /// changes, since a monitor can be added or unplugged while running.
+    ///
+    /// The renderer composes the scene once per display rather than stretching
+    /// one wide composition across the desktop, so each screen gets its own
+    /// framing instead of a crop.
+    public void ReportMonitors()
+    {
+        var bounds = GetMonitorBounds();
+        if (bounds.Count == 0) return;
+
+        var parts = new List<string>();
+        foreach (var b in bounds)
+        {
+            // Serialised as integers because these are pixel rectangles.
+            parts.Add($"{{ x: {b.X}, y: {b.Y}, w: {b.Width}, h: {b.Height} }}");
+        }
+        var json = "[" + string.Join(",", parts) + "]";
+        _logger.Info($"Reporting {bounds.Count} monitor(s) to the renderer: {json}");
+        _ = ExecuteScriptSafe(
+            $"window.dispatchEvent(new CustomEvent('anomaly:monitors', {{ detail: {{ monitors: {json} }} }}));");
     }
 
     private static readonly string[] StyleOrder = { "painterly", "flat", "riso" };
@@ -627,6 +735,9 @@ public class WallpaperHost : IDisposable
 
     public void Dispose()
     {
+        // Unsubscribed before Stop so a display change arriving during shutdown
+        // cannot touch a half-torn-down surface.
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         Stop();
     }
 }

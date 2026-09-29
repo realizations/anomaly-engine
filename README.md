@@ -102,7 +102,7 @@ so than ship a feature table that overstates the project.
 | **Worlds as data** | Six shipped worlds as ~40 line objects, plus one interior built by a separate scene constructor rather than the terrain pipeline. Biome-aware ground, structures placed by data, no art pipeline needed to add one. |
 | **Real local time** | Sky, sun position, moon phase and colour grading follow the system clock and a real latitude/longitude. |
 | **Weather** | Six conditions driving cloud cover, wind-aligned precipitation, lightning and fog density. |
-| **Anomaly layer** | Five anomalies with rarity, cooldowns and durations, fired through the event bus and written to the journal. |
+| **Anomaly layer** | Six anomalies with rarity, cooldowns and durations, fired through the event bus and written to the journal. |
 | **Field notes** | The ARG surface. World premise, observations and progress, from the tray or `Ctrl+Alt+F`. Every anomaly is paired with a plausible denial. |
 | **Durable state** | World, style, reduced motion, journal and secrets persist to a JSON document in `%APPDATA%` via the native host. A corrupt save cannot stop the engine starting. |
 | **Dynamic quality** | The scene renders to an offscreen buffer and blits up. Render scale adapts to hold a frame budget. |
@@ -119,7 +119,7 @@ so than ship a feature table that overstates the project.
 | Feature | What's missing |
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits. |
-| **Multi-monitor** | Monitors are enumerated and the host is sized correctly, but one wallpaper is hosted on the primary monitor only. Per-monitor worlds are not implemented. |
+| **Multi-monitor** | Every display is composed separately, so a mixed aspect-ratio setup gets correct framing on each rather than one crop of a wide panorama. Follows hot-plug. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 
@@ -476,6 +476,7 @@ Done:
 - [x] Durable state — JSON in `%APPDATA%` via the native host, survives a corrupt save
 - [x] Dynamic quality — offscreen buffer with adaptive render scale
 - [x] Global hotkeys — cycle world/style, pause, field notes, debug
+- [x] Per-monitor worlds - one engine, one composition per display, follows hot-plug
 - [x] Accessibility — reduced motion, high contrast, keyboard focus, live region
 - [x] Licence gate — machine-enforced, proven by 19 adversarial cases
 - [x] Bundled typefaces — three OFL families, verified to load and actually apply
@@ -484,8 +485,6 @@ Done:
 
 Next, in priority order:
 
-- [ ] **Per-monitor worlds** — currently one wallpaper on the primary display only. This is
-      the biggest remaining gap and the largest architectural change left.
 - [ ] **Security hardening** — CSP on the WebView2 surface, renderer bundle integrity check
       at startup, and checksums for imported world packages
 - [ ] **Installer and updates** — no signed build or auto-update today
@@ -513,6 +512,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
 | `tools/e2e.mjs` | 45 end-to-end checks on the deployed `file://` build |
+| `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
 | `tools/license-gate.mjs` | Asset licence policy enforcement |
 | `tools/license-gate.mjs --selftest` | Proves the gate rejects 19 bad-licence cases |

@@ -491,6 +491,14 @@ class Engine {
     window.addEventListener('anomaly:world-prev', () => {
       this._worlds.previous();
     });
+
+    // The host reports the real monitor layout, because the browser's
+    // `window.screen` describes the primary display only and knows nothing
+    // about the others attached to this machine.
+    window.addEventListener('anomaly:monitors', (e) => {
+      const detail = (e as CustomEvent<{ monitors?: Array<{ x: number; y: number; w: number; h: number }> }>).detail;
+      if (Array.isArray(detail?.monitors)) this._resize(detail.monitors);
+    });
     window.addEventListener('anomaly:worlds', (e) => {
       const detail = (e as CustomEvent<{ worlds?: unknown[] }>).detail;
       if (Array.isArray(detail?.worlds) && detail.worlds.length) {
@@ -597,10 +605,46 @@ class Engine {
     });
   }
 
-  private _resize(): void {
-    this._canvas.width = window.screen.width;
-    this._canvas.height = window.screen.height;
-    this._renderer.resize(this._canvas.width, this._canvas.height);
+  /**
+   * Sizes the canvas to the whole virtual desktop and tells the renderer where
+   * each display sits within it.
+   *
+   * The desktop is one continuous surface that Windows clips per monitor, so the
+   * canvas spans all of them and the scene is composed once per display. That
+   * gives each monitor its own composition rather than a crop of one very wide
+   * viewport, which would put the focal point in the gap between two screens.
+   *
+   * When the host has not sent a monitor layout, this falls back to a single
+   * full-screen viewport, so the engine still runs correctly in a plain browser.
+   */
+  private _resize(monitors?: Array<{ x: number; y: number; w: number; h: number }>): void {
+    const layout = monitors && monitors.length > 0 ? monitors : null;
+
+    if (!layout) {
+      this._canvas.width = window.screen.width;
+      this._canvas.height = window.screen.height;
+      this._renderer.resize(this._canvas.width, this._canvas.height);
+      return;
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const m of layout) {
+      minX = Math.min(minX, m.x);
+      minY = Math.min(minY, m.y);
+      maxX = Math.max(maxX, m.x + m.w);
+      maxY = Math.max(maxY, m.y + m.h);
+    }
+    this._canvas.width = maxX - minX;
+    this._canvas.height = maxY - minY;
+    this._renderer.setViewports(
+      layout.map((m, index) => ({
+        index,
+        x: m.x - minX,
+        y: m.y - minY,
+        w: m.w,
+        h: m.h,
+      }))
+    );
   }
 
   getFps(): number { return this._fps; }
@@ -795,6 +839,11 @@ class Engine {
    */
   triggerLightning(): void {
     this._renderer.triggerLightning();
+  }
+
+  /** Number of displays the renderer is currently composing for. */
+  getViewportCount(): number {
+    return this._renderer.getViewportCount();
   }
 
   /** Fires the surreal near-miss event, likewise for inspection. */

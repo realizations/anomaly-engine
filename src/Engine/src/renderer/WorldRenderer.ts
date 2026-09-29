@@ -85,6 +85,26 @@ const STRUCTURE_TONE: Record<string, RGB> = {
 export type RenderStyle = 'painterly' | 'flat' | 'riso';
 
 /**
+ * One display's rectangle on the virtual desktop.
+ *
+ * Coordinates are in CSS pixels relative to the virtual desktop origin, which
+ * may be negative when a secondary monitor sits to the left of the primary.
+ */
+export interface MonitorViewport {
+  /** Index in the reported monitor list; 0 is the primary. */
+  index: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Device pixel ratio for this display, which can differ per monitor. */
+  dpr?: number;
+}
+
+/** Used when the host has not reported any monitors yet. */
+const DEFAULT_VIEWPORT: MonitorViewport = { index: 0, x: 0, y: 0, w: 1920, h: 1080 };
+
+/**
  * Default risograph ink pair and stock.
  *
  * Two spot inks only, because that is the constraint the medium actually
@@ -106,6 +126,9 @@ export class WorldRenderer {
   private _crt: CrtTerminal | null = null;
   private _liminal: LiminalInterior | null = null;
   private _uncanny: UncannyLayer | null = null;
+
+  /** One entry per attached display. Empty means "assume one full-screen view". */
+  private _viewports: MonitorViewport[] = [];
 
   /** Cached riso print. The separation is far too expensive to run per frame. */
   private _risoCache: HTMLCanvasElement | null = null;
@@ -143,6 +166,8 @@ export class WorldRenderer {
   private _renderScale = 1;
   private _frameAccum = 0;
   private _frameSamples = 0;
+  /** Last average the quality controller saw, for diagnostics. */
+  private _lastAdaptAvg = 0;
   private _budgetMs = 16.7;
   private _qualityLocked = false;
   private _qualityListeners: Array<(scale: number, frameMs: number) => void> = [];
@@ -275,7 +300,7 @@ export class WorldRenderer {
    * Builds a sub-LSB dither tile.
    *
    * An eight-bit gradient stretched across a wide desktop develops visible
-   * contouring ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â hard steps where the ramp crosses a quantisation boundary.
+   * contouring ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â hard steps where the ramp crosses a quantisation boundary.
    * That is what made the sky look broken rather than soft. A low-amplitude
    * noise tile breaks each contour into grain, which the eye reads as film
    * rather than as a defect.
@@ -417,10 +442,19 @@ export class WorldRenderer {
    * cost of compositing, so a weak GPU can be given a cheaper frame without the
    * wallpaper being letterboxed or resized.
    */
+  /**
+   * Sizes the offscreen buffer to the viewport currently being composed.
+   *
+   * Not to the canvas. With several monitors the canvas spans the whole virtual
+   * desktop, but each monitor is composed at its own size and blitted into its
+   * own rectangle; sizing the buffer to the canvas would render a 1920-wide
+   * scene into a 3840-wide buffer and then squash the whole thing into the
+   * first monitor, leaving the rest empty.
+   */
   private _ensureBuffer(): void {
-    if (!this._canvas.width || !this._canvas.height) return;
-    const bw = Math.max(2, Math.round(this._canvas.width * this._renderScale));
-    const bh = Math.max(2, Math.round(this._canvas.height * this._renderScale));
+    // _w and _h have already been retargeted at the viewport by the caller.
+    const bw = Math.max(2, Math.round(this._w * this._renderScale * this._dpr));
+    const bh = Math.max(2, Math.round(this._h * this._renderScale * this._dpr));
     if (!this._buffer) {
       this._buffer = document.createElement('canvas');
       this._bctx = this._buffer.getContext('2d', { alpha: false })!;
@@ -436,24 +470,52 @@ export class WorldRenderer {
    * worse than one that is very slightly soft, so we trade resolution for frame
    * time and only climb back up once there is headroom.
    */
+  /**
+   * Adapts render scale to hold a frame budget. A wallpaper that stutters is
+   * worse than one that is very slightly soft, so we trade resolution for
+   * frame time and only climb back up once there is headroom.
+   *
+   * The response is proportional rather than a fixed step per window. A fixed
+   * step of 0.1 took about twelve seconds to react to a two-monitor layout that
+   * was running at 3fps, and its floor of 0.5 was still not low enough to
+   * recover. Both symptoms come from the same mistake: treating a fill-rate
+   * problem as something to be walked down.
+   *
+   * Because the cost is fill, time is roughly proportional to area, so area has
+   * to scale with the budget and the *linear* dimension with its square root.
+   * One correction therefore lands close to the right scale in a single step
+   * instead of creeping toward it.
+   */
   private _adaptQuality(frameMs: number): void {
     if (this._qualityLocked) return;
+    // Frames queued up while buffers reallocated after a resize or world change
+    // are not representative. The counter is cleared at those points, not here:
+    // re-arming it per window discarded three frames out of every window and
+    // stretched the correction cycle to nearly six seconds.
     this._frameAccum += frameMs;
     this._frameSamples++;
-    if (this._frameSamples < 45) return;
+    if (this._frameSamples < 16) return;
 
     const avg = this._frameAccum / this._frameSamples;
+    this._lastAdaptAvg = avg;
     this._frameAccum = 0;
     this._frameSamples = 0;
 
     const before = this._renderScale;
-    if (avg > this._budgetMs * 1.15) {
-      this._renderScale = Math.max(0.5, this._renderScale - 0.1);
-    } else if (avg < this._budgetMs * 0.6) {
-      this._renderScale = Math.min(1, this._renderScale + 0.05);
+    const budget = this._budgetMs;
+    if (avg > budget * 1.05) {
+      // Area scales with time, so the linear scale scales with the root.
+      const wanted = Math.sqrt(budget / avg);
+      // Damp the correction so a single slow window does not collapse quality.
+      const next = Math.sqrt(this._renderScale * wanted);
+      this._renderScale = Math.max(0.34, Math.min(1, next));
+    } else if (avg < budget * 0.75) {
+      // Climbing back is deliberately slower than dropping, so the scale does
+      // not oscillate around the budget.
+      this._renderScale = Math.min(1, this._renderScale * 1.06);
     }
-    if (before !== this._renderScale) {
-      this._ensureBuffer();
+
+    if (Math.abs(before - this._renderScale) > 0.004) {
       for (const fn of this._qualityListeners) fn(this._renderScale, avg);
     }
   }
@@ -480,6 +542,56 @@ export class WorldRenderer {
     };
   }
 
+  /**
+   * Reports the attached displays and their geometry.
+   *
+   * The canvas is sized to the whole virtual desktop and each display's
+   * rectangle within it, because the desktop is one continuous surface that
+   * Windows clips per monitor. The scene is then composed once per display, so
+   * each gets its own composition rather than a crop of one very wide
+   * panorama ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a 32:9 viewport would put the focal point in the middle of the
+   * gap between two monitors.
+   */
+  setViewports(viewports: MonitorViewport[]): void {
+    const valid = viewports.filter((v) => v && v.w > 0 && v.h > 0);
+    this._viewports = valid;
+
+    if (valid.length === 0) return;
+
+    // Virtual desktop bounds, which may have a negative origin when a
+    // secondary sits to the left of or above the primary.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const v of valid) {
+      if (v.x < minX) minX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.x + v.w > maxX) maxX = v.x + v.w;
+      if (v.y + v.h > maxY) maxY = v.y + v.h;
+    }
+    // Re-base the viewports onto a zero origin so the canvas math stays simple.
+    for (const v of valid) {
+      v.x -= minX;
+      v.y -= minY;
+    }
+    this._viewports = valid;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this._dpr = dpr;
+    this._canvas.width = Math.round((maxX - minX) * dpr);
+    this._canvas.height = Math.round((maxY - minY) * dpr);
+    this._canvas.style.width = `${maxX - minX}px`;
+    this._canvas.style.height = `${maxY - minY}px`;
+
+    // Everything sized to the canvas has to be rebuilt.
+    this._buffer = null;
+    this._finish = null;
+    this._risoCache = null;
+    this._risoCacheValid = false;
+  }
+
+  getViewportCount(): number {
+    return this._viewports.length > 0 ? this._viewports.length : 1;
+  }
+
   resize(w: number, h: number): void {
     this._dpr = Math.min(window.devicePixelRatio || 1, 2);
     this._w = w;
@@ -487,9 +599,19 @@ export class WorldRenderer {
     this._canvas.width = Math.round(w * this._dpr);
     this._canvas.height = Math.round(h * this._dpr);
     this._ensureBuffer();
-    // A print is sized to the sheet, and so is the finish layer.
+    // A print is sized to the sheet, and so is the finish layer. Timings from
+
+    // before the reallocation are not representative, so the quality window
+
+    // restarts rather than averaging across the change.
+
     this._risoCacheValid = false;
+
     this._finish = null;
+
+    this._frameAccum = 0;
+
+    this._frameSamples = 0;
   }
 
   setWeather(w: WeatherState): void {
@@ -624,20 +746,70 @@ export class WorldRenderer {
     this._boltPath = [];
   }
 
+  /**
+   * Draws one frame.
+   *
+   * With a single viewport this is the obvious thing: compose the scene at
+   * `_w` x `_h` into an offscreen buffer and blit it up. The buffer is what
+   * makes adaptive quality possible, since a slower machine draws a smaller
+   * buffer and it is scaled up on the way out.
+   *
+   * With several viewports ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â one per monitor, over a canvas the size of the
+   * whole virtual desktop ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the same frame is composed once per monitor and
+   * blitted into that monitor's rectangle. Each monitor therefore gets its own
+   * composition rather than a crop of one wide panorama, which is the whole
+   * reason this is not just a single wide viewport.
+   */
   render(date: Date): void {
     const now = performance.now();
     const dt = this._last === 0 ? 16.7 : Math.min(50, now - this._last);
     this._last = now;
     this._t += (dt / 1000) * this._motionScale;
 
+    const out = this._outCtx!;
+    out.setTransform(1, 0, 0, 1, 0, 0);
+    out.imageSmoothingEnabled = true;
+    out.imageSmoothingQuality = 'high';
+    // Clear the whole canvas, not just the primary viewport, or a previously
+    // larger monitor layout would leave stale pixels behind.
+    out.fillStyle = '#05060f';
+    out.fillRect(0, 0, this._canvas.width, this._canvas.height);
+
+    const viewports = this._viewports.length > 0 ? this._viewports : [DEFAULT_VIEWPORT];
+    let slowest = 0;
+    for (const vp of viewports) {
+      const t0 = this._profile ? performance.now() : 0;
+      this._composeViewport(date, vp, vp.index === 0, dt);
+      if (this._profile) {
+        const t1 = performance.now();
+        this._phases.total = t1 - t0;
+        slowest = Math.max(slowest, t1 - t0);
+      }
+    }
+
+    this._ctx = out;
+    this._adaptQuality(slowest || performance.now() - now);
+  }
+
+  /** Composes and blits a single viewport. */
+  private _composeViewport(date: Date, vp: MonitorViewport, isPrimary: boolean, dt: number): void {
     // The scene is drawn into the reduced-resolution buffer, then blitted to the
     // display canvas. At renderScale 1 this is a straight copy.
+    const vw = vp.w;
+    const vh = vp.h;
+    if (vw < 2 || vh < 2) return;
+
+    // Re-target the renderer at this viewport for the duration of the compose.
+    const prevW = this._w;
+    const prevH = this._h;
+    this._w = vw;
+    this._h = vh;
     this._ensureBuffer();
-    if (this._profile) this._phases.scene = now;
+
     const scale = this._renderScale * this._dpr;
     this._ctx = this._bctx!;
     this._ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
+    this._ctx.clearRect(0, 0, this._buffer!.width, this._buffer!.height);
 
     const g = this._ctx;
     g.save();
@@ -658,7 +830,8 @@ export class WorldRenderer {
       // landscape code stays honest about what it assumes.
       this._liminal ??= new LiminalInterior(this._world);
       this._liminal.render(g, this._w, this._h, this._world, grade, dt);
-    } else {      this._drawSky(grade);
+    } else {
+      this._drawSky(grade);
       this._drawStars(grade);
       this._drawSun(grade, hour);
       this._drawMoon(grade, hour, date);
@@ -686,7 +859,10 @@ export class WorldRenderer {
     this._uncanny.update(dt);
     this._uncanny.render(g, this._w, this._h, this._world, grade, this._detail(grade));
 
-    this._drawTerminal(grade, hour, dt);
+    // The observatory terminal is a single piece of equipment standing in the
+    // world, not something installed on every monitor. Drawn once, on the
+    // primary; the secondary displays are just looking at the same place.
+    if (isPrimary) this._drawTerminal(grade, hour, dt);
 
     // Phase timings, sampled rather than accumulated. The expensive parts of
     // this renderer are full-screen composite passes, and knowing which one
@@ -713,22 +889,31 @@ export class WorldRenderer {
 
     g.restore();
 
-    // Blit the buffer up to the display canvas, restoring the display context
-    // for the next frame.
+    // Blit this viewport's buffer into its own rectangle on the virtual desktop.
+    // The buffer is already scaled by renderScale and dpr, so the destination is
+    // expressed in device pixels directly.
     const out = this._outCtx!;
     const blitStart = this._profile ? performance.now() : 0;
     out.setTransform(1, 0, 0, 1, 0, 0);
     out.imageSmoothingEnabled = true;
     out.imageSmoothingQuality = 'high';
-    out.drawImage(this._buffer!, 0, 0, this._canvas.width, this._canvas.height);
-    this._ctx = out;
+    const dpr = this._dpr;
+    out.drawImage(
+      this._buffer!,
+      Math.round(vp.x * dpr), Math.round(vp.y * dpr),
+      Math.round(vp.w * dpr), Math.round(vp.h * dpr)
+    );
+
+    // Restore the renderer's own dimensions for anything that reads them
+    // outside a compose, such as the CRT's own state.
+    this._w = prevW;
+    this._h = prevH;
+
     if (this._profile) {
       const t = performance.now();
       this._phases.blit = t - blitStart;
       this._phases.post = this._phases.post - blitStart;
-      this._phases.total = t - now;
     }
-    this._adaptQuality(performance.now() - now);
   }
 
   /**
@@ -737,7 +922,7 @@ export class WorldRenderer {
    * free and this runs on a surface that is expected to sit idle for hours.
    */
   getPhaseTimings(): Record<string, number> {
-    return { ...this._phases };
+    return { ...this._phases, budgetMs: this._budgetMs, adaptAvgMs: this._lastAdaptAvg, qualityLocked: this._qualityLocked ? 1 : 0 };
   }
 
   setProfiling(on: boolean): void {

@@ -192,10 +192,18 @@ const notesText = await page.evaluate(() => document.getElementById('anomaly-fie
 check('field notes panel renders with world lore', notesText.length > 0 && /FIELD NOTES/i.test(notesText));
 check('field notes always offers a denial', /ALSO CONSISTENT WITH|Also consistent with/i.test(notesText));
 await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:notes')));
-await page.waitForTimeout(600);
-check('field notes toggles closed',
-  await page.evaluate(() => !document.getElementById('anomaly-field-notes') ||
-    getComputedStyle(document.getElementById('anomaly-field-notes')).opacity === '0'));
+// Poll rather than sleeping a fixed interval. A fixed wait passed in
+// isolation and failed when the whole verification suite ran back to back under
+// load, which is the classic shape of a flaky test: it was asserting on the
+// clock instead of on the condition.
+const notesHidden = await page
+  .waitForFunction(() => {
+    const el = document.getElementById('anomaly-field-notes');
+    return !el || getComputedStyle(el).opacity === '0';
+  }, { timeout: 5000 })
+  .then(() => true)
+  .catch(() => false);
+check('field notes toggles closed', notesHidden);
 
 // --- the status surface the settings window reads ---
 const status = await page.evaluate(() => window.__engine.getStatus());
