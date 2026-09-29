@@ -4,6 +4,7 @@ import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
 import { BUILT_IN_WORLDS } from '../worlds/registry.js';
 import { CrtTerminal } from './CrtTerminal.js';
 import { LiminalInterior } from './LiminalInterior.js';
+import { UncannyLayer } from './UncannyLayer.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -104,6 +105,7 @@ export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
   private _crt: CrtTerminal | null = null;
   private _liminal: LiminalInterior | null = null;
+  private _uncanny: UncannyLayer | null = null;
 
   /** Telemetry the terminal reports, driven by the engine so the CRT module
    *  stays decoupled from the journal and secret systems. */
@@ -492,6 +494,23 @@ export class WorldRenderer {
     this._world = world;
     this._seed = world.terrain.seed;
     this._buildScatter();
+    // The near-miss details are a property of the place, so they are rebuilt
+    // per world. Carrying them across would make two locations feel like the
+    // same location with different wallpaper.
+    this._uncanny = new UncannyLayer(world);
+    this._liminal = world.biome === 'liminal-interior' ? new LiminalInterior(world) : null;
+  }
+
+  /**
+   * Fires one impossible thing. Never two at once: a single violation reads as
+   * a dream, two read as a joke.
+   */
+  triggerSurreal(): void {
+    this._uncanny?.triggerSurreal();
+  }
+
+  hasSurreal(): boolean {
+    return this._uncanny?.hasSurreal() ?? false;
   }
 
   getWorld(): WorldDefinition {
@@ -610,8 +629,7 @@ export class WorldRenderer {
       // landscape code stays honest about what it assumes.
       this._liminal ??= new LiminalInterior(this._world);
       this._liminal.render(g, this._w, this._h, this._world, grade, dt);
-    } else {
-      this._drawSky(grade);
+    } else {      this._drawSky(grade);
       this._drawStars(grade);
       this._drawSun(grade, hour);
       this._drawMoon(grade, hour, date);
@@ -631,6 +649,14 @@ export class WorldRenderer {
     this._drawMeteor();
     this._drawBolt();
     this._drawAnomalyOverlays();
+
+    // The near-miss layer sits under the terminal, over the landscape. Interiors
+    // get it too: a liminal space that is merely empty is a corridor, and a
+    // corridor whose count is very slightly wrong is a liminal space.
+    this._uncanny ??= new UncannyLayer(this._world);
+    this._uncanny.update(dt);
+    this._uncanny.render(g, this._w, this._h, this._world, grade, this._detail(grade));
+
     this._drawTerminal(grade, hour, dt);
     if (this._style === 'painterly') {
       this._drawGrade(grade);
