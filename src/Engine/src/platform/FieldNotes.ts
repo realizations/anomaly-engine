@@ -98,7 +98,7 @@ export class FieldNotes {
       border-radius: 8px;
       padding: 22px 24px;
       z-index: 999998;
-      font: 13px/1.7 "Segoe UI", system-ui, sans-serif;
+      font: 13px/1.72 'Inter', 'Segoe UI', system-ui, sans-serif;
       opacity: 0;
       transition: opacity 0.45s ease;
       pointer-events: none;
@@ -145,11 +145,11 @@ export class FieldNotes {
       .slice(0, 12)
       .map((e) => {
         const clue = e.clues?.length
-          ? `<div style="color:#7e8c96;font-size:12px;margin-top:3px">${this._esc(e.clues.join(' · '))}</div>`
+          ? `<div style="color:#7e8c96;font-size:12px;margin-top:3px">${this._esc(e.clues.join(' Â· '))}</div>`
           : '';
         return `<li style="margin-bottom:13px">
           <div style="color:#c9c6be">${this._esc(e.anomalyName)}</div>
-          <div style="color:#7b7a86;font-size:12px">${this._esc(e.rarity)} · ${this._when(e.timestamp)}</div>
+          <div style="color:#7b7a86;font-size:12px">${this._esc(e.rarity)} Â· ${this._when(e.timestamp)}</div>
           ${clue}
         </li>`;
       })
@@ -176,8 +176,8 @@ export class FieldNotes {
 
     this._el.innerHTML = `
       <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#7b7a86">Field notes</div>
-      <h1 style="font-size:19px;font-weight:600;margin:4px 0 0;color:#e9e7e1">${this._esc(w?.name ?? 'Unknown world')}</h1>
-      <div style="font-size:12px;color:#7b7a86;margin-bottom:16px">${this._esc(w?.biome ?? '')} · seed ${this._esc(w?.terrain?.seed ?? '')}</div>
+      <h1 style="font-family:'Space Grotesk', 'Segoe UI', sans-serif;font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:4px 0 0;color:#e9e7e1">${this._esc(w?.name ?? 'Unknown world')}</h1>
+      <div style="font-size:12px;color:#7b7a86;margin-bottom:16px">${this._esc(w?.biome ?? '')} Â· seed ${this._esc(w?.terrain?.seed ?? '')}</div>
       ${lore}
       <p style="color:#9d9a92;margin:0 0 6px;font-size:13px">${this._esc(w?.description ?? '')}</p>
       ${denial}

@@ -289,14 +289,14 @@ export class CrtTerminal {
     // Clip to the rows that fit, shrinking the type first if a line is too long
     // to fit the tube. The return summary is the one thing that must never be
     // clipped, because the lost words would be the unsettling ones.
-    g.font = `${fs}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+    g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     g.textBaseline = 'top';
     const inner = w - padX * 2;
     let longest = 0;
     for (const row of shown) longest = Math.max(longest, g.measureText(row.text).width);
     if (longest > inner && longest > 0) {
       fs = Math.max(6, Math.floor(fs * (inner / longest)));
-      g.font = `${fs}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+      g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     }
     const lineH = fs * 1.5;
     const maxRows = Math.floor((h - padY * 2) / lineH);

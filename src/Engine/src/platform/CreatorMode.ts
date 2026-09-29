@@ -84,7 +84,7 @@ export class CreatorMode {
       right: 10px;
       background: rgba(20, 20, 40, 0.95);
       color: #e0e0ff;
-      font-family: 'Consolas', monospace;
+      font-family: 'Plex Mono', Consolas, monospace;
       font-size: 12px;
       padding: 16px;
       border-radius: 6px;

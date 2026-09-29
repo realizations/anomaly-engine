@@ -20,17 +20,60 @@
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
   </ItemGroup>
 
+  <!--
+    Typefaces are embedded as WPF resources rather than read from disk, so the
+    settings window renders correctly from any working directory and cannot end
+    up silently falling back to Segoe UI on a machine that happens to lack the
+    font. All are SIL OFL and unmodified, so embedding them is permitted; see
+    assets/manifest.json for the full provenance record.
+  -->
   <ItemGroup>
-    <RendererFiles Include="..\Engine\renderer\**\*" Condition="Exists('..\Engine\renderer\index.html')" />
+    <Resource Include="..\..\assets\fonts\Inter-Regular.ttf">
+      <Link>Fonts\Inter-Regular.ttf</Link>
+    </Resource>
+<Resource Include="..\..\assets\fonts\Inter-SemiBold.ttf">
+      <Link>Fonts\Inter-SemiBold.ttf</Link>
+    </Resource>
+    <Resource Include="..\..\assets\fonts\SpaceGrotesk-Medium.ttf">
+      <Link>Fonts\SpaceGrotesk-Medium.ttf</Link>
+    </Resource>
+    <Resource Include="..\..\assets\fonts\SpaceGrotesk-Bold.ttf">
+      <Link>Fonts\SpaceGrotesk-Bold.ttf</Link>
+    </Resource>
+    <Resource Include="..\..\assets\fonts\IBMPlexMono-Regular.ttf">
+      <Link>Fonts\IBMPlexMono-Regular.ttf</Link>
+    </Resource>
   </ItemGroup>
 
   <Target Name="BuildRenderer" BeforeTargets="Build">
     <Exec Command="npm run build" WorkingDirectory="..\Engine" Condition="Exists('..\Engine\package.json')" />
   </Target>
 
-  <Target Name="CopyRendererFiles" AfterTargets="Build">
-    <Copy SourceFiles="@(RendererFiles)" DestinationFiles="@(RendererFiles->'$(OutDir)renderer\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\Engine\src\index.html" DestinationFiles="$(OutDir)renderer\index.html" SkipUnchangedFiles="true" />
+  <!--
+    The renderer glob must be evaluated when this target RUNS, not when the project
+    is loaded. A project-level ItemGroup is evaluated before BuildRenderer has
+    produced src\Engine\renderer, so on a clean clone it matched nothing and the
+    build "succeeded" while deploying no renderer at all.
+
+    The deployed directory is removed first. Copy is additive, so without this
+    anything deleted from the renderer source stayed in the app output forever:
+    pruning four typefaces left 1.5MB of dead fonts shipping, and any removed
+    bundle would have kept being served. An output directory that is meant to
+    mirror its source has to be rebuilt, not amended.
+  -->
+  <Target Name="CopyRendererFiles" AfterTargets="Build" DependsOnTargets="BuildRenderer">
+    <ItemGroup>
+      <RendererFiles Include="..\Engine\renderer\**\*" />
+    </ItemGroup>
+    <Error Condition="'@(RendererFiles)' == ''"
+           Text="Renderer build produced no files. Expected ..\Engine\renderer to exist. Run 'npm run build' in src/Engine." />
+    <RemoveDir Directories="$(OutDir)renderer" />
+    <MakeDir Directories="$(OutDir)renderer" Condition="!Exists('$(OutDir)renderer')" />
+    <Copy SourceFiles="@(RendererFiles)"
+          DestinationFiles="@(RendererFiles->'$(OutDir)renderer\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+    <Error Condition="!Exists('$(OutDir)renderer\index.html')"
+           Text="Deployed renderer is missing index.html. The host would start and render nothing." />
   </Target>
 
 </Project>

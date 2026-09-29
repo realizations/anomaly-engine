@@ -1,0 +1,290 @@
+{
+  "$schema": "./manifest.schema.json",
+  "policy": {
+    "summary": "Every third-party asset must permit commercial use, modification and redistribution, because a paid tier may ship later.",
+    "preferred": "CC0-1.0 and PUBLIC-DOMAIN carry no downstream obligations.",
+    "accepted": [
+      "CC0-1.0",
+      "PUBLIC-DOMAIN",
+      "CC-BY-4.0",
+      "CC-BY-3.0",
+      "OFL-1.1 (fonts only)",
+      "MIT",
+      "PROPRIETARY-ORIGINAL (work we authored)"
+    ],
+    "rejected": [
+      "CC-BY-NC / CC-BY-NC-SA / CC-BY-NC-ND - non-commercial, incompatible with a paid tier",
+      "CC-BY-ND - we composite assets into generated scenes",
+      "CC-BY-SA - share-alike is viral and would contaminate the codebase",
+      "GPL / LGPL / MPL / EPL / CDDL - copyleft",
+      "CC-BY (v2.0 and earlier) - superseded, use 3.0 or 4.0",
+      "Anything 'personal use only', 'evaluation only', or 'all rights reserved'"
+    ],
+    "trademarks": "A copyright licence never grants trademark rights. Do not ship the Kenney, Poly Haven, NASA, ESA, Blender or Godot logos or names.",
+    "previews": "Never vendor a source site's preview image, screenshot or render. Those are routinely outside the asset licence or All Rights Reserved even when the asset itself is CC0."
+  },
+  "assets": [
+    {
+      "path": "src/Engine/src/render/noise.ts",
+      "license": "PROPRIETARY-ORIGINAL",
+      "author": "Anomaly Engine contributors",
+      "sourceUrl": "https://github.com/realizations/anomaly-engine",
+      "notes": "First-party procedural noise. No third-party code."
+    },
+    {
+      "path": "src/Engine/src/render/palette.ts",
+      "license": "PROPRIETARY-ORIGINAL",
+      "author": "Anomaly Engine contributors",
+      "sourceUrl": "https://github.com/realizations/anomaly-engine",
+      "notes": "First-party time-of-day grading ramps and moon phase maths."
+    },
+    {
+      "path": "src/Engine/src/renderer/WorldRenderer.ts",
+      "license": "PROPRIETARY-ORIGINAL",
+      "author": "Anomaly Engine contributors",
+      "sourceUrl": "https://github.com/realizations/anomaly-engine",
+      "notes": "First-party procedural scenery. All geometry is generated from seeded noise at runtime, so the project ships zero third-party art."
+    },
+    {
+      "path": "docs/images",
+      "license": "PROPRIETARY-ORIGINAL",
+      "author": "Anomaly Engine contributors",
+      "sourceUrl": "https://github.com/realizations/anomaly-engine",
+      "notes": "First-party renders produced by tools/bakeoff.mjs and tools/e2e.mjs from the engine itself."
+    },
+    {
+      "path": "assets/fonts/IBMPlexMono-Regular.ttf",
+      "license": "OFL-1.1",
+      "author": "IBM",
+      "sourceUrl": "https://github.com/IBM/plex",
+      "licenseText": "assets/fonts/OFL-ibmplexmono.txt",
+      "version": "2.3",
+      "modified": false,
+      "reservedFontName": "Plex",
+      "notes": "Terminal face for the observatory readout. Unmodified, as OFL reserves the family name against modified versions."
+    },
+    {
+      "path": "assets/fonts/Inter-Regular.ttf",
+      "license": "OFL-1.1",
+      "author": "Rasmus Andersson",
+      "sourceUrl": "https://github.com/rsms/inter",
+      "licenseText": "assets/fonts/OFL-inter.txt",
+      "version": "4.001",
+      "modified": false,
+      "reservedFontName": "Inter",
+      "notes": "Settings window and field notes. Unmodified."
+    },
+    {
+      "path": "assets/fonts/Inter-SemiBold.ttf",
+      "license": "OFL-1.1",
+      "author": "Rasmus Andersson",
+      "sourceUrl": "https://github.com/rsms/inter",
+      "licenseText": "assets/fonts/OFL-inter.txt",
+      "version": "4.001",
+      "modified": false,
+      "reservedFontName": "Inter",
+      "notes": "Unmodified."
+    },
+    {
+      "path": "assets/fonts/SpaceGrotesk-Medium.ttf",
+      "license": "OFL-1.1",
+      "author": "Florian Karsten",
+      "sourceUrl": "https://github.com/floriankarsten/space-grotesk",
+      "licenseText": "assets/fonts/OFL-spacegrotesk.txt",
+      "version": "2.000",
+      "modified": false,
+      "reservedFontName": "Space Grotesk",
+      "notes": "Unmodified."
+    },
+    {
+      "path": "assets/fonts/SpaceGrotesk-Bold.ttf",
+      "license": "OFL-1.1",
+      "author": "Florian Karsten",
+      "sourceUrl": "https://github.com/floriankarsten/space-grotesk",
+      "licenseText": "assets/fonts/OFL-spacegrotesk.txt",
+      "version": "2.000",
+      "modified": false,
+      "reservedFontName": "Space Grotesk",
+      "notes": "Unmodified."
+    }
+  ],
+  "sources": [
+    {
+      "name": "Poly Haven",
+      "url": "https://polyhaven.com/license",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["HDRIs", "textures", "3D models"],
+      "verifiedOn": "2026-09-29",
+      "quote": "You can use our assets for any purpose, including commercial work. You do not need to give credit or attribution when using them (although it is appreciated). You can redistribute them, share them around, include them when sharing your own work, or even in a product you sell.",
+      "gotchas": "The CC0 grant covers the assets only, not site chrome. Their logo is trademarked."
+    },
+    {
+      "name": "ambientCG",
+      "url": "https://docs.ambientcg.com/license",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["PBR textures", "HDRIs", "3D models"],
+      "verifiedOn": "2026-09-29",
+      "quote": "You can copy, modify, distribute and perform the assets, even for commercial purposes, all without asking permission. You can include the raw files in your project, for example a video game.",
+      "gotchas": "None material. Cleanest licence surface of the sources we evaluated."
+    },
+    {
+      "name": "Kenney",
+      "url": "https://kenney.nl/support",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["2D sprites", "tilesets", "UI", "fonts"],
+      "verifiedOn": "2026-09-29",
+      "quote": "all game assets on the asset pages are public domain licensed (CC0). You're free to use them, even in commercial projects.",
+      "gotchas": "Logo is reserved and must not be used. Per-asset licence field is shown on every page, so spot-check it."
+    },
+    {
+      "name": "Quaternius",
+      "url": "https://quaternius.com/license.html",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": false,
+      "categories": ["3D models", "animated rigs", "textures"],
+      "verifiedOn": "2026-09-29",
+      "quote": "You can use these assets, free of charge, in personal, educational, and commercial games and other projects, with no credit required. You just can't resell or redistribute the assets themselves as assets.",
+      "gotchas": "Safe to ship inside a product; do not republish the raw asset files. Patreon source kits are a separate paid, non-CC0 tier."
+    },
+    {
+      "name": "Godot Shaders (CC0 and MIT entries only)",
+      "url": "https://godotshaders.com/license/",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["water", "clouds", "foliage", "sky", "post-processing shaders"],
+      "verifiedOn": "2026-09-29",
+      "quote": "Anyone will be able to use the shaders posted to the site freely, both in personal and commercial products.",
+      "gotchas": "Must filter out GPL-tagged shaders. Site explicitly excludes its own featured images, screenshots and videos from the licence."
+    },
+    {
+      "name": "Freesound (CC0 filter only)",
+      "url": "https://freesound.org/help/faq/#licenses",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["ambience", "field recordings", "loops", "foley"],
+      "verifiedOn": "2026-09-29",
+      "quote": "for the 'zero' license you can do pretty much what you want with the sound.",
+      "gotchas": "Library is mixed-licence and includes CC-BY-NC. You MUST filter to license:\"Creative Commons 0\". Legacy Sampling+ content is not usable."
+    },
+    {
+      "name": "Sonniss GDC audio bundles",
+      "url": "https://sonniss.com/gdc-bundle-license/",
+      "license": "PROPRIETARY-ORIGINAL",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": false,
+      "categories": ["rain", "wind", "water", "fire", "impacts", "UI"],
+      "verifiedOn": "2026-09-29",
+      "quote": "Licensee may use and modify the licensed sound effects for personal and commercial projects without attribution to the original creator.",
+      "gotchas": "Custom EULA, not CC0. May be sold as incorporated into your project but not resold as sound effects. Expressly prohibits use for AI training. Record which licence version governs your download: v2.0 took effect 2026-08-27 and is not retroactive."
+    },
+    {
+      "name": "USGS Astrogeology / LROC",
+      "url": "https://astrogeology.usgs.gov/",
+      "license": "PUBLIC-DOMAIN",
+      "attribution": null,
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["lunar texture maps", "DEMs", "planetary geology"],
+      "verifiedOn": "2026-09-29",
+      "quote": "Sources/Usage: Public Domain.",
+      "gotchas": "Files are very large (99 MB to 189 GB). Citation appreciated; LROC asks that you cite the team and ASU."
+    },
+    {
+      "name": "ESA/Hubble and ESA/Webb",
+      "url": "https://esahubble.org/public/copyright/",
+      "license": "CC-BY-4.0",
+      "attribution": "Credit: ESA/Hubble & NASA",
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["deep field imagery", "nebulae", "star clusters"],
+      "verifiedOn": "2026-09-29",
+      "quote": "artwork you produced based on Hubble images may be sold for your own profit as long as you credit clearly and visibly.",
+      "gotchas": "Many images are dual-licensed CC BY 4.0 or ESA Standard Licence: always take the CC BY 4.0 branch. Must not imply ESA endorsement. esa.int itself is NOT CC."
+    },
+    {
+      "name": "Google Fonts / SIL OFL",
+      "url": "https://opensource.org/license/ofl",
+      "license": "OFL-1.1",
+      "attribution": "See bundled OFL.txt",
+      "commercial": true,
+      "derivatives": true,
+      "redistribution": true,
+      "categories": ["UI fonts", "display fonts", "monospace"],
+      "verifiedOn": "2026-09-29",
+      "quote": "Original or Modified Versions of the Font Software may be bundled, redistributed and/or sold with any software, provided that each copy contains the above copyright notice and this license.",
+      "gotchas": "If you modify or subset a font you must rename it if its OFL.txt declares a Reserved Font Name. Kenney Fonts (CC0) avoid this entirely and are preferred for pixel/display faces."
+    }
+  ],
+  "rejectedSources": [
+    {
+      "name": "ShaderToy (default pool)",
+      "url": "https://www.shadertoy.com/terms",
+      "reason": "Default licence is CC Attribution-NonCommercial-ShareAlike 3.0 - non-commercial AND viral AND attribution. Only usable if an individual shader carries an explicit permissive header."
+    },
+    {
+      "name": "Pexels",
+      "url": "https://www.pexels.com/license/",
+      "reason": "Explicitly prohibits wallpaper apps and any service that compiles content into a competing collection: \"Wallpaper apps are not permitted when they distribute Pexels content as wallpapers in a Standalone way, or when they compile content in a way that replicates a similar or competing service.\" This is precisely our product category."
+    },
+    {
+      "name": "Pixabay",
+      "url": "https://pixabay.com/service/license-summary/",
+      "reason": "Moved off CC0 in January 2019. Prohibits standalone distribution and bans using content as a digital wallpaper."
+    },
+    {
+      "name": "Unsplash",
+      "url": "https://unsplash.com/license",
+      "reason": "Removed CC0 in 2017. Licence is not irrevocable, bars selling images without significant modification, and bars compiling content into a competing service."
+    },
+    {
+      "name": "Coverr",
+      "url": "https://coverr.co/license",
+      "reason": "Started as CC0 and deliberately moved away from it specifically because stock sites resold their videos. Bars mobile app builders and competing services."
+    },
+    {
+      "name": "HYG star database",
+      "url": "https://codeberg.org/astronexus/hyg",
+      "reason": "CC-BY-SA 4.0 since v4.0. Share-alike is a legal judgement call for external data files; get counsel before shipping inside a paid tier."
+    },
+    {
+      "name": "Stellarium sky cultures",
+      "url": "https://stellarium.org/skycultures",
+      "reason": "Interesting constellation art is CC-BY-NC-SA, CC-BY-NC-ND or CC-BY-ND. Excluded wholesale."
+    },
+    {
+      "name": "Lospec palettes",
+      "url": "https://lospec.com/palette-list",
+      "reason": "No site-wide licence grant, lospec.com/terms 404s, and most palette pages carry no licence field. Generate our own palettes instead."
+    },
+    {
+      "name": "Mixkit (Restricted License items)",
+      "url": "https://mixkit.co/license/",
+      "reason": "Split between a Free License and a Restricted License that is personal-projects-only. Per-item checking required and raw media redistribution is restricted."
+    }
+  ]
+}

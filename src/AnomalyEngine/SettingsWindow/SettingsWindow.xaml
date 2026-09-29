@@ -7,7 +7,7 @@
         WindowStartupLocation="CenterScreen"
         Background="#0D1014"
         Foreground="#E4E9F0"
-        FontFamily="Segoe UI"
+        FontFamily="pack://application:,,,/Fonts/Inter-Regular.ttf#Inter"
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Ideal"
         SnapsToDevicePixels="True">

@@ -165,8 +165,14 @@ class Engine {
     this._resize();
     window.addEventListener('resize', () => this._resize());
 
+    // The boot line is the world's own epitaph, not a fixed string. Every world
+    // carries one, and showing the right one is the first thing that says the
+    // place has a history rather than a theme.
     const boot = document.getElementById('anomaly-boot');
     if (boot) {
+      const world = this._worlds.getActive() ?? this._worlds.getAll()[0];
+      const epitaph = world?.lore?.epitaph?.trim();
+      if (epitaph) boot.textContent = epitaph;
       window.setTimeout(() => {
         boot.classList.add('gone');
         window.setTimeout(() => boot.remove(), 800);

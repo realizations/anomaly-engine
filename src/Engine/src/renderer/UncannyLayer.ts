@@ -204,7 +204,7 @@ export class UncannyLayer {
   private _drawGlyphs(g: CanvasRenderingContext2D, w: number, h: number, detail: number): void {
     const fs = Math.max(6, Math.round(h * 0.014));
     g.save();
-    g.font = `${fs}px ui-monospace, Consolas, monospace`;
+    g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     g.textBaseline = 'middle';
     for (const gl of this._glyphs) {
       // Very low alpha, and it breathes. A steady mark reads as graffiti; a

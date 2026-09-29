@@ -63,7 +63,7 @@ export class DebugOverlay {
       left: 10px;
       background: rgba(0, 0, 0, 0.85);
       color: #00ff88;
-      font-family: 'Consolas', 'Courier New', monospace;
+      font-family: 'Plex Mono', Consolas, monospace;
       font-size: 12px;
       padding: 12px;
       border-radius: 4px;
