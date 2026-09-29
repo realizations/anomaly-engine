@@ -18,7 +18,8 @@ export type BiomeId =
   | 'alpine'
   | 'coast'
   | 'high-desert'
-  | 'salt-marsh';
+  | 'salt-marsh'
+  | 'liminal-interior';
 
 export type StructureKind =
   | 'cabin'
@@ -103,6 +104,37 @@ export interface SkyProfile {
   moonlight?: number;
 }
 
+/**
+ * Liminal interior profile.
+ *
+ * A liminal space is not frightening because it is dark; it is unsettling
+ * because it is *almost* ordinary. The geometry has to be mundane and almost
+ * right, because the unease comes entirely from the gap between what you expect
+ * and what you get. Every field here controls one specific way the space can be
+ * subtly wrong.
+ */
+export interface LiminalProfile {
+  /** Where the corridor's vanishing point sits, 0..1 across the viewport.
+   *  Off-centre is unsettling; dead centre reads as a diagram. */
+  vanishingX?: number;
+  /** Corridor depth as a count of bays. More bays means more repetition,
+   *  which is what turns a hallway into something you cannot stop noticing. */
+  bays?: number;
+  /** Floor tile size in pixels. Institutional sizes feel wrong. */
+  tile?: number;
+  /** 0 = no ceiling, 1 = fully enclosed. Liminal spaces are usually closed. */
+  ceiling?: number;
+  /** Fluorescent tube brightness, 0..1. */
+  lightLevel?: number;
+  /** Hue of the institutional light. Slightly green or slightly warm reads as
+   *  "lighting that is not quite right" far more than neutral white. */
+  lightTint?: RGB8;
+  /** How strongly the walls repeat. 0 = varied, 1 = identical panels. */
+  uniformity?: number;
+  /** Doors or openings down one side, 0 = none. */
+  doors?: number;
+}
+
 export interface WorldStructure {
   kind: StructureKind;
   /** Horizontal position, 0..1 across the viewport. */
@@ -139,6 +171,8 @@ export interface WorldDefinition {
   biome: BiomeId;
   terrain: TerrainProfile;
   sky?: SkyProfile;
+  /** Interior geometry. Only meaningful for the liminal-interior biome. */
+  liminal?: LiminalProfile;
   palette?: WorldPalette;
   structures?: WorldStructure[];
   features?: {
@@ -158,7 +192,9 @@ export interface WorldValidation {
   warnings: string[];
 }
 
-const BIOMES: BiomeId[] = ['temperate-forest', 'alpine', 'coast', 'high-desert', 'salt-marsh'];
+const BIOMES: BiomeId[] = [
+  'temperate-forest', 'alpine', 'coast', 'high-desert', 'salt-marsh', 'liminal-interior',
+];
 const STRUCTURES: StructureKind[] = [
   'cabin', 'radio-tower', 'observatory', 'lighthouse', 'ruin', 'well',
   'dishes', 'cairn', 'pylon-run', 'fence-line', 'rock-field', 'reed-bank',
@@ -222,6 +258,30 @@ export function validateWorld(input: unknown): WorldValidation {
   }
   if (w.lore && !w.lore.deniability?.length) {
     warnings.push('lore has no deniability lines, so anomalies cannot be explained away');
+  }
+  if (w.biome === 'liminal-interior' && !w.liminal) {
+    warnings.push('liminal-interior world has no liminal profile, so it will use the engine defaults');
+  }
+  if (w.biome !== 'liminal-interior' && w.liminal) {
+    warnings.push('world defines a liminal profile but is not a liminal-interior, so it will be ignored');
+  }
+  if (w.liminal) {
+    const l = w.liminal;
+    if (l.bays !== undefined && (typeof l.bays !== 'number' || l.bays < 2 || l.bays > 40)) {
+      errors.push('liminal.bays must be a number between 2 and 40');
+    }
+    if (l.tile !== undefined && (typeof l.tile !== 'number' || l.tile < 12 || l.tile > 160)) {
+      errors.push('liminal.tile must be a number between 12 and 160');
+    }
+    for (const key of ['ceiling', 'lightLevel', 'uniformity'] as const) {
+      const v = l[key];
+      if (v !== undefined && (typeof v !== 'number' || v < 0 || v > 1)) {
+        errors.push(`liminal.${key} must be between 0 and 1`);
+      }
+    }
+    if (l.vanishingX !== undefined && (typeof l.vanishingX !== 'number' || l.vanishingX < 0.1 || l.vanishingX > 0.9)) {
+      errors.push('liminal.vanishingX must be between 0.1 and 0.9');
+    }
   }
 
   return { valid: errors.length === 0, errors, warnings };

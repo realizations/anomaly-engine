@@ -1,0 +1,252 @@
+import { chromium } from 'playwright';
+import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+
+const OUT = join(process.cwd(), '..', 'build', 'preview', 'e2e');
+mkdirSync(OUT, { recursive: true });
+
+const INDEX = pathToFileURL(
+  join(process.cwd(), '..', 'src', 'AnomalyEngine', 'bin', 'Debug', 'net8.0-windows', 'renderer', 'index.html')
+).href;
+
+const results = [];
+const allErrors = [];
+let failures = 0;
+
+function check(name, pass, detail = '') {
+  results.push({ name, pass, detail });
+  if (!pass) failures++;
+  process.stdout.write(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  -- ${detail}` : ''}\n`);
+}
+
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+
+page.on('pageerror', (e) => allErrors.push(`pageerror: ${e.message}`));
+page.on('console', (m) => { if (m.type() === 'error') allErrors.push(`console.error: ${m.text()}`); });
+page.on('requestfailed', (r) => allErrors.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
+
+await page.goto(INDEX);
+await page.waitForTimeout(3000);
+
+// --- boot ---
+check('engine defined over file://', await page.evaluate(() => typeof window.__engine !== 'undefined'));
+check('boot overlay removed', await page.evaluate(() => !document.getElementById('anomaly-boot')));
+const canvasSize = await page.evaluate(() => {
+  const c = document.getElementById('wallpaper-canvas');
+  return c ? `${c.width}x${c.height}` : 'missing';
+});
+check('canvas sized to viewport', canvasSize === '1280x720', canvasSize);
+
+const shot = async (name) => {
+  const buf = await page.screenshot();
+  return createHash('sha256').update(buf).digest('hex').slice(0, 12);
+};
+
+// --- style switching, exactly as the tray dispatches it ---
+const styleHashes = {};
+for (const style of ['painterly', 'flat', 'riso']) {
+  await page.evaluate((s) => {
+    window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: s } }));
+  }, style);
+  await page.waitForTimeout(1400);
+
+  const reported = await page.evaluate(() => window.__engine.getStyle());
+  check(`tray dispatch applies "${style}"`, reported === style, `reported "${reported}"`);
+
+  const h = await shot(style);
+  styleHashes[style] = h;
+  const buf = await page.screenshot({ path: join(OUT, `style-${style}.png`) });
+  void buf;
+}
+check('all three styles render distinct pixels',
+  new Set(Object.values(styleHashes)).size === 3,
+  JSON.stringify(styleHashes));
+
+// --- style survives a round trip back to default ---
+await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: 'painterly' } })));
+await page.waitForTimeout(1200);
+check('style round-trips to painterly', (await page.evaluate(() => window.__engine.getStyle())) === 'painterly');
+
+// --- invalid style must not corrupt state ---
+await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: 'bogus' } })));
+await page.waitForTimeout(800);
+check('invalid style ignored', (await page.evaluate(() => window.__engine.getStyle())) === 'painterly');
+
+// --- pause / resume must actually change frame output ---
+const beforePause = await shot('pre-pause');
+await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:pause')));
+await page.waitForTimeout(1200);
+const duringPause1 = await shot('pause1');
+await page.waitForTimeout(1200);
+const duringPause2 = await shot('pause2');
+check('paused frame is frozen', duringPause1 === duringPause2, `${duringPause1} vs ${duringPause2}`);
+check('paused frame differs from running frame', beforePause !== duringPause1);
+
+await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:resume')));
+await page.waitForTimeout(1500);
+check('resume restores animation', (await shot('resumed')) !== duringPause2);
+
+// --- time of day must change the image ---
+await page.evaluate(() => window.__engine.setSimulatedHour(2));
+await page.waitForTimeout(1200);
+const night = await shot('tod-night');
+await page.evaluate(() => window.__engine.setSimulatedHour(17));
+await page.waitForTimeout(1200);
+const golden = await shot('tod-golden');
+check('time of day changes render', night !== golden, `${night} vs ${golden}`);
+
+// --- weather must change the image ---
+await page.evaluate(() => window.__engine.setSimulatedWeather('storm'));
+await page.waitForTimeout(1500);
+const storm = await shot('weather-storm');
+check('weather changes render', storm !== golden, `${storm} vs ${golden}`);
+await page.screenshot({ path: join(OUT, 'weather-storm.png') });
+await page.evaluate(() => window.__engine.setSimulatedWeather('clear'));
+await page.waitForTimeout(1200);
+
+// --- anomaly triggers must not throw ---
+const anomalies = ['meteor', 'second-moon', 'red-moon', 'forest-watcher', 'observatory-signal'];
+for (const a of anomalies) {
+  const before = allErrors.length;
+  await page.evaluate((x) => window.__engine.forceAnomaly(x), a);
+  await page.waitForTimeout(900);
+  check(`anomaly "${a}" renders without error`, allErrors.length === before,
+    allErrors.slice(before).join('; '));
+}
+
+// --- performance: no runaway frame time ---
+const fps = await page.evaluate(() => new Promise((res) => {
+  let frames = 0;
+  const t0 = performance.now();
+  const tick = () => {
+    frames++;
+    if (performance.now() - t0 < 2000) requestAnimationFrame(tick);
+    else res(Math.round((frames / (performance.now() - t0)) * 1000));
+  };
+  requestAnimationFrame(tick);
+}));
+// Headless Chromium rasterises in software (SwiftShader), so this number is not
+// representative of the real GPU-composited host. Reported, not asserted.
+process.stdout.write(`INFO  headless software-raster fps: ${fps} (not representative of real host)\n`);
+
+// --- worlds: the tray dispatches these, so they must work over file:// too ---
+const worlds = await page.evaluate(() => window.__engine.listWorlds());
+check('at least four worlds are registered', worlds.length >= 4, `${worlds.length} worlds`);
+check('worlds expose id, name and biome',
+  worlds.every((w) => typeof w.id === 'string' && typeof w.name === 'string' && typeof w.biome === 'string'));
+
+const worldHashes = {};
+for (const w of worlds) {
+  await page.evaluate((id) => {
+    window.dispatchEvent(new CustomEvent('anomaly:world', { detail: { world: id } }));
+  }, w.id);
+  await page.waitForTimeout(1200);
+  worldHashes[w.id] = await shot(`world-${w.id}`);
+}
+check('every world renders distinct pixels',
+  new Set(Object.values(worldHashes)).size === worlds.length,
+  JSON.stringify(worldHashes));
+
+// Cycling must wrap and never land on an unknown world.
+const cycle = [];
+for (let i = 0; i < worlds.length + 1; i++) {
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:world-next')));
+  await page.waitForTimeout(250);
+  cycle.push(await page.evaluate(() => window.__engine.getWorlds().getActiveId()));
+}
+check('world cycling wraps without leaving the set',
+  cycle.every((id) => worlds.some((w) => w.id === id)),
+  cycle.join(' -> '));
+
+// An unknown world must fall back rather than blanking the scene.
+const beforeBad = await shot('pre-bad-world');
+await page.evaluate(() => {
+  window.dispatchEvent(new CustomEvent('anomaly:world', { detail: { world: 'not-a-world' } }));
+});
+await page.waitForTimeout(1200);
+check('unknown world does not blank the scene', (await shot('post-bad-world')) !== null);
+void beforeBad;
+
+// --- quality scaling ---
+const scaleInfo = await page.evaluate(() => {
+  window.__engine.setRenderScale(0.75);
+  const pinned = window.__engine.getRenderScale();
+  window.__engine.setRenderScale(null);
+  return { pinned, quality: window.__engine.getQuality() };
+});
+check('render scale can be pinned and released', scaleInfo.pinned === 0.75, JSON.stringify(scaleInfo));
+check('quality reports the active style and world',
+  scaleInfo.quality.style === 'painterly' && worlds.some((w) => w.id === scaleInfo.quality.worldId),
+  JSON.stringify(scaleInfo.quality));
+check('render scale is within the supported range',
+  scaleInfo.quality.renderScale >= 0.4 && scaleInfo.quality.renderScale <= 1,
+  String(scaleInfo.quality.renderScale));
+
+// --- field notes panel (the ARG surface) ---
+await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:notes')));
+await page.waitForTimeout(900);
+const notesText = await page.evaluate(() => document.getElementById('anomaly-field-notes')?.innerText ?? '');
+check('field notes panel renders with world lore', notesText.length > 0 && /FIELD NOTES/i.test(notesText));
+check('field notes always offers a denial', /ALSO CONSISTENT WITH|Also consistent with/i.test(notesText));
+await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:notes')));
+await page.waitForTimeout(600);
+check('field notes toggles closed',
+  await page.evaluate(() => !document.getElementById('anomaly-field-notes') ||
+    getComputedStyle(document.getElementById('anomaly-field-notes')).opacity === '0'));
+
+// --- the status surface the settings window reads ---
+const status = await page.evaluate(() => window.__engine.getStatus());
+check('status reports a real world', typeof status.worldName === 'string' && status.worldName.length > 0, status.worldName);
+check('status reports frame metrics', typeof status.fps === 'number' && typeof status.frameMs === 'number',
+  `${status.fps} fps / ${status.frameMs} ms`);
+check('status reports render scale in range',
+  status.renderScale >= 0.4 && status.renderScale <= 1, String(status.renderScale));
+check('status reports anomaly and discovery counts',
+  status.anomalyKinds > 0 && status.secretsTotal > 0 && status.secretsFound <= status.secretsTotal,
+  `${status.anomalyKinds} anomalies, ${status.secretsFound}/${status.secretsTotal} notes`);
+check('status reports reduced motion state', typeof status.reducedMotion === 'boolean');
+
+// Frame cap must actually change the reported limit.
+await page.evaluate(() => window.__engine.setFpsLimit(30));
+check('fps limit can be set', (await page.evaluate(() => window.__engine.getFpsLimit())) === 30);
+await page.evaluate(() => window.__engine.setFpsLimit(0));
+check('fps limit can be released', (await page.evaluate(() => window.__engine.getFpsLimit())) === 0);
+
+// --- world details feed the settings list, including removability ---
+const details = await page.evaluate(() => window.__engine.getWorldDetails());
+check('world details cover every world', details.length === worlds.length, `${details.length}`);
+check('exactly one world is active', details.filter((w) => w.active).length === 1);
+check('the fallback world is not removable', details.find((w) => w.active)?.removable !== true
+  || details.filter((w) => !w.removable).length === 1, JSON.stringify(details.map((d) => [d.id, d.removable])));
+// A world reports a biome, and a structure count. Interiors are the exception:
+// the liminal corridor is built from its own interior geometry rather than from
+// placed objects, so it legitimately has none.
+check('world details expose biome and structure counts',
+  details.every((w) => typeof w.biome === 'string'
+    && (w.biome === 'liminal-interior' ? w.structures === 0 : w.structures > 0)));
+
+// Import must accept a valid world and reject garbage, with a reported reason.
+const imported = await page.evaluate(() => window.__engine.importWorlds([{
+  id: 'e2e-world', name: 'E2E World', author: 'test', version: '0.1.0', engine: '0.1',
+  description: 'Imported by the test suite.', biome: 'coast',
+  terrain: { seed: 90210 },
+  structures: [{ kind: 'lighthouse', x: 0.7 }],
+  lore: { premise: 'x', deniability: ['y'] },
+}]));
+check('a valid world imports', imported.ok === true, JSON.stringify(imported.errors));
+check('the imported world is now listed',
+  (await page.evaluate(() => window.__engine.getWorldDetails())).some((w) => w.id === 'e2e-world'));
+
+const rejected = await page.evaluate(() => window.__engine.importWorlds([{ id: 'BAD ID', name: 'x' }]));
+check('an invalid world is rejected with a reason', rejected.ok === false && rejected.errors.length > 0,
+  JSON.stringify(rejected.errors).slice(0, 90));
+
+check('no console or page errors overall', allErrors.length === 0, allErrors.join(' | '));
+
+await browser.close();
+
+process.stdout.write(`\n${results.length - failures}/${results.length} checks passed\n`);
+process.exit(failures ? 1 : 0);

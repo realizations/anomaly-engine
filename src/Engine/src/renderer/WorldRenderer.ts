@@ -3,6 +3,7 @@ import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '..
 import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
 import { BUILT_IN_WORLDS } from '../worlds/registry.js';
 import { CrtTerminal } from './CrtTerminal.js';
+import { LiminalInterior } from './LiminalInterior.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -102,6 +103,7 @@ const DEBUG_RISO_DUMP = false;
 export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
   private _crt: CrtTerminal | null = null;
+  private _liminal: LiminalInterior | null = null;
 
   /** Telemetry the terminal reports, driven by the engine so the CRT module
    *  stays decoupled from the journal and secret systems. */
@@ -602,19 +604,28 @@ export class WorldRenderer {
 
     this._pruneAnomalies();
 
-    this._drawSky(grade);
-    this._drawStars(grade);
-    this._drawSun(grade, hour);
-    this._drawMoon(grade, hour, date);
-    this._drawClouds(grade);
-    this._drawRidges(grade);
-    this._drawHazeBands(grade);
-    this._drawForestFar();
-    this._drawGround(grade);
-    this._drawStructures(grade);
-    this._drawForestMid();
-    this._drawFog(grade);
-    this._drawForestNear();
+    if (this._world.biome === 'liminal-interior') {
+      // An interior shares nothing with the terrain pipeline: no sky, no
+      // ridgeline, no weather. It gets its own scene constructor so the
+      // landscape code stays honest about what it assumes.
+      this._liminal ??= new LiminalInterior(this._world);
+      this._liminal.render(g, this._w, this._h, this._world, grade, dt);
+    } else {
+      this._drawSky(grade);
+      this._drawStars(grade);
+      this._drawSun(grade, hour);
+      this._drawMoon(grade, hour, date);
+      this._drawClouds(grade);
+      this._drawRidges(grade);
+      this._drawHazeBands(grade);
+      this._drawForestFar();
+      this._drawGround(grade);
+      this._drawStructures(grade);
+      this._drawForestMid();
+      this._drawFog(grade);
+      this._drawForestNear();
+    }
+
     this._drawMotes(grade);
     this._drawPrecipitation(dt);
     this._drawMeteor();

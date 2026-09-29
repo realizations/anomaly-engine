@@ -301,7 +301,67 @@ const HEAD: WorldDefinition = {
   },
 };
 
-export const BUILT_IN_WORLDS: WorldDefinition[] = [TOWN, SALT, FELL, MERE, HEAD];
+/**
+ * A liminal interior. The only world with no landscape at all, and the one that
+ * carries the project's strangest idea: that the unsettling place is an
+ * ordinary one, emptied of people and lit by the wrong fluorescent tube.
+ */
+const LIMINAL: WorldDefinition = {
+  id: 'the-long-corridor',
+  name: 'The Long Corridor',
+  author: 'Anomaly Engine contributors',
+  version: '0.1.0',
+  engine: '0.1',
+  description:
+    'An interior that is not outside. The lights are on a timer. There is no window, and the corridor does not appear on any floor plan.',
+  biome: 'liminal-interior',
+  terrain: {
+    seed: 2718,
+    // Terrain is unused by the interior scene, but the seed still drives the
+    // space's identity: which single detail is wrong, and which door is ajar.
+    groundY: 0.5,
+    groundBanding: 0,
+    road: 0,
+  },
+  sky: { cloudiness: 0, starDensity: 0, moonlight: 0 },
+  liminal: {
+    // Off centre on purpose. A dead-centred vanishing point reads as a
+    // diagram; slightly off reads as a place someone built.
+    vanishingX: 0.44,
+    bays: 10,
+    // Institutional tile. Sizes that are slightly too large read as wrong in a
+    // way the eye notices but cannot name.
+    tile: 58,
+    ceiling: 1,
+    lightLevel: 0.82,
+    // Not white. Slightly green, which is the colour of lighting that is
+    // present but not quite right.
+    lightTint: { r: 206, g: 218, b: 196 },
+    // Very high uniformity. The repetition is the point.
+    uniformity: 0.9,
+    doors: 1,
+  },
+  palette: {
+    // Desaturated and slightly warm, the colour of old carpet and vinyl.
+    haze: { r: 26, g: 28, b: 32 },
+    ground: { r: 150, g: 146, b: 134 },
+    road: { r: 150, g: 146, b: 134 },
+    saturation: 0.5,
+    exposure: 1,
+  },
+  features: { weather: false, astronomy: false, systemEvents: true, audioReactive: false },
+  lore: {
+    premise: 'It is a public building. It has been open continuously. Nothing about that is strange on its own.',
+    epitaph: 'the far end is further than it was',
+    deniability: [
+      'Offices are like this. Nobody is ever quite sure how many floors there are.',
+      'The lights are on a timer. You have seen the timer.',
+      'The door was ajar because of the draught.',
+    ],
+  },
+};
+
+export const BUILT_IN_WORLDS: WorldDefinition[] = [TOWN, SALT, FELL, MERE, HEAD, LIMINAL];
 
 export function findBuiltInWorld(id: string): WorldDefinition | null {
   return BUILT_IN_WORLDS.find((w) => w.id === id) ?? null;
