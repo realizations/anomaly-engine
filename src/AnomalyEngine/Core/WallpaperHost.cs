@@ -652,9 +652,26 @@ public class WallpaperHost : IDisposable
         _ = ExecuteScriptSafe($"window.__engine && window.__engine.setFpsLimit({fps});");
     }
 
-    public void SetRenderScale(double scale)
+    /**
+     * Pins the render scale, or releases the pin.
+     *
+     * The parameter is nullable on purpose. "Automatic" and "40%" are opposite
+     * settings, and an earlier version signalled automatic by passing zero — but
+     * zero is a number, so the renderer clamped it to its minimum and *locked
+     * the quality there*, meaning the option labelled Automatic actually
+     * pinned quality to the lowest setting and disabled adaptation entirely.
+     *
+     * Nullable makes the distinction unrepresentable as a mistake: releasing the
+     * pin is a different call, not a magic value.
+     */
+    public void SetRenderScale(double? scale)
     {
-        _ = ExecuteScriptSafe($"window.__engine && window.__engine.setRenderScale({scale});");
+        if (scale is null)
+        {
+            _ = ExecuteScriptSafe("window.__engine && window.__engine.setRenderScale(null);");
+            return;
+        }
+        _ = ExecuteScriptSafe($"window.__engine && window.__engine.setRenderScale({scale.Value});");
     }
 
     public void SetArtStyle(string style)

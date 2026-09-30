@@ -70,7 +70,6 @@ interface Line {
 }
 
 export class CrtTerminal {
-  private _ctx: CanvasRenderingContext2D;
 
   /** typewriter cursor position within the current line */
   private _revealed = 0;
@@ -95,8 +94,7 @@ export class CrtTerminal {
   private _returnUntil = 0;
   private _returnShown = false;
 
-  constructor(ctx: CanvasRenderingContext2D, seed: number) {
-    this._ctx = ctx;
+  constructor(seed: number) {
     const rnd = mulberry32(seed ^ 0x5c7e);
     this._scan = rnd();
   }
@@ -122,10 +120,12 @@ export class CrtTerminal {
    * @param state what the terminal has to report
    * @param dt   seconds since the last frame
    */
-  render(w: number, h: number, grade: SkyGrade, state: TerminalState, dt: number): void {
+  render(
+    g: CanvasRenderingContext2D, w: number, h: number,
+    grade: SkyGrade, state: TerminalState, dt: number
+  ): void {
     if (w < 420 || h < 260) return;
 
-    const g = this._ctx;
     const now = performance.now();
     if (!this._booted) {
       this._booted = true;

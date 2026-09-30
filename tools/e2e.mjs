@@ -170,6 +170,34 @@ await page.waitForTimeout(1200);
 check('unknown world does not blank the scene', (await shot('post-bad-world')) !== null);
 void beforeBad;
 
+// --- the observatory terminal is actually drawn ---
+// The terminal held a canvas context captured at construction. The offscreen
+// buffer is reallocated on resize and on a monitor-layout change, so a retained
+// context silently pointed at an orphaned canvas and the terminal stopped
+// appearing at all. Nothing else would have caught it, because every other
+// check still passed. This looks for the terminal's bright phosphor pixels in
+// the bottom-left of the frame, where it is drawn.
+const terminal = await page.evaluate(async () => {
+  window.dispatchEvent(new CustomEvent('anomaly:monitors', {
+    detail: { monitors: [{ x: 0, y: 0, w: 1280, h: 720 }] },
+  }));
+  await new Promise((r) => setTimeout(r, 1200));
+  const cv = document.getElementById('wallpaper-canvas');
+  const g = cv.getContext('2d');
+  // The tube occupies roughly x 58..290, y 540..700 at 1280x720.
+  const region = g.getImageData(50, 520, 260, 190).data;
+  let phosphor = 0;
+  for (let i = 0; i < region.length; i += 4) {
+    // Phosphor is a green-dominant colour; count pixels where green clearly
+    // leads red and blue.
+    if (region[i + 1] > region[i] + 18 && region[i + 1] > region[i + 2] + 8) phosphor++;
+  }
+  return { phosphor, sampled: region.length / 4 };
+});
+check('the observatory terminal is drawn on the canvas',
+  terminal.phosphor > 40,
+  `${terminal.phosphor} phosphor pixels of ${terminal.sampled} sampled`);
+
 // --- quality scaling ---
 const scaleInfo = await page.evaluate(() => {
   window.__engine.setRenderScale(0.75);
@@ -184,6 +212,41 @@ check('quality reports the active style and world',
 check('render scale is within the supported range',
   scaleInfo.quality.renderScale >= 0.4 && scaleInfo.quality.renderScale <= 1,
   String(scaleInfo.quality.renderScale));
+
+// The settings window's "Automatic" entry must release the pin, not pass a
+// number. It used to pass 0, which the renderer clamped to its minimum and
+// *locked*, so the option labelled Automatic pinned quality to the lowest
+// setting and disabled adaptation entirely. This asserts the distinction the
+// settings window depends on, so the two cannot drift apart again.
+const automatic = await page.evaluate(async () => {
+  // Pretend to be a machine that cannot hold full resolution.
+  window.dispatchEvent(new CustomEvent('anomaly:monitors', {
+    detail: { monitors: [{ x: 0, y: 0, w: 1920, h: 1080 }, { x: 1920, y: 0, w: 1920, h: 1080 }] },
+  }));
+  window.__engine.setRenderScale(1.0);
+  const pinnedHigh = window.__engine.getRenderScale();
+
+  // Automatic: the same call the settings window makes for the last entry.
+  window.__engine.setRenderScale(null);
+  // Poll for the controller to actually move, rather than sleeping and hoping.
+  let adapted = null;
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const now = window.__engine.getRenderScale();
+    if (now < 0.9) { adapted = now; break; }
+  }
+  const current = window.__engine.getRenderScale();
+  // Back to a single monitor so later checks are not measuring a heavy load.
+  window.dispatchEvent(new CustomEvent('anomaly:monitors', {
+    detail: { monitors: [{ x: 0, y: 0, w: 1280, h: 720 }] },
+  }));
+  window.__engine.setRenderScale(null);
+  return { pinnedHigh, adapted, current };
+});
+check('a pinned scale is held', automatic.pinnedHigh === 1, String(automatic.pinnedHigh));
+check('automatic releases the pin and adapts instead of clamping to a minimum',
+  automatic.adapted !== null && automatic.adapted < 0.9,
+  automatic.adapted === null ? 'never adapted within 30s' : `adapted to ${automatic.adapted}`);
 
 // --- field notes panel (the ARG surface) ---
 await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:notes')));

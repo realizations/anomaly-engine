@@ -155,23 +155,52 @@ for (const c of CASES) {
   // The decisive check for per-monitor composition.
   //
   // If the renderer stretched one wide composition across the desktop, a second
-  // identical monitor would receive a *different* slice of it, so the two would
-  // not match. Composing each monitor independently means two monitors of the
-  // same size come out identical, and monitors of different sizes come out
-  // different. Getting this backwards is what made the first version of this
-  // check fail.
+  // identical monitor would receive a *different* slice of it. Composing each
+  // monitor independently means two monitors of the same size come out the same
+  // in the landscape — but not byte-identical, because the observatory terminal
+  // is deliberately drawn on the primary only, as one piece of equipment
+  // standing in the world rather than something installed on every screen.
+  //
+  // So the property being asserted is that the two monitors agree on the
+  // landscape while differing only where that one terminal sits. Comparing
+  // the left-hand region, away from the terminal, is the check that survives.
   if (r.rects.length > 1) {
     const sizes = c.monitors.map((m) => `${m.w}x${m.h}`);
     const allSameSize = sizes.every((s) => s === sizes[0]);
-    const distinct = new Set(r.rects.map((x) => x.sig)).size;
 
     if (allSameSize) {
+      // Compare the region each monitor shares, excluding the bottom-left corner
+      // where the terminal is drawn on the primary.
+      const agree = await page.evaluate((monitors) => {
+        const cv = document.getElementById('wallpaper-canvas');
+        const g = cv.getContext('2d');
+        const dpr = cv.width / parseFloat(cv.style.width || String(cv.width));
+        let minX = Infinity, minY = Infinity;
+        for (const m of monitors) { minX = Math.min(minX, m.x); minY = Math.min(minY, m.y); }
+        const rects = monitors.map((m) => ({ x: m.x - minX, y: m.y - minY, w: m.w, h: m.h }));
+        // Sample the upper half, clear of the terminal.
+        const grab = (r) => {
+          const out = [];
+          for (let j = 0; j < 5; j++) {
+            for (let i = 0; i < 8; i++) {
+              const px = Math.round((r.x + (r.w * (i + 0.5)) / 8) * dpr);
+              const py = Math.round((r.y + (r.h * (j + 0.5)) / 10) * dpr);
+              const d = g.getImageData(px, py, 1, 1).data;
+              out.push(`${d[0]},${d[1]},${d[2]}`);
+            }
+          }
+          return out.join(' ');
+        };
+        return rects.map(grab);
+      }, c.monitors);
+      const same = agree.every((s) => s === agree[0]);
       check(
-        distinct === 1,
-        'identical monitors are composed identically, not cropped from one panorama',
-        `${distinct} distinct of ${r.rects.length}`
+        same,
+        'identical monitors show the same landscape, independent of the single terminal',
+        same ? 'regions agree' : 'regions differ'
       );
     } else {
+      const distinct = new Set(r.rects.map((x) => x.sig)).size;
       check(
         distinct > 1,
         'differently shaped monitors are framed independently',

@@ -424,18 +424,21 @@ public partial class SettingsWindow : Window
     private void QualityCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading) return;
-        // These map onto the render scale the quality scaler already uses.
-        var scale = QualityCombo.SelectedIndex switch
+        // The three presets pin the render scale. The fourth releases the pin so
+        // the controller adapts. It is passed as null rather than a sentinel
+        // number, because zero is a number and the renderer would have clamped
+        // it to the minimum and locked quality there.
+        double? scale = QualityCombo.SelectedIndex switch
         {
             0 => 0.6,
             1 => 0.8,
             2 => 1.0,
-            _ => -1.0,   // automatic: release the pin
+            _ => null,
         };
-        _host?.SetRenderScale(scale < 0 ? 0 : scale);
-        StatusText.Text = scale < 0
+        _host?.SetRenderScale(scale);
+        StatusText.Text = scale is null
             ? "Quality: automatic, adapting to hold a frame budget"
-            : $"Quality pinned to {(int)(scale * 100)}% render scale";
+            : $"Quality pinned to {(int)(scale.Value * 100)}% render scale";
     }
 
     private void StyleCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

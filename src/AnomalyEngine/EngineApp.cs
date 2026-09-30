@@ -37,9 +37,7 @@ public class EngineApp : Application
             _logger.Info("Anomaly Engine starting...");
             _stateStore = new Core.StateStore(_logger);
 
-        IconGenerator.EnsureIconExists();
-
-        _monitorManager = new MonitorManager(_logger);
+            _monitorManager = new MonitorManager(_logger);
         _powerManager = new PowerManager(_logger);
         _fullscreenDetector = new FullscreenDetector(_logger);
 

@@ -240,26 +240,35 @@ export class WorldRenderer {
   }
 
   private _drawTerminal(grade: SkyGrade, hour: number, dt: number): void {
-    if (!this._crt) this._crt = new CrtTerminal(this._ctx, this._seed);
+    // The terminal takes the context per call rather than holding one. The
+    // offscreen buffer is reallocated on resize and on a monitor-layout change,
+    // and a retained context would then point at an orphaned canvas — the
+    // terminal would silently stop drawing, which is exactly what happened when
+    // per-monitor support landed.
+    this._crt ??= new CrtTerminal(this._seed);
     if (this._startedAt === 0) this._startedAt = performance.now();
 
     const hh = String(Math.floor(hour)).padStart(2, '0');
     const mm = String(Math.floor((hour % 1) * 60)).padStart(2, '0');
     const anomaly = this._anomalies.find((a) => a.active);
 
-    this._crt.render(this._w, this._h, grade, {
-      worldName: this._world.name,
-      worldCode: this._siteCode(),
-      biome: this._world.biome,
-      clock: `${hh}:${mm}`,
-      weather: this._weather.condition.toUpperCase(),
-      observations: this._telemetry.observations,
-      secrets: this._telemetry.secrets,
-      anomalyActive: !!anomaly,
-      anomalyName: anomaly?.type,
-      uptime: (performance.now() - this._startedAt) / 1000,
-      returnSummary: this._returnSummary ?? undefined,
-    }, dt);
+    this._crt.render(
+      this._ctx, this._w, this._h, grade,
+      {
+        worldName: this._world.name,
+        worldCode: this._siteCode(),
+        biome: this._world.biome,
+        clock: `${hh}:${mm}`,
+        weather: this._weather.condition.toUpperCase(),
+        observations: this._telemetry.observations,
+        secrets: this._telemetry.secrets,
+        anomalyActive: !!anomaly,
+        anomalyName: anomaly?.type,
+        uptime: (performance.now() - this._startedAt) / 1000,
+        returnSummary: this._returnSummary ?? undefined,
+      },
+      dt
+    );
   }
 
   private _buildPaper(): void {
