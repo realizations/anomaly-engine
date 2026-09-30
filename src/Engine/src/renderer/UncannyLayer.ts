@@ -154,7 +154,7 @@ export class UncannyLayer {
   ): void {
     this._drawParity(g, w, h, world, grade, detail);
     this._drawGlyphs(g, w, h, detail);
-    this._drawPareidolia(g, w, h, detail);
+    this._drawPareidolia(g, w, h, detail, world.terrain.groundY ?? 0.7);
     this._drawBeat(g, w, h, grade, detail);
     this._drawSurreal(g, w, h, world, grade, detail);
   }
@@ -201,18 +201,24 @@ export class UncannyLayer {
    * moment any of them form a word, the effect has landed and they should
    * therefore not.
    */
-  private _drawGlyphs(g: CanvasRenderingContext2D, w: number, h: number, detail: number): void {
+  private _drawGlyphs(g: CanvasRenderingContext2D, w: number, h: number, detail: number, limit = 1): void {
     const fs = Math.max(6, Math.round(h * 0.014));
     g.save();
     g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     g.textBaseline = 'middle';
+    // Only the first few marks are drawn. Drawing all of them at once turned the
+    // layer into visible stray text, which reads as a debugging overlay rather
+    // than as something you are not quite sure you saw.
+    let drawn = 0;
     for (const gl of this._glyphs) {
+      if (drawn >= limit) break;
       // Very low alpha, and it breathes. A steady mark reads as graffiti; a
       // mark that varies in visibility reads as something you cannot quite see.
-      const a = gl.a * detail * (0.4 + 0.6 * Math.abs(Math.sin(this._t * 0.4 + gl.x * 9)));
-      if (a < 0.015) continue;
+      const a = gl.a * 0.34 * detail * (0.4 + 0.6 * Math.abs(Math.sin(this._t * 0.4 + gl.x * 9)));
+      if (a < 0.008) continue;
       g.fillStyle = `rgba(210,214,206,${a})`;
       g.fillText(gl.ch, w * gl.x, h * gl.y);
+      drawn++;
     }
     g.restore();
   }
@@ -223,12 +229,18 @@ export class UncannyLayer {
    * structure faces where the eye goes when it is looking for people.
    */
   private _drawPareidolia(
-    g: CanvasRenderingContext2D, w: number, h: number, detail: number
+    g: CanvasRenderingContext2D, w: number, h: number, detail: number, groundYFrac: number
   ): void {
     for (const p of this._pareidolia) {
+      // Only below the horizon. Pareidolia belongs on ground, rock and
+      // structure, where the eye actually goes when it is looking for people;
+      // floating two dark ellipses in open sky read as smudges on the lens.
+      const yFrac = h * p.y;
+      if (yFrac < h * groundYFrac - h * 0.04) continue;
+
       const rnd = mulberry32(p.seed);
       const s = p.s * w;
-      const a = 0.16 * detail * (0.5 + 0.5 * Math.sin(this._t * 0.23 + p.seed));
+      const a = 0.13 * detail * (0.5 + 0.5 * Math.sin(this._t * 0.23 + p.seed));
       if (a < 0.02) continue;
       g.save();
       g.globalAlpha = a;
@@ -239,13 +251,13 @@ export class UncannyLayer {
         g.beginPath();
         g.ellipse(
           w * p.x + side * s * 0.42 + (rnd() - 0.5) * s * 0.2,
-          h * p.y - s * 0.12,
+          yFrac - s * 0.12,
           s * 0.3, s * 0.19, (rnd() - 0.5) * 0.5, 0, Math.PI * 2
         );
         g.fill();
       }
       g.beginPath();
-      g.ellipse(w * p.x, h * p.y + s * 0.7, s * 0.8, s * 0.44, 0, 0, Math.PI * 2);
+      g.ellipse(w * p.x, yFrac + s * 0.7, s * 0.8, s * 0.44, 0, 0, Math.PI * 2);
       g.fill();
       g.restore();
     }

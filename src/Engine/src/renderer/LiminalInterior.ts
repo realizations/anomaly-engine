@@ -357,15 +357,17 @@ export class LiminalInterior {
   ): void {
     const far = 0.055 + (this._wrong === 'length' ? 0.03 : 0);
 
-    for (let i = bays - 1; i >= 0; i--) {
+    for (let i = bays - 1; i >= 0; i -= 2) {
       const s = this._bayScale(i, bays, far);
       const y = vpY - s * vpY * 0.72;
       // A tube is a long thin fixture, and it has to stay thin. An earlier
       // version scaled the bloom ellipse off the tube width and produced one
       // enormous blown-out blob across the whole ceiling.
-      const lw = Math.max(4, s * w * 0.085);
-      const lh = Math.max(1.5, s * h * 0.009);
-      const housingH = lh * 3.2;
+      const lw = Math.max(4, s * w * 0.075);
+      const lh = Math.max(1.2, s * h * 0.006);
+      // Housing only just proud of the tube. A deep recess stacked down the
+      // ceiling read as a ladder rather than as a row of fittings.
+      const housingH = lh * 2.2;
 
       // The one wrong fixture, or a tube that is slightly out.
       const out = this._wrong === 'light' && i === bays - 3;
@@ -376,29 +378,29 @@ export class LiminalInterior {
 
       const a = light * flick * (out ? 0.45 : 1) * (0.3 + s * 0.7);
 
-      // Housing: the dark recess the tube sits in.
-      g.fillStyle = css(mixRgb(WALL_LO, { r: 0, g: 0, b: 0 }, 0.45), 0.7);
-      g.fillRect(vpX - lw * 0.62, y - housingH / 2, lw * 1.24, housingH);
+      // Housing: a shallow dark recess.
+      g.fillStyle = css(mixRgb(WALL_LO, { r: 0, g: 0, b: 0 }, 0.34), 0.72);
+      g.fillRect(vpX - lw * 0.6, y - housingH / 2, lw * 1.2, housingH);
 
       g.save();
       g.globalCompositeOperation = 'lighter';
 
       // Tight bloom along the tube only.
-      const bloom = g.createRadialGradient(vpX, y, 0, vpX, y, lw * 0.95);
-      bloom.addColorStop(0, css(tint, 0.34 * a));
-      bloom.addColorStop(0.45, css(tint, 0.1 * a));
+      const bloom = g.createRadialGradient(vpX, y, 0, vpX, y, lw * 0.8);
+      bloom.addColorStop(0, css(tint, 0.3 * a));
+      bloom.addColorStop(0.45, css(tint, 0.09 * a));
       bloom.addColorStop(1, css(tint, 0));
       g.save();
       g.translate(vpX, y);
-      g.scale(1, 0.24);
+      g.scale(1, 0.3);
       g.fillStyle = bloom;
       g.beginPath();
-      g.arc(0, 0, lw * 0.95, 0, Math.PI * 2);
+      g.arc(0, 0, lw * 0.8, 0, Math.PI * 2);
       g.fill();
       g.restore();
 
       // The tube itself.
-      g.fillStyle = css(mixRgb(tint, { r: 255, g: 255, b: 255 }, 0.55), 0.8 * a);
+      g.fillStyle = css(mixRgb(tint, { r: 255, g: 255, b: 255 }, 0.55), 0.72 * a);
       g.fillRect(vpX - lw / 2, y - lh / 2, lw, lh);
 
       g.restore();
