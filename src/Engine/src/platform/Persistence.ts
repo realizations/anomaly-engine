@@ -32,10 +32,27 @@ export interface PersistedState {
   }>;
   secrets: string[];
   moments: string[];
+  /**
+   * Worlds the user imported, stored as the definitions they supplied.
+   *
+   * Definitions are kept rather than ids, because an id alone cannot rebuild a
+   * world on the next launch. They are validated again on load, exactly as if
+   * they had just been imported: the state file is as much untrusted input as a
+   * pasted world is, and it is written somewhere a user can edit.
+   */
+  customWorlds: unknown[];
 }
 
 const VERSION = 1;
 const LS_KEY = 'anomaly-engine:state';
+
+/**
+ * Ceiling on imported worlds held in the state file.
+ *
+ * The registry accepts far more than this in one go; this is only a bound on what
+ * is written to disk, so that a state file cannot be inflated without limit.
+ */
+export const MAX_CUSTOM_WORLDS = 200;
 
 export function emptyState(): PersistedState {
   return {
@@ -49,6 +66,7 @@ export function emptyState(): PersistedState {
     journal: [],
     secrets: [],
     moments: [],
+    customWorlds: [],
   };
 }
 
@@ -76,6 +94,12 @@ export function reconcile(raw: unknown): PersistedState {
     ) as PersistedState['journal'],
     secrets: arr<string>(s.secrets).filter((x) => typeof x === 'string'),
     moments: arr<string>(s.moments).filter((x) => typeof x === 'string'),
+    // Capped as well as filtered. The file is user-editable, and an unbounded
+    // array here would be written back out on every save, so a hand-edited
+    // state file could grow without limit and be re-serialised every launch.
+    customWorlds: arr<unknown>(s.customWorlds)
+      .filter((w) => !!w && typeof w === 'object' && !Array.isArray(w))
+      .slice(0, MAX_CUSTOM_WORLDS),
   };
 }
 
@@ -166,6 +190,32 @@ export class Persistence {
       this._flushTimer = null;
       this.save();
     }, 1500);
+  }
+
+  /**
+   * Installs a flush for the moment the engine goes away.
+   *
+   * Writes are debounced so that a burst of mutations, which is what the engine
+   * does every time a world changes, produces one write instead of dozens. The
+   * cost is a window in which the newest change is only in memory, and a
+   * wallpaper host is exactly the kind of program that gets terminated rather
+   * than closed, so anything saved during that window is simply lost. pagehide
+   * and visibilitychange are both handled because neither reliably fires on its
+   * own: pagehide does not fire on a crash, and visibilitychange is what
+   * actually happens when a hosted window is minimised or occluded.
+   */
+  installFlushOnHide(): void {
+    const flush = () => {
+      if (this._flushTimer === null) return;
+      window.clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+      this.save();
+    };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
   }
 
   save(): void {

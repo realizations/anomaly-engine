@@ -127,6 +127,19 @@ export class WorldLoader {
     return this._worlds.delete(id);
   }
 
+  /**
+   * Definitions of every registered world that is not built in.
+   *
+   * Built-ins are excluded because they ship with the app: writing them into the
+   * state file would duplicate the source of truth and mean a built-in change
+   * could be shadowed by a stale copy in a user's saved state. What remains is
+   * exactly what has to be rebuilt on the next launch.
+   */
+  getCustomDefinitions(): WorldDefinition[] {
+    const builtin = new Set(BUILT_IN_WORLDS.map((w) => w.id));
+    return [...this._worlds.values()].filter((w) => !builtin.has(w.id));
+  }
+
   dispose(): void {
     this._worlds.clear();
     this._activeId = null;

@@ -485,8 +485,10 @@ Done:
 
 Next, in priority order:
 
-- [ ] **Security hardening** — CSP on the WebView2 surface, renderer bundle integrity check
-      at startup, and checksums for imported world packages
+- [ ] **Checksummed world packages** — imported worlds are validated on load and
+      re-validated when read back from the state file, but a package is not yet
+      verified against a digest, so a world edited between sessions is trusted as
+      long as it still satisfies the schema
 - [ ] **Installer and updates** — no signed build or auto-update today
 - [ ] **ARG event layer** — needs endpoint config, payload validation and rate limiting first
 - [ ] **Audio capture** — inert until desktop audio is actually sampled

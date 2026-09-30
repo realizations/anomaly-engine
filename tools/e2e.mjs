@@ -318,6 +318,31 @@ const rejected = await page.evaluate(() => window.__engine.importWorlds([{ id: '
 check('an invalid world is rejected with a reason', rejected.ok === false && rejected.errors.length > 0,
   JSON.stringify(rejected.errors).slice(0, 90));
 
+// An imported world has to survive a restart, or the feature is a lie: it
+// accepts the file, reports success, and quietly loses the world next launch.
+// Re-navigate so the engine rebuilds itself from durable state, exactly as a
+// relaunch would. This is the check that the import is actually persisted rather
+// than merely held in memory.
+check('the imported world is written to durable state',
+  (await page.evaluate(() => window.__engine.getPersistedSummary().customWorlds)) >= 1,
+  await page.evaluate(() => `${window.__engine.getPersistedSummary().customWorlds} stored`));
+
+await page.reload();
+await page.waitForTimeout(3000);
+check('the imported world survives a restart',
+  (await page.evaluate(() => window.__engine.getWorldDetails())).some((w) => w.id === 'e2e-world'),
+  'after reload');
+
+// And a saved world id pointing at an imported world must resolve to that world
+// rather than falling back to a built-in.
+await page.evaluate(() => window.__engine.setWorld('e2e-world'));
+await page.reload();
+await page.waitForTimeout(3000);
+check('a saved imported world id resolves to the imported world',
+  (await page.evaluate(() => window.__engine.getWorldDetails().find((w) => w.id === 'e2e-world'))) !== undefined
+    && (await page.evaluate(() => window.__engine.getActiveWorldId())) === 'e2e-world',
+  await page.evaluate(() => String(window.__engine.getActiveWorldId())));
+
 // The favicon has to survive the whole chain: generated into the directory Vite
 // actually copies, referenced relatively so it resolves over file://, and present
 // in the deployed output. Each of those has been wrong at least once and the

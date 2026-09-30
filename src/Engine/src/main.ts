@@ -121,14 +121,24 @@ class Engine {
     // style apply without a visible switch.
     this._persistence = new Persistence(this._bridge);
     this._persistence.load();
+    this._persistence.installFlushOnHide();
+
+    // Worlds are data, not code. Imported worlds are rebuilt before any restored
+    // state is applied, because a saved world id may refer to an imported world
+    // and would otherwise silently fail to resolve and fall back to a built-in.
+    // Then activate the default and keep the loader in sync so the tray, hotkeys
+    // and persistence can all switch worlds.
+    const restored = this.restoreCustomWorlds();
+    if (restored.skipped.length) {
+      this._bridge.sendLog('worlds:restore-skipped', { errors: restored.skipped.slice(0, 5) });
+    }
+
     window.addEventListener('anomaly:state', (e) => {
       this._persistence.acceptFromHost((e as CustomEvent<unknown>).detail);
       this._applyRestoredState();
     });
     this._applyRestoredState();
 
-    // Worlds are data, not code. Activate the built-in default and keep the
-    // loader in sync so the tray, hotkeys and persistence can all switch worlds.
     const firstWorld = this._worlds.getAll()[0];
     if (firstWorld && !this._worlds.getActiveId()) {
       this._worlds.activate(firstWorld.id);
@@ -782,15 +792,57 @@ class Engine {
     const v = this._worlds.registerAll(defs);
     if (v.valid) {
       this._bridge.sendLog('worlds:imported', { count: defs.length });
-      this._persistence?.save();
+      this._persistCustomWorlds();
     }
     return { ok: v.valid, errors: v.errors, warnings: v.warnings };
   }
 
   removeWorld(id: string): boolean {
     const ok = this._worlds.remove(id);
-    if (ok) this._persistence?.update({ worldId: this._worlds.getActiveId() });
+    if (ok) {
+      this._persistence?.update({
+        worldId: this._worlds.getActiveId(),
+        customWorlds: this._worlds.getCustomDefinitions(),
+      });
+    }
     return ok;
+  }
+
+  /**
+   * Writes the current set of imported worlds into durable state.
+   *
+   * Without this, importing a world looked like it worked and then quietly lost
+   * it on the next launch, which is the worst shape a feature like this can
+   * take: it appears to succeed, it survives a restart only in the sense that
+   * nothing complains, and the world the user spent time writing is gone.
+   */
+  private _persistCustomWorlds(): void {
+    this._persistence?.update({ customWorlds: this._worlds.getCustomDefinitions() });
+  }
+
+  /**
+   * Re-registers imported worlds from durable state.
+   *
+   * They go back through the same validation as a fresh import. The state file
+   * lives somewhere a user can edit, so it is treated as untrusted input rather
+   * than as something the app wrote and can therefore assume is sound. An
+   * invalid entry is skipped and reported rather than aborting startup.
+   */
+  private restoreCustomWorlds(): { restored: number; skipped: string[] } {
+    const stored = this._persistence?.get().customWorlds ?? [];
+    if (stored.length === 0) return { restored: 0, skipped: [] };
+
+    const v = this._worlds.registerAll(stored);
+    const skipped = v.errors;
+    if (v.warnings.length) this._bridge.sendLog('worlds:restore-warnings', { count: v.warnings.length });
+    if (v.valid) {
+      this._bridge.sendLog('worlds:restored', { count: stored.length });
+    } else {
+      // Partial success is normal and expected: some definitions may have been
+      // hand-edited into an invalid state since. Keep the valid ones.
+      this._bridge.sendLog('worlds:restore-partial', { requested: stored.length, rejected: skipped.length });
+    }
+    return { restored: this._worlds.getCustomDefinitions().length, skipped };
   }
 
   setWorld(id: string): boolean {
@@ -811,6 +863,33 @@ class Engine {
       biome: w.biome,
       description: w.description,
     }));
+  }
+
+  /** Id of the world currently on screen. */
+  getActiveWorldId(): string | null {
+    return this._worlds.getActiveId();
+  }
+
+  /**
+   * A summary of what is currently persisted.
+   *
+   * Exposed rather than the raw state object so the durable document stays an
+   * implementation detail: this reports the fields that are interesting to check
+   * from outside, and cannot be used to write them.
+   */
+  getPersistedSummary(): {
+    worldId: string | null;
+    journal: number;
+    secrets: number;
+    customWorlds: number;
+  } {
+    const s = this._persistence.get();
+    return {
+      worldId: s.worldId,
+      journal: s.journal.length,
+      secrets: s.secrets.length,
+      customWorlds: s.customWorlds.length,
+    };
   }
 
   setSimulatedHour(hour: number): void {

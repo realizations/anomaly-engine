@@ -157,6 +157,18 @@ the engine is testable without the host.
 problems, not just the first. An imported world is untrusted data and can never
 carry code: worlds are data, so there is no execution surface to police.
 
+Imported worlds are persisted as their definitions rather than as ids, because an
+id cannot rebuild a world on the next launch. They are re-validated on load, by
+exactly the same path a fresh import takes: the state file lives somewhere a user
+can edit, so it is treated as untrusted input and not as something the app wrote
+and can therefore assume is sound. Built-ins are excluded from the saved set, so a
+built-in change is never shadowed by a stale copy in a user's state.
+
+Writes are debounced, because the engine mutates state in bursts when a world
+changes, and a pending write is flushed on `pagehide`, `beforeunload` and
+`visibilitychange`. A hosted wallpaper is terminated as often as it is closed,
+and without the flush anything changed in that window would be lost silently.
+
 ## Project layout
 
 ```
