@@ -184,7 +184,26 @@ src/AnomalyEngine/
     Core/          wallpaper host, tray, hotkeys, state store, fullscreen
     SettingsWindow/
 tools/             verification, showcase, performance, licence gate
+    SettingsShot/   renders the settings window to PNG without displaying it
 ```
+
+## The settings window is reviewed, not assumed
+
+The settings window is the only surface the browser-driven tooling cannot reach.
+Everything else is a canvas the renderer owns and can be measured or screenshotted
+directly, but this is a native WPF window, and its bugs are invisible to an
+end-to-end test. It has had real ones: navigation labels clipped to a few
+characters because a `StackPanel` was left as a direct child of a `DockPanel`, and
+two dropdowns rendering as default grey Windows controls against a dark phosphor
+interface because a `ComboBox` paints itself from a `ControlTemplate` and setting
+`Background` on the style does nothing without one.
+
+Both were found by looking at the rendered window. `tools/SettingsShot` lays the
+window out and rasterises it through `RenderTargetBitmap` **without displaying
+it**, so the surface can be reviewed on a machine whose owner is using it, with no
+wallpaper appearing on the desktop. `tools/settings-shot.mjs` runs all nine
+sections and asserts each produced a real image, because a window that never got
+a layout pass renders as a small blank PNG and reports no error at all.
 
 ## Adding a world
 

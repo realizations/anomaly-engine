@@ -145,6 +145,14 @@
             <Setter Property="MinHeight" Value="24"/>
         </Style>
 
+        <!--
+            A ComboBox's chrome comes from a ControlTemplate, and the default
+            template paints itself with system theme brushes. Setting Background,
+            Foreground and BorderBrush on the style does nothing without a
+            template to consume them, so the two most-used dropdowns in the window
+            rendered as default grey Windows controls against a dark phosphor UI.
+            This template brings them in line with the buttons.
+        -->
         <Style TargetType="ComboBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
@@ -153,6 +161,110 @@
             <Setter Property="MinHeight" Value="34"/>
             <Setter Property="Padding" Value="10,6"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="5"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="26"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                      VerticalAlignment="Center"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                                    <!-- Chevron, drawn rather than themed. -->
+                                    <Path Grid.Column="1"
+                                          Data="M 0 0 L 5 5 L 10 0"
+                                          Stroke="{StaticResource TextBrush}"
+                                          StrokeThickness="1.5"
+                                          StrokeEndLineCap="Round"
+                                          StrokeStartLineCap="Round"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <!-- The invisible button that actually opens the list. -->
+                            <ToggleButton x:Name="PART_Toggle"
+                                          Focusable="False"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent"/>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Placement="Bottom"
+                                   VerticalOffset="4"
+                                   PopupAnimation="Fade"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}">
+                                <Border Background="{StaticResource CardBrush}"
+                                        BorderBrush="{StaticResource LineBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="5"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Padding="4">
+                                    <ScrollViewer MaxHeight="260">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentDimBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="1.5"/>
+                            </Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style TargetType="ProgressBar">
@@ -388,10 +500,10 @@
                         <Border Background="{StaticResource WarnBgBrush}" BorderBrush="{StaticResource WarnLineBrush}"
                                 BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,20,0,0">
                             <StackPanel>
-                                <TextBlock Text="Not built yet" FontSize="12" FontWeight="SemiBold"
+                                <TextBlock Text="One world at a time" FontSize="12" FontWeight="SemiBold"
                                            Foreground="{StaticResource WarnBrush}"/>
                                 <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
-                                           Text="The wallpaper is hosted on the primary display only. Per-monitor worlds need one engine per screen, so the per-pixel cost is paid once per monitor; this is the largest remaining structural gap and is documented rather than approximated."/>
+                                           Text="Every attached display is composed independently, so a mixed setup gets a correct aspect ratio on each screen rather than one wide crop split across them. What is not built yet is giving each display its own world: right now they all show the same place, framed differently."/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

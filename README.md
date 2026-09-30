@@ -369,14 +369,14 @@ serving it over HTTP.
 
 ```
 Clock / Random / Network / Weather sources
-        ’
-    EventBus  ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢  Anomaly registry (rarity, cooldowns)
-        ’                              ’
+        |
+    EventBus -----> Anomaly registry (rarity, cooldowns)
+        |                              |
   Handlers / systems              Journal + Field Notes
-        ’
-  WorldRenderer  ÃƒÂ¢Ã¢â‚¬Â Ã‚ÂÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬  World data (biome, palette, terrain, structures)
-        ’
-  Offscreen buffer ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢  blit to display (adaptive render scale)
+        |
+  WorldRenderer <--- World data (biome, palette, terrain, structures)
+        |
+  Offscreen buffer ----> blit to display (adaptive render scale)
 ```
 
 ## CLI
@@ -514,15 +514,20 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | Tool | Purpose |
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
-| `tools/e2e.mjs` | 45 end-to-end checks on the deployed `file://` build |
+| `tools/e2e.mjs` | 53 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
 | `tools/license-gate.mjs` | Asset licence policy enforcement |
 | `tools/license-gate.mjs --selftest` | Proves the gate rejects 19 bad-licence cases |
-| `tools/perf.mjs` | Measures cost per pixel per style; the honest performance number |
+| `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
+| `tools/perf-gpu.mjs` | Measures the engine's real per-frame cost on the GPU, and proves the adaptive scaler responds to load |
+| `tools/riso-halftone.mjs` | Proves riso actually prints a dot screen, by measuring adjacent-pixel luminance |
+| `tools/settings-shot.mjs` | Renders all nine WPF settings pages to PNG without displaying the window, so layout can be reviewed |
 | `tools/verify-fonts.mjs` | Parses each font's real family, style and version |
 | `tools/verify-fonts-use.mjs` | Proves each family loads and actually applies, not just ships |
-| `tools/showcase.mjs` | Renders the 64-frame gallery to `build/showcase/` |
+| `tools/showcase.mjs` | Renders the 69-frame gallery to `build/showcase/`, and fails if a shipped anomaly has no frame |
+| `tools/contact-sheet.mjs` | Tiles many renders into one sheet, for reviewing a pattern rather than a single frame |
+| `tools/make-branding.mjs` | Draws the icon set, ICO, favicon and social preview from code |
 | `tools/worlds.mjs` | Renders every world at a given hour and style |
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |

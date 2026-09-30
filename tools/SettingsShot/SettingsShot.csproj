@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Renders the WPF settings window to a PNG without displaying it.
+
+    This is a diagnostic harness, not part of the shipped application. It exists
+    because the settings window is the only surface the browser-driven tooling
+    cannot inspect, and its layout bugs are invisible to an end-to-end test.
+
+    It is excluded from the solution's normal build and from the gate, since it
+    is a tool rather than a product component.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SettingsShot</AssemblyName>
+    <RootNamespace>SettingsShot</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AnomalyEngine\AnomalyEngine.csproj" />
+  </ItemGroup>
+
+</Project>

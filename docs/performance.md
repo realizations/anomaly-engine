@@ -1,22 +1,45 @@
 # Performance
 
-Every number here came from `node tools/perf.mjs` against the deployed
-`file://` build. Nothing in this document is estimated.
+Every number here came from a measurement against the deployed `file://` build.
+Nothing in this document is estimated, and the CPU and GPU figures are reported
+separately because they answer different questions.
+
+## The short version
+
+On real hardware the renderer is not close to being the bottleneck. On a Radeon
+RX 5500M, the engine's own per-frame work at 1920x1080 is **about 4 ms**, against
+a 16.7 ms budget for 60 Hz. That is roughly a quarter of the frame, which leaves
+the rest for the desktop compositor, other applications, and the host.
+
+The renderer is fill-rate bound, and the adaptive quality scaler is a real
+safeguard rather than a fallback: on a machine with no usable GPU it detects the
+load and reduces render scale until the frame fits the budget. That path was
+observed working, dropping to a scale of 0.59 to bring a 50.8 ms CPU frame inside
+budget.
 
 ## How to read these figures
 
-Headless Chromium rasterises on the CPU through SwiftShader. A full-screen
-composite operation costs roughly two orders of magnitude more there than on the
-GPU-composited WebView2 the application actually ships in.
+There are two very different rasterisation paths and conflating them produces
+numbers that are both wrong and misleading in opposite directions.
 
-So raw fps measured this way is a **floor, not a forecast**. The useful figure is
-cost *per pixel*, which is stable across resolutions precisely when the renderer
-is fill-rate bound. It is the number to watch when a change adds a full-screen
-pass, because it predicts what the same pass will cost on real hardware.
+**CPU rasterisation.** Headless Chromium rasterises through SwiftShader on the
+CPU. A full-screen composite costs roughly two orders of magnitude more there
+than on the GPU-composited WebView2 the application actually ships in. Measured
+this way, fps is a **floor, not a forecast**. The useful figure is cost *per
+pixel*, which is stable across resolutions precisely when the renderer is
+fill-rate bound. It is the number to watch when a change adds a full-screen pass,
+because it predicts what that pass will cost on real hardware.
+
+**GPU rasterisation.** Launched with hardware acceleration, the same scene
+reports the engine's real per-frame cost. Note that the fps figure in this mode
+is bounded by the headless compositor's own frame pacing, around 25 Hz, and is
+*not* a measure of the renderer: the engine's own work finishes in single-digit
+milliseconds while frames are still being paced out at that rate. Read
+`frameMs`, not `fps`, when hardware is available.
 
 ## Measured
 
-CPU-rasterised, adaptive quality enabled:
+CPU-rasterised (SwiftShader), adaptive quality enabled — a floor, not a forecast:
 
 | Resolution | Style | fps | frame ms | ns/pixel | render scale |
 |---|---|---|---|---|---|
@@ -27,10 +50,20 @@ CPU-rasterised, adaptive quality enabled:
 | 1920x1080 | flat | 9 | 81.4 | 39 | 0.90 |
 | 1920x1080 | riso | 22 | 6.8 | 3 | 0.80 |
 
+GPU-composited (ANGLE, AMD Radeon 5500M, OpenGL 4.5), 1920x1080, painterly:
+
+| Path | fps (pacing-bound) | engine frame ms | render scale |
+|---|---|---|---|
+| Hardware | 26 | 4.1 | 1.00 |
+| SwiftShader fallback | 11 | 50.8 | 0.59 |
+
 The renderer is fill-rate bound: cost per pixel holds between 39 and 52 ns across
-a 2.25x change in pixel count, which is what fill-rate bound looks like and is
-the reason the adaptive quality scaler is the primary defence rather than a
-fallback.
+a 2.25x change in pixel count on the CPU path, which is what fill-rate bound
+looks like, and it is why the adaptive quality scaler is the primary defence
+rather than a fallback. The same scene that costs 50.8 ms to rasterise on the CPU
+costs 4.1 ms on the GPU — the 12x ratio is the reason the shipped application,
+which composites on the GPU through WebView2, has so much more headroom than the
+CPU-rasterised table above suggests.
 
 ## Per-monitor
 
