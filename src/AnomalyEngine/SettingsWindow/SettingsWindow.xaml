@@ -497,13 +497,29 @@
                                 <TextBlock x:Name="MonitorListText" Text="" Style="{StaticResource Note}" Margin="0,8,0,0"/>
                             </StackPanel>
                         </Border>
+
+                        <!--
+                            Per-display worlds. Populated at runtime, one row per
+                            attached display, because the number of displays is not
+                            known until the host reports them and hard-coding two
+                            rows would be wrong on every machine except the one it
+                            was written on.
+                        -->
+                        <TextBlock Style="{StaticResource Heading}" Text="WORLD PER DISPLAY"
+                                   Margin="0,26,0,0"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Give each screen its own place. Left on the active world, a display follows whatever world is selected."/>
+                        <StackPanel x:Name="DisplayWorldPanel" Margin="0,12,0,0"/>
+                        <Button x:Name="ClearDisplayWorlds" Content="Reset all displays to the active world"
+                                HorizontalAlignment="Left" Margin="0,12,0,0"
+                                Visibility="Collapsed" Click="BtnClearDisplayWorlds_Click"/>
                         <Border Background="{StaticResource WarnBgBrush}" BorderBrush="{StaticResource WarnLineBrush}"
                                 BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,20,0,0">
                             <StackPanel>
-                                <TextBlock Text="One world at a time" FontSize="12" FontWeight="SemiBold"
+                                <TextBlock Text="The terminal is on the primary only" FontSize="12" FontWeight="SemiBold"
                                            Foreground="{StaticResource WarnBrush}"/>
                                 <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
-                                           Text="Every attached display is composed independently, so a mixed setup gets a correct aspect ratio on each screen rather than one wide crop split across them. What is not built yet is giving each display its own world: right now they all show the same place, framed differently."/>
+                                           Text="Every attached display is composed independently, so a mixed setup gets a correct aspect ratio on each screen rather than one wide crop split across them. The observatory terminal is drawn on the primary only, as one piece of equipment standing in the world rather than something installed on every screen."/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

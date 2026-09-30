@@ -35,6 +35,21 @@ import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
 import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
 
+/**
+ * One display as the native host reports it.
+ *
+ * `id` is the display device path, which is what a per-display setting has to key
+ * on. `x`/`y` are in virtual-desktop coordinates and may be negative.
+ */
+interface MonitorReport {
+  id?: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  primary?: boolean;
+}
+
 class Engine {
   private _bus: EventBus;
   private _scheduler: EventScheduler;
@@ -63,6 +78,8 @@ class Engine {
   private _accessibility: AccessibilitySystem;
   public _updater: UpdateSystem;
   private _worlds: WorldLoader;
+  /** The layout the host last reported, kept so a per-display world can be re-resolved. */
+  private _monitors: Array<MonitorReport & { index: number }> = [];
   private _worldClock: WorldClock;
   private _easterEggs: EasterEggSystem;
   private _hotkeys: HotkeySystem;
@@ -506,7 +523,7 @@ class Engine {
     // `window.screen` describes the primary display only and knows nothing
     // about the others attached to this machine.
     window.addEventListener('anomaly:monitors', (e) => {
-      const detail = (e as CustomEvent<{ monitors?: Array<{ x: number; y: number; w: number; h: number }> }>).detail;
+      const detail = (e as CustomEvent<{ monitors?: MonitorReport[] }>).detail;
       if (Array.isArray(detail?.monitors)) this._resize(detail.monitors);
     });
     window.addEventListener('anomaly:worlds', (e) => {
@@ -627,13 +644,14 @@ class Engine {
    * When the host has not sent a monitor layout, this falls back to a single
    * full-screen viewport, so the engine still runs correctly in a plain browser.
    */
-  private _resize(monitors?: Array<{ x: number; y: number; w: number; h: number }>): void {
+  private _resize(monitors?: MonitorReport[]): void {
     const layout = monitors && monitors.length > 0 ? monitors : null;
 
     if (!layout) {
       this._canvas.width = window.screen.width;
       this._canvas.height = window.screen.height;
       this._renderer.resize(this._canvas.width, this._canvas.height);
+      this._monitors = [];
       return;
     }
 
@@ -646,15 +664,69 @@ class Engine {
     }
     this._canvas.width = maxX - minX;
     this._canvas.height = maxY - minY;
+
+    // Remember the layout so a per-display world can be attached to it, and
+    // resolve the assignments against the worlds that actually exist right now.
+    this._monitors = layout.map((m, index) => ({ ...m, index }));
+    const assignments = this._persistence?.get().displayWorlds ?? {};
+
     this._renderer.setViewports(
-      layout.map((m, index) => ({
-        index,
-        x: m.x - minX,
-        y: m.y - minY,
-        w: m.w,
-        h: m.h,
-      }))
+      layout.map((m, index) => {
+        // A display with no id, or an id that matches nothing, or an id pointing
+        // at a world that has since been removed, all fall back to the active
+        // world. Silently compositing nothing would leave a black rectangle.
+        const wanted = m.id ? assignments[m.id] : undefined;
+        const world = wanted ? this._worlds.get(wanted) : null;
+        // The key is omitted rather than set to undefined, because the project
+        // compiles with exactOptionalPropertyTypes: an omitted key and an
+        // explicit undefined are different there, and a viewport with no world
+        // of its own must genuinely not have the property.
+        return {
+          index,
+          x: m.x - minX,
+          y: m.y - minY,
+          w: m.w,
+          h: m.h,
+          // Only set when it differs, so a single-display machine and every
+          // development run take exactly the path they took before.
+          ...(world && world.id !== this._worlds.getActiveId() ? { world } : {}),
+        };
+      })
     );
+  }
+
+  /**
+   * Assigns a world to one display.
+   *
+   * Passing null clears the assignment, so the display reverts to the active
+   * world. An id for a display that is not attached is kept rather than rejected,
+   * because a monitor that is currently unplugged is a normal state and the
+   * assignment should still be there when it comes back.
+   */
+  setDisplayWorld(displayId: string | null, worldId: string | null): boolean {
+    if (!displayId) return false;
+    if (worldId !== null && !this._worlds.has(worldId)) return false;
+    const next = { ...(this._persistence?.get().displayWorlds ?? {}) };
+    if (worldId === null) delete next[displayId];
+    else next[displayId] = worldId;
+    this._persistence?.update({ displayWorlds: next });
+    this._resize(this._monitors.length ? this._monitors : undefined);
+    this._bridge.sendLog('displays:world-assigned', { displayId, worldId });
+    return true;
+  }
+
+  /** Current per-display assignments, for the settings window. */
+  getDisplayWorlds(): Record<string, string> {
+    return { ...(this._persistence?.get().displayWorlds ?? {}) };
+  }
+
+  /** The displays the host last reported, with their stable ids. */
+  getMonitors(): Array<{ id: string; x: number; y: number; w: number; h: number; primary: boolean }> {
+    return this._monitors.map((m) => ({
+      id: m.id ?? '',
+      x: m.x, y: m.y, w: m.w, h: m.h,
+      primary: m.primary === true,
+    }));
   }
 
   getFps(): number { return this._fps; }

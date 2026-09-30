@@ -557,6 +557,36 @@ public class WallpaperHost : IDisposable
         return result;
     }
 
+    /// A stable identifier for each attached display.
+    ///
+    /// Geometry is not an identity. Unplugging a monitor and plugging a different
+    /// one into the same port, or rearranging two displays, changes the rectangles
+    /// without changing the hardware, and Windows reorders Screen.AllScreens when
+    /// the primary display changes. Anything that has to remember which display is
+    /// which across a session therefore has to key on something that belongs to the
+    /// hardware rather than to its position.
+    ///
+    /// DeviceName is the display device path (for example
+    /// \\.\DISPLAY1), which is stable for a given monitor on a given port. It is
+    /// not a hardware serial and is not claimed to be: it identifies the output,
+    /// which is exactly the granularity a per-display setting needs.
+    public static List<MonitorIdentity> GetMonitorIdentities()
+    {
+        var result = new List<MonitorIdentity>();
+        foreach (var screen in Screen.AllScreens)
+        {
+            var b = screen.Bounds;
+            if (b.Width <= 0 || b.Height <= 0) continue;
+            result.Add(new MonitorIdentity(screen.DeviceName ?? string.Empty, b, screen.Primary));
+        }
+        return result;
+    }
+
+    /// <param name="Id">Stable per-output key, for example \\.\DISPLAY1.</param>
+    /// <param name="Bounds">Rectangle in virtual-desktop coordinates.</param>
+    /// <param name="Primary">True for the primary display, which draws the terminal.</param>
+    public readonly record struct MonitorIdentity(string Id, System.Drawing.Rectangle Bounds, bool Primary);
+
     /// Bounding box of the whole virtual desktop, which may have a negative
     /// origin when a secondary sits to the left of or above the primary.
     public static System.Drawing.Rectangle GetVirtualDesktopBounds()
@@ -582,17 +612,21 @@ public class WallpaperHost : IDisposable
     /// framing instead of a crop.
     public void ReportMonitors()
     {
-        var bounds = GetMonitorBounds();
-        if (bounds.Count == 0) return;
+        var monitors = GetMonitorIdentities();
+        if (monitors.Count == 0) return;
 
         var parts = new List<string>();
-        foreach (var b in bounds)
+        foreach (var m in monitors)
         {
-            // Serialised as integers because these are pixel rectangles.
-            parts.Add($"{{ x: {b.X}, y: {b.Y}, w: {b.Width}, h: {b.Height} }}");
+            // Serialised as integers because these are pixel rectangles. The id is
+            // embedded as a JSON string literal, escaped, because a device path is
+            // attacker-adjacent input as far as the JavaScript parser is concerned:
+            // it is interpolated into a script string.
+            var id = System.Text.Json.JsonSerializer.Serialize(m.Id);
+            parts.Add($"{{ id: {id}, x: {m.Bounds.X}, y: {m.Bounds.Y}, w: {m.Bounds.Width}, h: {m.Bounds.Height}, primary: {(m.Primary ? "true" : "false")} }}");
         }
         var json = "[" + string.Join(",", parts) + "]";
-        _logger.Info($"Reporting {bounds.Count} monitor(s) to the renderer: {json}");
+        _logger.Info($"Reporting {monitors.Count} monitor(s) to the renderer: {json}");
         _ = ExecuteScriptSafe(
             $"window.dispatchEvent(new CustomEvent('anomaly:monitors', {{ detail: {{ monitors: {json} }} }}));");
     }

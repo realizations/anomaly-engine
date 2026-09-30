@@ -477,7 +477,8 @@ Done:
 - [x] Durable state — JSON in `%APPDATA%` via the native host, survives a corrupt save
 - [x] Dynamic quality — offscreen buffer with adaptive render scale
 - [x] Global hotkeys — cycle world/style, pause, field notes, debug
-- [x] Per-monitor worlds - one engine, one composition per display, follows hot-plug
+- [x] Per-monitor worlds - one engine, one composition per display, follows hot-plug, and each
+      display can be given its own world
 - [x] Accessibility — reduced motion, high contrast, keyboard focus, live region
 - [x] Licence gate — machine-enforced, proven by 19 adversarial cases
 - [x] Bundled typefaces — three OFL families, verified to load and actually apply
@@ -516,6 +517,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify.mjs` | Everything below, in order |
 | `tools/e2e.mjs` | 53 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
+| `tools/per-display-worlds.mjs` | Proves each display can show its own world, by checking the two screens render differently |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
 | `tools/license-gate.mjs` | Asset licence policy enforcement |
 | `tools/license-gate.mjs --selftest` | Proves the gate rejects 19 bad-licence cases |

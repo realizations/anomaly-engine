@@ -99,6 +99,15 @@ export interface MonitorViewport {
   h: number;
   /** Device pixel ratio for this display, which can differ per monitor. */
   dpr?: number;
+  /**
+   * The world to compose on this display.
+   *
+   * Optional, and absent means "use the active world", which is what every
+   * single-display case and every development run wants. Only a multi-display
+   * host sets it, and only when the user has actually chosen a different world
+   * for that screen.
+   */
+  world?: WorldDefinition;
 }
 
 
@@ -661,13 +670,25 @@ export class WorldRenderer {
    */
   setWorld(world: WorldDefinition): void {
     this._world = world;
-    this._seed = world.terrain.seed;
+    this._rebuildForWorldChange();
+  }
+
+  /**
+   * Re-derives everything that is a property of the current world.
+   *
+   * Kept separate from setWorld because switching world per display does not go
+   * through setWorld: a viewport that owns its own world has it swapped in for
+   * the duration of one compose. The derived state has to be rebuilt either way,
+   * and rebuilding only some of it draws one world's sky over another's ground.
+   */
+  private _rebuildForWorldChange(): void {
+    this._seed = this._world.terrain.seed;
     this._buildScatter();
     // The near-miss details are a property of the place, so they are rebuilt
     // per world. Carrying them across would make two locations feel like the
     // same location with different wallpaper.
-    this._uncanny = new UncannyLayer(world);
-    this._liminal = world.biome === 'liminal-interior' ? new LiminalInterior(world) : null;
+    this._uncanny = new UncannyLayer(this._world);
+    this._liminal = this._world.biome === 'liminal-interior' ? new LiminalInterior(this._world) : null;
     this._risoCacheValid = false;
   }
 
@@ -802,9 +823,40 @@ export class WorldRenderer {
 
     const viewports = this._viewports.length > 0 ? this._viewports : [this._fallbackViewport()];
     let slowest = 0;
+
+    // Per-display worlds.
+    //
+    // The renderer keeps its world as instance state and most of the draw code
+    // reads it directly, so a viewport that has been given its own world has it
+    // swapped in for the duration of its compose and the previous one put back
+    // afterwards. Doing it this way keeps the change local to the one loop rather
+    // than threading a world parameter through several hundred draw calls.
+    //
+    // Everything derived from the world has to be re-derived when it changes, not
+    // just the world itself: the terrain, the structures and the anomaly set are
+    // all built from the world and cached, so switching without clearing them
+    // would draw one world's sky over another's ground.
+    const activeWorld = this._world;
+    const activeSeed = this._seed;
+    const activeAnomalies = this._anomalies;
+
     for (const vp of viewports) {
       const t0 = this._profile ? performance.now() : 0;
+
+      if (vp.world && vp.world.id !== activeWorld.id) {
+        this._world = vp.world;
+        this._seed = vp.world.terrain.seed;
+        this._rebuildForWorldChange();
+      }
+
       this._composeViewport(date, vp, vp.index === 0, dt);
+
+      if (vp.world && vp.world.id !== activeWorld.id) {
+        this._world = activeWorld;
+        this._seed = activeSeed;
+        this._anomalies = activeAnomalies;
+      }
+
       if (this._profile) {
         const t1 = performance.now();
         this._phases.total = t1 - t0;

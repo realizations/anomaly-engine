@@ -169,6 +169,30 @@ changes, and a pending write is flushed on `pagehide`, `beforeunload` and
 `visibilitychange`. A hosted wallpaper is terminated as often as it is closed,
 and without the flush anything changed in that window would be lost silently.
 
+## Per-display worlds
+
+A display can be given its own world, so a two-screen setup does not have to show
+the same place twice. The renderer holds its world as instance state and most of
+the draw code reads it directly, so a viewport carrying its own world has it
+swapped in for the duration of its one compose and the previous one restored
+afterwards. Everything derived from the world is rebuilt on that swap, not just
+the world itself: the terrain, the structures, the near-miss details and the
+anomaly set are all built from the world and cached, so restoring only the world
+would draw one world's sky over another's ground.
+
+Assignments are keyed on the display's **device name**, not on its index in the
+monitor list and not on its rectangle. Both of those are positions rather than
+identities. Windows reorders the list when the primary display changes, and a
+monitor moved to another port changes its rectangle, so either would let a
+setting drift onto the wrong screen. An id that matches no attached display is
+kept rather than discarded, because a monitor that is currently unplugged is a
+normal state and the assignment should still be there when it comes back.
+
+`tools/per-display-worlds.mjs` proves the assignment reaches the composition by
+comparing pixel samples from the two halves of the canvas. Asserting on the
+stored mapping would prove nothing: the mapping could persist perfectly while the
+renderer ignored it, and the check would still pass.
+
 ## Project layout
 
 ```

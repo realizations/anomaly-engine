@@ -41,6 +41,17 @@ export interface PersistedState {
    * pasted world is, and it is written somewhere a user can edit.
    */
   customWorlds: unknown[];
+  /**
+   * World chosen for each display, keyed by the display's stable id.
+   *
+   * Keyed by the host-reported device id rather than by index or by geometry.
+   * Both of those are positions rather than identities: Windows reorders the
+   * monitor list when the primary display changes, and a monitor moved to another
+   * port changes its rectangle, so a setting stored either way would drift onto
+   * the wrong screen. Ids that no longer match any attached display are dropped
+   * on load rather than accumulating.
+   */
+  displayWorlds: Record<string, string>;
 }
 
 const VERSION = 1;
@@ -53,6 +64,9 @@ const LS_KEY = 'anomaly-engine:state';
  * is written to disk, so that a state file cannot be inflated without limit.
  */
 export const MAX_CUSTOM_WORLDS = 200;
+
+/** Ceiling on per-display world assignments held in the state file. */
+export const MAX_DISPLAY_ASSIGNMENTS = 16;
 
 export function emptyState(): PersistedState {
   return {
@@ -67,6 +81,7 @@ export function emptyState(): PersistedState {
     secrets: [],
     moments: [],
     customWorlds: [],
+    displayWorlds: {},
   };
 }
 
@@ -100,6 +115,22 @@ export function reconcile(raw: unknown): PersistedState {
     customWorlds: arr<unknown>(s.customWorlds)
       .filter((w) => !!w && typeof w === 'object' && !Array.isArray(w))
       .slice(0, MAX_CUSTOM_WORLDS),
+    // Only string-to-string pairs survive. The values are world ids and are
+    // re-checked against the registry on load, so a stale or hand-edited id
+    // simply falls back to the active world rather than selecting nothing.
+    displayWorlds: (() => {
+      const src = (s as { displayWorlds?: unknown }).displayWorlds;
+      if (!src || typeof src !== 'object' || Array.isArray(src)) return {};
+      const out: Record<string, string> = {};
+      let n = 0;
+      for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+        if (typeof v !== 'string' || !v) continue;
+        if (n >= MAX_DISPLAY_ASSIGNMENTS) break;
+        out[k] = v;
+        n++;
+      }
+      return out;
+    })(),
   };
 }
 

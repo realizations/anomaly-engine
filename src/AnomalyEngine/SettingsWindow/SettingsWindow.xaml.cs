@@ -29,6 +29,13 @@ public partial class SettingsWindow : Window
     // Guards the SelectionChanged handlers while we are writing values into
     // them programmatically, which would otherwise fire them as user actions.
     private bool _loading = true;
+
+    /// <summary>
+    /// Mirror of the engine's per-display world assignments, keyed by display
+    /// device name. Read once per refresh and written as picks change, so the
+    /// pickers do not have to call into the engine for every row.
+    /// </summary>
+    private Dictionary<string, string> _displayWorlds = new();
     private bool _paused;
 
     public SettingsWindow(WallpaperHost? host = null, Logger? logger = null)
@@ -556,8 +563,124 @@ public partial class SettingsWindow : Window
 
         MonitorCountText.Text = $"{Screen.AllScreens.Length} display{(Screen.AllScreens.Length == 1 ? "" : "s")} detected";
         MonitorListText.Text = string.Join(Environment.NewLine, Screen.AllScreens.Select(sc =>
-            $"{sc.DeviceName} · {(sc.Bounds.Width)}x{sc.Bounds.Height}" +
-            (sc.Primary ? " · primary (wallpaper attaches here)" : " · not used yet")));
+            $"{sc.DeviceName} · {sc.Bounds.Width}x{sc.Bounds.Height}" +
+            (sc.Primary ? " · primary (wallpaper attaches here)" : "")));
+
+        // Refreshed before the pickers are built, so they are populated from the
+        // engine's real state rather than from whatever was last picked here.
+        _displayWorlds = ReadDisplayWorlds();
+        BuildDisplayWorldRows();
+    }
+
+    private Dictionary<string, string> ReadDisplayWorlds()
+    {
+        if (_host is null) return new();
+        try
+        {
+            var json = _host.EvaluateAsync("JSON.stringify(window.__engine.getDisplayWorlds())")
+                             .GetAwaiter().GetResult();
+            if (string.IsNullOrWhiteSpace(json)) return new();
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(
+                       JsonNode.Parse(json)?.ToString() ?? "{}")
+                   ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    /// <summary>
+    /// Builds one world picker per attached display.
+    ///
+    /// Rebuilt from scratch on every refresh rather than diffed, because the
+    /// number of displays can change while the window is open and a picker bound
+    /// to a display that is no longer attached would write to a dead id.
+    /// </summary>
+    private void BuildDisplayWorldRows()
+    {
+        DisplayWorldPanel.Children.Clear();
+        ClearDisplayWorlds.Visibility = Visibility.Collapsed;
+
+        if (_host is null) return;
+        List<WorldRow>? worlds;
+        try
+        {
+            var json = _host.EvaluateAsync("JSON.stringify(window.__engine.getWorldDetails())")
+                             .GetAwaiter().GetResult();
+            if (string.IsNullOrWhiteSpace(json)) return;
+            worlds = JsonSerializer.Deserialize<List<WorldRow>>(JsonNode.Parse(json)?.ToString() ?? "[]");
+        }
+        catch
+        {
+            // The engine is not answering yet. The displays list below still
+            // renders from Screen.AllScreens, so this is a partial page, not a
+            // broken one.
+            return;
+        }
+        if (worlds is null || worlds.Count == 0) return;
+
+        foreach (var screen in Screen.AllScreens)
+        {
+            var deviceName = screen.DeviceName ?? string.Empty;
+            var assigned = _displayWorlds.TryGetValue(deviceName, out var w) ? w : null;
+            if (assigned is not null) ClearDisplayWorlds.Visibility = Visibility.Visible;
+
+            var label = new TextBlock
+            {
+                Text = screen.Primary
+                    ? $"{deviceName} · primary · {screen.Bounds.Width}x{screen.Bounds.Height}"
+                    : $"{deviceName} · {screen.Bounds.Width}x{screen.Bounds.Height}",
+                Style = (Style)FindResource("Note"),
+                Margin = new Thickness(0, 10, 0, 4),
+            };
+
+            var combo = new ComboBox { MinWidth = 320, Margin = new Thickness(0, 0, 0, 4) };
+            combo.Items.Add("Follow the active world");
+            foreach (var world in worlds) combo.Items.Add(world.Name);
+            // Index 0 is "follow", so a stored world sits one past it.
+            combo.SelectedIndex = 0;
+            if (assigned is not null)
+            {
+                var at = worlds.FindIndex(x => x.Id == assigned);
+                if (at >= 0) combo.SelectedIndex = at + 1;
+            }
+
+            var worldIds = worlds.Select(x => x.Id).ToList();
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (_loading) return;
+                var pick = combo.SelectedIndex <= 0 ? null : worldIds[combo.SelectedIndex - 1];
+                SetDisplayWorld(deviceName, pick);
+            };
+
+            DisplayWorldPanel.Children.Add(label);
+            DisplayWorldPanel.Children.Add(combo);
+        }
+    }
+
+    /// <summary>
+    /// Applies a per-display world choice, updating the local mirror only when
+    /// the engine accepted it so the pickers cannot drift from the real state.
+    /// </summary>
+    private void SetDisplayWorld(string deviceId, string? worldId)
+    {
+        if (_host is null) return;
+        var ok = _host.EvaluateAsync(
+            $"window.__engine.setDisplayWorld({JsonSerializer.Serialize(deviceId)}, " +
+            $"{(worldId is null ? "null" : JsonSerializer.Serialize(worldId))})")
+            .GetAwaiter().GetResult().Trim() == "true";
+        if (!ok) return;
+
+        if (worldId is null) _displayWorlds.Remove(deviceId);
+        else _displayWorlds[deviceId] = worldId;
+        ClearDisplayWorlds.Visibility = _displayWorlds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void BtnClearDisplayWorlds_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var id in _displayWorlds.Keys.ToList()) SetDisplayWorld(id, null);
+        BuildDisplayWorldRows();
     }
 
     private class WorldRow
