@@ -343,6 +343,38 @@ check('a saved imported world id resolves to the imported world',
     && (await page.evaluate(() => window.__engine.getActiveWorldId())) === 'e2e-world',
   await page.evaluate(() => String(window.__engine.getActiveWorldId())));
 
+// An imported world carries a digest recorded at import time, so one edited in
+// the saved state afterwards is reported rather than silently accepted. The edit
+// is made through the state file the way a hand-edit or a tampered file would
+// reach it, which is the case the check exists for.
+check('an unchanged imported world is not reported as changed',
+  (await page.evaluate(() => window.__engine.getChangedWorlds())).length === 0,
+  JSON.stringify(await page.evaluate(() => window.__engine.getChangedWorlds())));
+
+await page.evaluate(() => {
+  const key = 'anomaly-engine:state';
+  const s = JSON.parse(localStorage.getItem(key));
+  const w = s.customWorlds.find((x) => x.id === 'e2e-world');
+  w.name = 'Edited since it was imported';
+  localStorage.setItem(key, JSON.stringify(s));
+});
+await page.reload();
+await page.waitForTimeout(3000);
+const changed = await page.evaluate(() => window.__engine.getChangedWorlds());
+check('a world edited after import is reported as changed', changed.includes('e2e-world'),
+  JSON.stringify(changed));
+check('a world edited after import is still loaded, not rejected',
+  (await page.evaluate(() => window.__engine.getWorldDetails().some((w) => w.id === 'e2e-world'))),
+  'the user may have edited their own file on purpose');
+
+// Accepting the change makes it the new baseline, so it is not reported again.
+await page.evaluate(() => window.__engine.acceptWorldChanges());
+await page.reload();
+await page.waitForTimeout(3000);
+check('accepting the edit clears the report',
+  (await page.evaluate(() => window.__engine.getChangedWorlds())).length === 0,
+  JSON.stringify(await page.evaluate(() => window.__engine.getChangedWorlds())));
+
 // The favicon has to survive the whole chain: generated into the directory Vite
 // actually copies, referenced relatively so it resolves over file://, and present
 // in the deployed output. Each of those has been wrong at least once and the

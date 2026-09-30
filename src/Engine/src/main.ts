@@ -1,5 +1,6 @@
 import { EventBus } from './core/EventBus.js';
 import { EventScheduler } from './core/EventScheduler.js';
+import { digestWorld, verifyWorld } from './worlds/digest.js';
 import { EntityManager } from './core/EntityManager.js';
 import { StateManager } from './core/StateManager.js';
 import { ClockSource } from './events/ClockSource.js';
@@ -148,6 +149,9 @@ class Engine {
     const restored = this.restoreCustomWorlds();
     if (restored.skipped.length) {
       this._bridge.sendLog('worlds:restore-skipped', { errors: restored.skipped.slice(0, 5) });
+    }
+    if (restored.changed.length) {
+      this._bridge.sendLog('worlds:changed', { ids: restored.changed });
     }
 
     window.addEventListener('anomaly:state', (e) => {
@@ -881,15 +885,26 @@ class Engine {
   }
 
   /**
-   * Writes the current set of imported worlds into durable state.
+   * Writes the current set of imported worlds into durable state, along with a
+   * digest of each.
    *
    * Without this, importing a world looked like it worked and then quietly lost
    * it on the next launch, which is the worst shape a feature like this can
    * take: it appears to succeed, it survives a restart only in the sense that
    * nothing complains, and the world the user spent time writing is gone.
+   *
+   * The digest is what makes the restored copy trustworthy: it is recorded here,
+   * when the world was first accepted, and checked when the world comes back.
    */
   private _persistCustomWorlds(): void {
-    this._persistence?.update({ customWorlds: this._worlds.getCustomDefinitions() });
+    const customs = this._worlds.getCustomDefinitions();
+    const digests = { ...(this._persistence?.get().worldDigests ?? {}) };
+    for (const w of customs) {
+      // Recorded only on first sight, so re-importing an edited world does not
+      // silently overwrite the very digest that would have reported the change.
+      if (!digests[w.id]) digests[w.id] = digestWorld(w);
+    }
+    this._persistence?.update({ customWorlds: customs, worldDigests: digests });
   }
 
   /**
@@ -900,9 +915,23 @@ class Engine {
    * than as something the app wrote and can therefore assume is sound. An
    * invalid entry is skipped and reported rather than aborting startup.
    */
-  private restoreCustomWorlds(): { restored: number; skipped: string[] } {
+  private restoreCustomWorlds(): { restored: number; skipped: string[]; changed: string[] } {
     const stored = this._persistence?.get().customWorlds ?? [];
-    if (stored.length === 0) return { restored: 0, skipped: [] };
+    if (stored.length === 0) return { restored: 0, skipped: [], changed: [] };
+
+    const digests = this._persistence?.get().worldDigests ?? {};
+
+    // Checked before anything is registered, so a world that changed since it
+    // was first approved is named rather than quietly re-registered.
+    //
+    // A changed world is still loaded. It is the user's own file and they may
+    // have edited it on purpose; refusing it would be worse than reporting it.
+    // What must not happen is the change going unnoticed, so it is logged under
+    // its own event and the ids are exposed for the settings window to surface.
+    const changed = stored
+      .filter((w): w is { id: string } => !!w && typeof w === 'object' && typeof (w as { id?: unknown }).id === 'string')
+      .map((w) => w.id)
+      .filter((id) => !verifyWorld(stored.find((w) => (w as { id?: string })?.id === id), digests[id]));
 
     const v = this._worlds.registerAll(stored);
     const skipped = v.errors;
@@ -914,7 +943,36 @@ class Engine {
       // hand-edited into an invalid state since. Keep the valid ones.
       this._bridge.sendLog('worlds:restore-partial', { requested: stored.length, rejected: skipped.length });
     }
-    return { restored: this._worlds.getCustomDefinitions().length, skipped };
+    return { restored: this._worlds.getCustomDefinitions().length, skipped, changed };
+  }
+
+  /**
+   * Imported worlds whose contents no longer match the digest recorded when
+   * they were first imported.
+   *
+   * Reported rather than acted on. A world is the user's own file, so editing it
+   * is legitimate; what is not acceptable is an edited world being loaded as if
+   * nothing had happened.
+   */
+  getChangedWorlds(): string[] {
+    const stored = this._persistence?.get().customWorlds ?? [];
+    const digests = this._persistence?.get().worldDigests ?? {};
+    return stored
+      .filter((w): w is { id: string } => !!w && typeof w === 'object' && typeof (w as { id?: unknown }).id === 'string')
+      .map((w) => w.id)
+      .filter((id) => !verifyWorld(stored.find((w) => (w as { id?: string })?.id === id), digests[id]));
+  }
+
+  /**
+   * Accepts the current contents of a world as the new baseline.
+   *
+   * Called when the user confirms an edit, so the change is not reported again
+   * on every subsequent launch.
+   */
+  acceptWorldChanges(): void {
+    const digests = { ...(this._persistence?.get().worldDigests ?? {}) };
+    for (const w of this._worlds.getCustomDefinitions()) digests[w.id] = digestWorld(w);
+    this._persistence?.update({ worldDigests: digests });
   }
 
   setWorld(id: string): boolean {

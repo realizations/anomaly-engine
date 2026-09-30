@@ -42,6 +42,15 @@ export interface PersistedState {
    */
   customWorlds: unknown[];
   /**
+   * Digest of each imported world, keyed by world id.
+   *
+   * Recorded when a world is first imported and recomputed every time it is
+   * restored, so a world edited between sessions is reported rather than
+   * quietly accepted. See worlds/digest.ts for why this is a checksum and not a
+   * cryptographic hash, and why a mismatch warns instead of rejecting.
+   */
+  worldDigests: Record<string, string>;
+  /**
    * World chosen for each display, keyed by the display's stable id.
    *
    * Keyed by the host-reported device id rather than by index or by geometry.
@@ -82,6 +91,7 @@ export function emptyState(): PersistedState {
     moments: [],
     customWorlds: [],
     displayWorlds: {},
+    worldDigests: {},
   };
 }
 
@@ -126,6 +136,19 @@ export function reconcile(raw: unknown): PersistedState {
       for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
         if (typeof v !== 'string' || !v) continue;
         if (n >= MAX_DISPLAY_ASSIGNMENTS) break;
+        out[k] = v;
+        n++;
+      }
+      return out;
+    })(),
+    worldDigests: (() => {
+      const src = (s as { worldDigests?: unknown }).worldDigests;
+      if (!src || typeof src !== 'object' || Array.isArray(src)) return {};
+      const out: Record<string, string> = {};
+      let n = 0;
+      for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+        if (typeof v !== 'string' || !v) continue;
+        if (n >= MAX_CUSTOM_WORLDS) break;
         out[k] = v;
         n++;
       }

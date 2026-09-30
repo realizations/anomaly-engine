@@ -169,6 +169,33 @@ changes, and a pending write is flushed on `pagehide`, `beforeunload` and
 `visibilitychange`. A hosted wallpaper is terminated as often as it is closed,
 and without the flush anything changed in that window would be lost silently.
 
+## World integrity
+
+A world is validated against a schema when it is imported, but a schema check
+only proves a definition is well-formed. It says nothing about whether the same
+content is still there on the next launch, so a world edited between sessions
+would be re-registered as if nothing had happened.
+
+Each imported world therefore carries a digest, recorded when it is first
+accepted and recomputed every time it is restored. A mismatch is **reported, not
+rejected**: a world is the user's own file and they may have edited it on purpose,
+so refusing it would be a worse failure than telling them it changed. What is not
+acceptable is the change passing unnoticed, so the Worlds page in settings shows
+which worlds changed and offers to accept the new contents as the baseline.
+
+The digest is a synchronous four-lane 128-bit FNV-1a, and it is honest about not
+being a cryptographic hash. `crypto.subtle.digest`, the obvious choice, is a
+secure-context API that is not guaranteed over `file://` and is asynchronous,
+while worlds are registered from a synchronous load path. A security check that
+quietly stops running when its API is missing is worse than a checksum that
+always runs, so the digest is prefixed `fnv128:` to say what produced it. It
+detects "this file changed", which is the property relied on; it is not a defence
+against a constructed collision and is not described as one.
+
+`crypto.subtle` *is* present in the current WebView2 over `file://`, so this is a
+deliberate choice of a check that always runs over one that is stronger when it
+happens to be available.
+
 ## Per-display worlds
 
 A display can be given its own world, so a two-screen setup does not have to show

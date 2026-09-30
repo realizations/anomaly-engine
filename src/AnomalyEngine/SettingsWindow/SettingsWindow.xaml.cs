@@ -247,7 +247,54 @@ public partial class SettingsWindow : Window
 
         WorldList.Items.Clear();
         foreach (var w in worlds) WorldList.Items.Add(BuildWorldRow(w));
-        WorldCountText.Text = $"{worlds.Count} world{(worlds.Count == 1 ? "" : "s")} · worlds are data, not art";
+        WorldCountText.Text = $"{worlds.Count} world{(worlds.Count == 1 ? "" : "s")} · all are data, not art";
+
+        RefreshWorldIntegrity();
+    }
+
+    /// <summary>
+    /// Surfaces imported worlds whose contents no longer match the checksum
+    /// recorded when they were first imported.
+    ///
+    /// Reported, not blocked. A world is a file the user owns and may well have
+    /// edited deliberately, and a checksum is only a statement that something
+    /// changed, not that something is wrong. The point is that the change is never
+    /// silent.
+    /// </summary>
+    private void RefreshWorldIntegrity()
+    {
+        WorldChangedPanel.Visibility = Visibility.Collapsed;
+        if (_host is null) return;
+        try
+        {
+            var json = _host.EvaluateAsync("JSON.stringify(window.__engine.getChangedWorlds())")
+                             .GetAwaiter().GetResult();
+            if (string.IsNullOrWhiteSpace(json)) return;
+            var changed = JsonSerializer.Deserialize<List<string>>(JsonNode.Parse(json)?.ToString() ?? "[]");
+            if (changed is null || changed.Count == 0) return;
+
+            var names = changed
+                .Select(id => WorldList.Items.OfType<Border>()
+                    .Select(b => b.Tag as WorldRow)
+                    .FirstOrDefault(w => w?.Id == id)?.Name ?? id)
+                .ToList();
+            WorldChangedText.Text =
+                $"These imported worlds have been edited since they were first imported: " +
+                $"{string.Join(", ", names)}. If that was you, accept the changes so this stops being reported. " +
+                $"If it was not, the file was modified outside the app.";
+            WorldChangedPanel.Visibility = Visibility.Visible;
+        }
+        catch
+        {
+            // The engine is not answering; the world list is still correct.
+        }
+    }
+
+    private void BtnAcceptWorldChanges_Click(object sender, RoutedEventArgs e)
+    {
+        if (_host is null) return;
+        _host.EvaluateAsync("window.__engine.acceptWorldChanges()").GetAwaiter().GetResult();
+        RefreshWorldIntegrity();
     }
 
     private Border BuildWorldRow(WorldRow w)
@@ -360,6 +407,9 @@ public partial class SettingsWindow : Window
             Padding = new Thickness(16),
             Margin = new Thickness(0, 0, 0, 10),
             Child = grid,
+            // Carried on the row so the integrity notice can name a changed world
+            // without keeping a parallel id-to-name map that could drift.
+            Tag = w,
         };
     }
 

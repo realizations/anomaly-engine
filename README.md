@@ -484,13 +484,10 @@ Done:
 - [x] Bundled typefaces — three OFL families, verified to load and actually apply
 - [x] CI — typecheck, lint, unit tests, clean-build check, e2e, durable state
 - [x] Diagnostics and verification tooling, including a measured performance report
+- [x] Checksummed world packages — a world edited between sessions is reported, not silently reloaded
 
 Next, in priority order:
 
-- [ ] **Checksummed world packages** — imported worlds are validated on load and
-      re-validated when read back from the state file, but a package is not yet
-      verified against a digest, so a world edited between sessions is trusted as
-      long as it still satisfies the schema
 - [ ] **Installer and updates** — no signed build or auto-update today
 - [ ] **ARG event layer** — needs endpoint config, payload validation and rate limiting first
 - [ ] **Audio capture** — inert until desktop audio is actually sampled
@@ -534,9 +531,9 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 172 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 187 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, the anomaly registry
-and its world-fit rules, the liminal world profile and the return summary.
+and its world-fit rules, the liminal world profile, the return summary and the world digest.
 `npx eslint src/ tests/` is clean.
 
 The suite loads the renderer from `file://` rather than `http://localhost`, because serving
