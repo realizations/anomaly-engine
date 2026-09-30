@@ -1121,44 +1121,63 @@ export class WorldRenderer {
     g.fill();
     g.restore();
 
-    g.save();
-    g.beginPath();
-    g.arc(p.x, p.y, r, 0, Math.PI * 2);
-    g.clip();
-    const surf = g.createRadialGradient(p.x - r * 0.3, p.y - r * 0.35, 0, p.x, p.y, r);
-    surf.addColorStop(0, css(shade(body, 0.2), alpha));
-    surf.addColorStop(1, css(shade(body, -0.16), alpha));
-    g.fillStyle = surf;
-    g.fillRect(p.x - r, p.y - r, r * 2, r * 2);
-
+    // The lit disc, its phase and its craters are composed on a small offscreen
+    // canvas and then composited, because the phase has to be carved out of the
+    // moon and nothing else. Carving it in place with destination-out also
+    // erased the halo that had already been laid down underneath, so the shadowed
+    // part appeared as a dark disc sitting on top of the glow: two overlapping
+    // circles rather than one moon in phase.
     const ph = moonPhase(date);
     const lit = Math.cos(ph * Math.PI * 2);
-    if (lit < 0.985) {
-      // Soft terminator. A hard-edged destination-out bite read as a
-      // rendering fault sitting on top of the moon rather than as a phase,
-      // because the carved disc was slightly wider than the moon itself.
-      const off = lit * r * 1.12;
-      const sr = r * 1.2;
-      const sg = g.createRadialGradient(p.x + off, p.y, 0, p.x + off, p.y, sr);
-      sg.addColorStop(0, 'rgba(0,0,0,1)');
-      sg.addColorStop(0.7, 'rgba(0,0,0,1)');
-      sg.addColorStop(1, 'rgba(0,0,0,0)');
-      g.globalCompositeOperation = 'destination-out';
-      g.fillStyle = sg;
-      g.beginPath();
-      g.arc(p.x + off, p.y, sr, 0, Math.PI * 2);
-      g.fill();
-    }
+    const pad = 2;
+    const disc = document.createElement('canvas');
+    disc.width = (r + pad) * 2;
+    disc.height = (r + pad) * 2;
+    const dc = disc.getContext('2d');
+    if (dc) {
+      const cx = r + pad;
+      const cy = r + pad;
 
-    g.globalCompositeOperation = 'source-atop';
-    g.fillStyle = 'rgba(0,0,0,0.1)';
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * 6.28 + ph * 3;
-      g.beginPath();
-      g.ellipse(p.x + Math.cos(a) * r * 0.42, p.y + Math.sin(a) * r * 0.42, r * 0.24, r * 0.17, a, 0, Math.PI * 2);
-      g.fill();
+      dc.save();
+      dc.beginPath();
+      dc.arc(cx, cy, r, 0, Math.PI * 2);
+      dc.clip();
+
+      const surf = dc.createRadialGradient(cx - r * 0.3, cy - r * 0.35, 0, cx, cy, r);
+      surf.addColorStop(0, css(shade(body, 0.2), alpha));
+      surf.addColorStop(1, css(shade(body, -0.16), alpha));
+      dc.fillStyle = surf;
+      dc.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+      if (lit < 0.985) {
+        // Terminator. Offset and radius are taken from the phase, so a thin
+        // crescent is a narrow sliver and a gibbous moon is only slightly eaten
+        // into, instead of every phase being the same soft-edged bite.
+        const off = lit * r * 1.02;
+        const sr = r * 1.04;
+        const sg = dc.createRadialGradient(cx + off, cy, r * 0.1, cx + off, cy, sr);
+        sg.addColorStop(0, 'rgba(0,0,0,1)');
+        sg.addColorStop(0.86, 'rgba(0,0,0,1)');
+        sg.addColorStop(1, 'rgba(0,0,0,0)');
+        dc.globalCompositeOperation = 'destination-out';
+        dc.fillStyle = sg;
+        dc.beginPath();
+        dc.arc(cx + off, cy, sr, 0, Math.PI * 2);
+        dc.fill();
+        dc.globalCompositeOperation = 'source-over';
+      }
+
+      dc.fillStyle = 'rgba(0,0,0,0.1)';
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * 6.28 + ph * 3;
+        dc.beginPath();
+        dc.ellipse(cx + Math.cos(a) * r * 0.42, cy + Math.sin(a) * r * 0.42, r * 0.24, r * 0.17, a, 0, Math.PI * 2);
+        dc.fill();
+      }
+      dc.restore();
+
+      g.drawImage(disc, p.x - cx, p.y - cy);
     }
-    g.restore();
 
     const second = this._anom('second-moon');
     if (second > 0) {
@@ -2510,16 +2529,37 @@ export class WorldRenderer {
     const rnd = mulberry32(this._seed + 8081);
 
     // Broad drift bands give the flat a sense of scale.
-    for (let i = 0; i < 7; i++) {
-      const t = i / 7;
-      const yy = y0 + this._h * (0.02 + t * 0.26);
-      const hgt = this._h * (0.012 + t * 0.016);
+    //
+    // Drawn as undulating paths rather than as fillRect bands. A full-width
+    // rectangle has a perfectly straight edge, and seven of them stacked across
+    // a flat white surface is not a snowfield, it is a barcode: the eye reads
+    // them as painted stripes because they are straight and evenly spaced.
+    // Snow drifts, so every band gets its own noise-seeded edge.
+    for (let i = 0; i < 6; i++) {
+      const t = i / 6;
+      const yy = y0 + this._h * (0.03 + t * 0.25);
+      const hgt = this._h * (0.014 + t * 0.018);
+      const freq = 0.006 + t * 0.012;
+      const seed = 911 + i * 977;
+
       const grd = g.createLinearGradient(0, yy - hgt, 0, yy + hgt);
-      grd.addColorStop(0, css(shade(base, 0.24), 0));
-      grd.addColorStop(0.5, css(shade(base, 0.2), 0.85));
-      grd.addColorStop(1, css(shade(base, -0.3), 0.5));
+      grd.addColorStop(0, css(shade(base, 0.2), 0));
+      grd.addColorStop(0.55, css(shade(base, 0.14), 0.5));
+      grd.addColorStop(1, css(shade(base, -0.22), 0.28));
       g.fillStyle = grd;
-      g.fillRect(0, yy - hgt, this._w, hgt * 2);
+      g.beginPath();
+      g.moveTo(0, this._h);
+      for (let px = 0; px <= this._w; px += 6) {
+        const n = fbm1D(px * freq, seed, 4) - 0.5;
+        g.lineTo(px, yy - hgt + n * hgt * 3);
+      }
+      for (let px = this._w; px >= 0; px -= 6) {
+        const n = fbm1D(px * freq, seed + 31, 4) - 0.5;
+        g.lineTo(px, yy + hgt + n * hgt * 3);
+      }
+      g.lineTo(0, this._h);
+      g.closePath();
+      g.fill();
     }
 
     // Blue-grey shadow pooling in the hollows, which is what makes snow read

@@ -106,7 +106,12 @@ const KEYS: Array<{ hour: number; grade: SkyGrade }> = [
       lightColor: { r: 255, g: 138, b: 88 },
       ambient: 0.4,
       haze: { r: 198, g: 96, b: 82 },
-      starAlpha: 0.2,
+      // Still no stars. This grade is an hour before sunset with the sky still
+      // bright, and the previous value of 0.2 put visible stars into it: the
+      // ramp started during golden hour, so a dusk frame carried a scatter of
+      // points against a lit sky, which reads as dirt on the lens rather than as
+      // evening. Stars begin with 'dusk', once the sky is actually dark.
+      starAlpha: 0,
       sunAlpha: 0.85,
       moonAlpha: 0.15,
     },
