@@ -715,12 +715,17 @@ public partial class SettingsWindow : Window
     /// </summary>
     private void SetDisplayWorld(string deviceId, string? worldId)
     {
-        if (_host is null) return;
-        var ok = _host.EvaluateAsync(
+        // Held in a local because _host is a field, and the compiler does not
+        // carry a null check on a field across a call that could reassign it.
+        var host = _host;
+        if (host is null) return;
+        // EvaluateAsync returns null when the engine cannot be reached, which is
+        // a normal state before the renderer has loaded rather than an error.
+        var reply = host.EvaluateAsync(
             $"window.__engine.setDisplayWorld({JsonSerializer.Serialize(deviceId)}, " +
             $"{(worldId is null ? "null" : JsonSerializer.Serialize(worldId))})")
-            .GetAwaiter().GetResult().Trim() == "true";
-        if (!ok) return;
+            .GetAwaiter().GetResult();
+        if (reply?.Trim() != "true") return;
 
         if (worldId is null) _displayWorlds.Remove(deviceId);
         else _displayWorlds[deviceId] = worldId;

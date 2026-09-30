@@ -61,19 +61,60 @@
     bundle would have kept being served. An output directory that is meant to
     mirror its source has to be rebuilt, not amended.
   -->
+  <!--
+    Deploy the built renderer next to the application.
+
+    Hooked to Build, and separately to Publish. `dotnet publish` writes to a
+    different directory from $(OutDir) and does not always run the Build target's
+    AfterTargets chain in a way that reaches a copy aimed at OutDir, so a target
+    that only fired on Build produced a publish with no renderer in it at all:
+    the app launched, found no index.html, and would have shown a blank desktop
+    with no error. The renderer is the entire product, so its absence from a
+    release is the worst thing that can go quietly wrong here.
+
+    $(TargetDir) is used rather than $(OutDir) because it is the directory MSBuild
+    is actually publishing into, on both paths.
+  -->
   <Target Name="CopyRendererFiles" AfterTargets="Build" DependsOnTargets="BuildRenderer">
     <ItemGroup>
       <RendererFiles Include="..\Engine\renderer\**\*" />
     </ItemGroup>
     <Error Condition="'@(RendererFiles)' == ''"
            Text="Renderer build produced no files. Expected ..\Engine\renderer to exist. Run 'npm run build' in src/Engine." />
-    <RemoveDir Directories="$(OutDir)renderer" />
-    <MakeDir Directories="$(OutDir)renderer" Condition="!Exists('$(OutDir)renderer')" />
+    <RemoveDir Directories="$(TargetDir)renderer" />
+    <MakeDir Directories="$(TargetDir)renderer" Condition="!Exists('$(TargetDir)renderer')" />
     <Copy SourceFiles="@(RendererFiles)"
-          DestinationFiles="@(RendererFiles->'$(OutDir)renderer\%(RecursiveDir)%(Filename)%(Extension)')"
+          DestinationFiles="@(RendererFiles->'$(TargetDir)renderer\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="false" />
-    <Error Condition="!Exists('$(OutDir)renderer\index.html')"
+    <Error Condition="!Exists('$(TargetDir)renderer\index.html')"
            Text="Deployed renderer is missing index.html. The host would start and render nothing." />
+  </Target>
+
+  <!--
+    Same deployment for the publish path, aimed at the publish directory. Kept as
+    its own target rather than a condition inside the Build one, because on
+    publish $(TargetDir) already points at the publish folder and running the same
+    copy twice would be wasted work; this makes the intent explicit and lets a
+    publish fail loudly if the renderer is missing.
+  -->
+  <Target Name="CopyRendererFilesForPublish" AfterTargets="Publish" DependsOnTargets="BuildRenderer">
+    <PropertyGroup>
+      <!-- $(PublishDir) is not guaranteed to end in a separator, and concatenating
+           a path without one silently produces "publish-proberenderer". -->
+      <RendererPublishDir>$(PublishDir)</RendererPublishDir>
+      <RendererPublishDir Condition="!HasTrailingSlash('$(RendererPublishDir)')">$(RendererPublishDir)\</RendererPublishDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <PublishRendererFiles Include="..\Engine\renderer\**\*" />
+    </ItemGroup>
+    <Error Condition="'@(PublishRendererFiles)' == ''"
+           Text="Renderer build produced no files, so the published application would render nothing. Run 'npm run build' in src/Engine." />
+    <MakeDir Directories="$(RendererPublishDir)renderer" />
+    <Copy SourceFiles="@(PublishRendererFiles)"
+          DestinationFiles="@(PublishRendererFiles->'$(RendererPublishDir)renderer\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+    <Error Condition="!Exists('$(RendererPublishDir)renderer\index.html')"
+           Text="Published renderer is missing index.html. The published application would render nothing." />
   </Target>
 
   <!--
@@ -82,7 +123,17 @@
     describe what was actually deployed rather than what the build produced.
   -->
   <Target Name="WriteBundleDigest" AfterTargets="CopyRendererFiles">
-    <Exec Command="node ..\..\tools\write-bundle-digest.mjs &quot;$(OutDir)renderer&quot; &quot;$(OutDir)renderer.bundle.sha256&quot;"
+    <Exec Command="node ..\..\tools\write-bundle-digest.mjs &quot;$(TargetDir)renderer&quot; &quot;$(TargetDir)renderer.bundle.sha256&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="Exists('..\..\tools\write-bundle-digest.mjs')" />
+  </Target>
+
+  <Target Name="WriteBundleDigestForPublish" AfterTargets="CopyRendererFilesForPublish">
+    <PropertyGroup>
+      <RendererDigestDir>$(PublishDir)</RendererDigestDir>
+      <RendererDigestDir Condition="!HasTrailingSlash('$(RendererDigestDir)')">$(RendererDigestDir)\</RendererDigestDir>
+    </PropertyGroup>
+    <Exec Command="node ..\..\tools\write-bundle-digest.mjs &quot;$(RendererDigestDir)renderer&quot; &quot;$(RendererDigestDir)renderer.bundle.sha256&quot;"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           Condition="Exists('..\..\tools\write-bundle-digest.mjs')" />
   </Target>

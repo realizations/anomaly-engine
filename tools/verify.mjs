@@ -44,6 +44,7 @@ steps.push(await run('per-display worlds', ['per-display-worlds.mjs']));
 steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));
 steps.push(await run('renderer performance on the real GPU', ['perf-gpu.mjs']));
 steps.push(await run('settings window renders every page', ['settings-shot.mjs']));
+steps.push(await run('published build is complete', ['verify-publish.mjs']));
 steps.push(await run('typefaces load and apply', ['verify-fonts-use.mjs']));
 steps.push(await run('durable state round-trip', ['verify-persistence.mjs']));
 

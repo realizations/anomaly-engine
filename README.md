@@ -488,7 +488,9 @@ Done:
 
 Next, in priority order:
 
-- [ ] **Installer and updates** — no signed build or auto-update today
+- [ ] **Installer and updates** — a self-contained release builds and is verified by
+      `tools/verify-publish.mjs`, but there is no signed installer, no shortcut or
+      start-menu registration, and no auto-update
 - [ ] **ARG event layer** — needs endpoint config, payload validation and rate limiting first
 - [ ] **Audio capture** — inert until desktop audio is actually sampled
 - [ ] **Naming decision** — see [`docs/NAMING.md`](docs/NAMING.md)
@@ -522,6 +524,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/perf-gpu.mjs` | Measures the engine's real per-frame cost on the GPU, and proves the adaptive scaler responds to load |
 | `tools/riso-halftone.mjs` | Proves riso actually prints a dot screen, by measuring adjacent-pixel luminance |
 | `tools/settings-shot.mjs` | Renders all nine WPF settings pages to PNG without displaying the window, so layout can be reviewed |
+| `tools/verify-publish.mjs` | Publishes a release and asserts it contains the renderer, digest, icon, fonts and runtime |
 | `tools/verify-fonts.mjs` | Parses each font's real family, style and version |
 | `tools/verify-fonts-use.mjs` | Proves each family loads and actually applies, not just ships |
 | `tools/showcase.mjs` | Renders the 69-frame gallery to `build/showcase/`, and fails if a shipped anomaly has no frame |
