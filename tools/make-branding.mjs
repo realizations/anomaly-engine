@@ -27,6 +27,10 @@ const ROOT = resolve(HERE, '..');
 const BRANDING = resolve(ROOT, 'assets/branding');
 const BIN = resolve(ROOT, 'src/AnomalyEngine/bin/Debug/net8.0-windows');
 const DOCS_IMAGES = resolve(ROOT, 'docs/images');
+// The bundled faces, so the compositor sets type in the fonts the product
+// actually ships rather than in whatever the machine running this happens to
+// have installed.
+const FONTS_DIR = resolve(ROOT, 'src/Engine/src/public/fonts');
 
 mkdirSync(BRANDING, { recursive: true });
 mkdirSync(DOCS_IMAGES, { recursive: true });
@@ -216,8 +220,13 @@ writeFileSync(resolve(BRANDING, 'anomaly.ico'), ico);
 console.log(`\nanomaly.ico  ${(ico.length / 1024).toFixed(1)} KB  ${icoSizes.length} sizes`);
 
 // Favicon, small and sharp.
+//
+// Into src/Engine/src/public, because that is the directory Vite copies
+// verbatim. Writing to src/Engine/public looks equivalent and is not: there is
+// no such public directory in the Vite config, so the file was generated
+// faithfully and then silently never shipped, and nothing failed anywhere.
 const fav = entries.find((e) => e.size === 32).data;
-writeFileSync(resolve(ROOT, 'src/Engine/public/favicon.png'), fav);
+writeFileSync(resolve(ROOT, 'src/Engine/src/public/favicon.png'), fav);
 console.log('favicon.png 32px');
 
 console.log('\nBranding written to assets/branding and the app output.');
@@ -281,6 +290,36 @@ await shotBrowser.close();
 
 const compBrowser = await chromium.launch();
 const compPage = await compBrowser.newPage({ viewport: { width: W, height: H } });
+
+// The compositor draws type onto a canvas in a blank page, so it has no access
+// to the fonts the engine ships. Canvas font strings silently fall back when the
+// family is unknown, which means the preview was being set in whatever the host
+// machine happened to have rather than in Space Grotesk and Inter. The fonts are
+// registered explicitly from the bundled files, and awaited, so a font that fails
+// to load shows up as a different letterform rather than as a silent substitution.
+await compPage.evaluate(async (fontDir) => {
+  const faces = [
+    ['500 16px "Space Grotesk"', 'SpaceGrotesk-Medium.ttf'],
+    ['700 16px "Space Grotesk"', 'SpaceGrotesk-Bold.ttf'],
+    ['400 16px "Inter"', 'Inter-Regular.ttf'],
+    ['600 16px "Inter"', 'Inter-SemiBold.ttf'],
+    ['400 16px "Plex Mono"', 'IBMPlexMono-Regular.ttf'],
+  ];
+  for (const [spec, file] of faces) {
+    const ff = new FontFace(spec.split(' ').slice(2).join(' '), `url(file:///${fontDir}/${file})`, {
+      weight: spec.split(' ')[0],
+      style: 'normal',
+    });
+    try {
+      await ff.load();
+      document.fonts.add(ff);
+    } catch {
+      // Leave it to the fallback and let the letterforms differ visibly.
+    }
+  }
+  await document.fonts.ready;
+}, FONTS_DIR.replace(/\\/g, '/'));
+
 const finalUrl = await compPage.evaluate(async ({ heroUrl, W, H, C }) => {
   const img = new Image();
   img.src = heroUrl;
@@ -356,11 +395,11 @@ const finalUrl = await compPage.evaluate(async ({ heroUrl, W, H, C }) => {
     x += g.measureText(f).width + 40;
   }
 
-  // Licence, bottom right, small.
+// Licence, bottom right, small.
   g.font = '400 13px Inter, system-ui, sans-serif';
   g.fillStyle = 'rgba(228,233,240,0.42)';
   g.textAlign = 'right';
-  g.fillText('Windows · MIT', right, H - 45);
+  g.fillText('Windows \u00b7 MIT', right, H - 45);
   g.textAlign = 'left';
 
   return cv.toDataURL('image/png');
@@ -370,3 +409,9 @@ const preview = Buffer.from(finalUrl.split(',')[1], 'base64');
 writeFileSync(resolve(DOCS_IMAGES, 'social-preview.png'), preview);
 writeFileSync(resolve(BRANDING, 'social-preview.png'), preview);
 console.log(`social-preview.png  ${W}x${H}  ${(preview.length / 1024).toFixed(0)} KB`);
+
+// Every browser this script opens has to be closed, including the compositor.
+// Leaving it open keeps the Node event loop alive after the work is done, so the
+// script prints its final line and then hangs until it is killed, which is
+// indistinguishable from the generator having failed.
+await compBrowser.close();

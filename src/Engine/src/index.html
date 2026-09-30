@@ -17,6 +17,12 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'">
   <title>Anomaly Engine</title>
+<!--
+  Relative, not absolute. The native host loads this document over file://, where
+  a leading slash resolves against the filesystem root and the icon never loads.
+  Everything else the document references is relative for the same reason.
+-->
+<link rel="icon" type="image/png" href="./favicon.png">
   <style>
     /*
       Typefaces are bundled rather than fetched. Three families, all SIL OFL,

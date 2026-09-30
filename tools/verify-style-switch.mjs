@@ -1,10 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { dirname, join, extname } from 'node:path';
 
-const ROOT = join(process.cwd(), '..', 'src', 'Engine', 'renderer');
-const OUT = join(process.cwd(), '..', 'build', 'preview');
+// Anchored to this file rather than to the working directory, so the tool
+// behaves the same however it is invoked.
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+const ROOT = join(HERE, '..', 'src', 'Engine', 'renderer');
+const OUT = join(HERE, '..', 'build', 'preview');
 mkdirSync(OUT, { recursive: true });
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.map': 'application/json', '.png': 'image/png' };

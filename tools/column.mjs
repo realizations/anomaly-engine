@@ -1,9 +1,13 @@
 import { chromium } from 'playwright';
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// Anchored to this file rather than to the working directory, so the tool
+// behaves the same however it is invoked.
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const INDEX = pathToFileURL(
-  join(process.cwd(), '..', 'src', 'AnomalyEngine', 'bin', 'Debug', 'net8.0-windows', 'renderer', 'index.html')
+  join(HERE, '..', 'src', 'AnomalyEngine', 'bin', 'Debug', 'net8.0-windows', 'renderer', 'index.html')
 ).href;
 
 const style = process.argv[2] || 'flat';

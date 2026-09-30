@@ -122,7 +122,7 @@
       "notes": "Social preview, composed over a real render by tools/make-branding.mjs so it cannot drift out of date."
     },
     {
-      "path": "src/Engine/public/favicon.png",
+      "path": "src/Engine/src/public/favicon.png",
       "license": "PROPRIETARY-ORIGINAL",
       "author": "Anomaly Engine contributors",
       "sourceUrl": "https://github.com/realizations/anomaly-engine",

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 /**
  * Records a SHA-256 digest of the deployed renderer.
  *
@@ -15,7 +16,11 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+
+// Anchored to this file rather than to the working directory, so the tool
+// behaves the same however it is invoked.
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const dir = resolve(process.argv[2] ?? 'src/AnomalyEngine/bin/Debug/net8.0-windows/renderer');
 const out = resolve(process.argv[3] ?? 'src/AnomalyEngine/bin/Debug/net8.0-windows/renderer.bundle.sha256');
@@ -44,5 +49,5 @@ for (const file of files) {
 const digest = sha.digest('hex');
 
 writeFileSync(out, `${digest}\n`, 'utf8');
-console.log(`Wrote ${relative(process.cwd(), out)}`);
+console.log(`Wrote ${relative(HERE, out)}`);
 console.log(`  ${files.length} files, sha256 ${digest}`);

@@ -1,15 +1,18 @@
 import { chromium } from 'playwright';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
 
-const OUT = join(process.cwd(), '..', 'build', 'preview', 'e2e');
+// Anchored to this file rather than to the working directory, so the tool
+// behaves the same however it is invoked.
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+const OUT = join(HERE, '..', 'build', 'preview', 'e2e');
 mkdirSync(OUT, { recursive: true });
 
-const INDEX = pathToFileURL(
-  join(process.cwd(), '..', 'src', 'AnomalyEngine', 'bin', 'Debug', 'net8.0-windows', 'renderer', 'index.html')
-).href;
+const deployedIndex = join(HERE, '..', 'src', 'AnomalyEngine', 'bin', 'Debug', 'net8.0-windows', 'renderer', 'index.html');
+const INDEX = pathToFileURL(deployedIndex).href;
 
 const results = [];
 const allErrors = [];
@@ -314,6 +317,22 @@ check('the imported world is now listed',
 const rejected = await page.evaluate(() => window.__engine.importWorlds([{ id: 'BAD ID', name: 'x' }]));
 check('an invalid world is rejected with a reason', rejected.ok === false && rejected.errors.length > 0,
   JSON.stringify(rejected.errors).slice(0, 90));
+
+// The favicon has to survive the whole chain: generated into the directory Vite
+// actually copies, referenced relatively so it resolves over file://, and present
+// in the deployed output. Each of those has been wrong at least once and the
+// symptom was always the same silence, so it is checked here.
+//
+// Existence is checked on disk rather than with fetch. The document's policy is
+// connect-src 'none', which blocks fetch outright, so a fetch-based check cannot
+// distinguish a missing favicon from a working one. A favicon is loaded as an
+// image and is governed by img-src, so what actually matters is that the bytes
+// are next to the document and that the reference is relative.
+const iconHref = await page.evaluate(() => document.querySelector('link[rel="icon"]')?.getAttribute('href') ?? '');
+check('the favicon is referenced relatively for file://', iconHref.startsWith('./'), iconHref || 'no link element');
+check('the favicon ships next to the deployed document',
+  iconHref.startsWith('./') && existsSync(join(dirname(deployedIndex), iconHref.slice(2))),
+  iconHref ? resolve(dirname(deployedIndex), iconHref.slice(2)) : 'no link element');
 
 check('no console or page errors overall', allErrors.length === 0, allErrors.join(' | '));
 

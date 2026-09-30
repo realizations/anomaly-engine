@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 /**
  * Verifies durable state round-trips through the real host: launch the engine,
  * change world and style, quit, relaunch, and confirm both were restored.
@@ -8,9 +9,13 @@
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-const ROOT = join(process.cwd(), '..');
+// Anchored to this file rather than to the working directory, so the tool
+// behaves the same however it is invoked.
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+const ROOT = join(HERE, '..');
 const EXE = join(ROOT, 'src', 'AnomalyEngine', 'bin', 'Debug', 'net8.0-windows', 'AnomalyEngine.exe');
 const STATE = join(process.env.APPDATA || '', 'AnomalyEngine', 'state.json');
 const LOGDIR = join(process.env.APPDATA || '', 'AnomalyEngine', 'logs');
