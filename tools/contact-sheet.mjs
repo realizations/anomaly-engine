@@ -1,53 +1,107 @@
+/**
+ * Builds contact sheets for visual review.
+ *
+ * Reviewing one frame at a time hides systematic problems, because a bug that
+ * affects everything looks fine in any single sample. Tiling many renders of the
+ * same scene at different hours, or the same hour across different worlds,
+ * makes a fault that is only visible as a pattern actually visible.
+ *
+ *   node tools/contact-sheet.mjs world-hour      one row per world, columns are hours
+ *   node tools/contact-sheet.mjs world-style     one row per world, columns are styles
+ *   node tools/contact-sheet.mjs style-hour      one row per style, columns are hours
+ */
 import { chromium } from 'playwright';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { writeFileSync, mkdirSync } from 'node:fs';
 
-const OUT = join(process.cwd(), '..', 'build', 'preview');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DEPLOYED = resolve(HERE, '../src/AnomalyEngine/bin/Debug/net8.0-windows/renderer/index.html');
+const OUT = resolve(HERE, '../build/review');
+mkdirSync(OUT, { recursive: true });
 
-const COLS = [
-  { id: 'a-riso', label: 'A - riso print' },
-  { id: 'b-flat', label: 'B - flat vector' },
-  { id: 'c-painterly', label: 'C - painterly' },
+const WORLDS = [
+  ['the-town-that-wasnt-there', 'town'],
+  ['saltwick', 'salt'],
+  ['the-long-fell', 'fell'],
+  ['the-dry-mere', 'mere'],
+  ['the-long-head', 'head'],
+  ['the-long-corridor', 'corridor'],
 ];
+const HOURS = [0.5, 6.8, 12, 16.8, 19.4, 21.8];
+const STYLES = ['painterly', 'flat', 'riso'];
+const CELL_W = 300;
 
-const ROWS = [
-  { name: 'night', label: 'NIGHT  1:30am' },
-  { name: 'golden', label: 'GOLDEN  4:50pm' },
-  { name: 'storm', label: 'STORM  3:00pm' },
-];
-
-const img = (id, name) => {
-  const p = join(OUT, `style-${id}-${name}.png`);
-  if (!existsSync(p)) throw new Error(`missing ${p}`);
-  return `data:image/png;base64,${readFileSync(p).toString('base64')}`;
-};
-
-const html = `<!doctype html>
-<html><head><meta charset="utf-8"><style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#12131a; color:#e8e6e0; font:13px/1.4 "Segoe UI",system-ui,sans-serif; padding:18px; width:1560px; }
-  h1 { font-size:15px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:#9aa; margin-bottom:14px; }
-  .grid { display:grid; grid-template-columns: 96px repeat(3, 1fr); gap:8px; align-items:center; }
-  .col { font-size:12px; font-weight:600; letter-spacing:.04em; color:#c9c6bf; padding-bottom:2px; }
-  .row { font-size:11px; font-weight:600; letter-spacing:.05em; color:#8d8a84; text-align:right; padding-right:4px; }
-  img { width:100%; display:block; border:1px solid #2a2c36; }
-</style></head><body>
-<h1>Anomaly Engine &mdash; art direction bake-off</h1>
-<div class="grid">
-  <div></div>
-  ${COLS.map((c) => `<div class="col">${c.label}</div>`).join('')}
-  ${ROWS.map(
-    (r) =>
-      `<div class="row">${r.label}</div>` +
-      COLS.map((c) => `<img src="${img(c.id, r.name)}">`).join('')
-  ).join('')}
-</div>
-</body></html>`;
+const mode = process.argv[2] ?? 'world-hour';
+const rows = mode === 'world-hour' ? WORLDS : mode === 'world-style' ? WORLDS : STYLES;
+const cols = mode === 'world-hour' ? HOURS : mode === 'world-style' ? STYLES : HOURS;
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
-await page.setContent(html);
-await page.waitForTimeout(600);
-await page.screenshot({ path: join(OUT, 'bakeoff-contact-sheet.png'), fullPage: true });
+const page = await browser.newPage({ viewport: { width: CELL_W, height: Math.round(CELL_W * 9 / 16) } });
+await page.goto(pathToFileURL(DEPLOYED).href);
+await page.waitForFunction(() => window.__engine !== undefined, { timeout: 20000 });
+
+const shots = [];
+for (const row of rows) {
+  for (const col of cols) {
+    await page.evaluate(
+      ({ w, s, h }) => {
+        if (w) window.__engine.setWorld(w);
+        if (s) window.__engine.setStyle(s);
+        if (h !== undefined) window.__engine.setSimulatedHour(h);
+      },
+      {
+        w: Array.isArray(row) ? row[0] : undefined,
+        s: Array.isArray(row) ? undefined : row,
+        h: typeof col === 'number' ? col : undefined,
+      }
+    );
+    await page.waitForTimeout(220);
+    const url = await page.evaluate(() => document.getElementById('wallpaper-canvas').toDataURL('image/png'));
+    // Base64 strings, because Buffers do not survive the trip into the page.
+    shots.push(url.split(',')[1]);
+  }
+}
 await browser.close();
-process.stdout.write('bakeoff-contact-sheet.png\n');
+
+const compose = await chromium.launch();
+const cpage = await compose.newPage({ viewport: { width: 10, height: 10 } });
+const sheetUrl = await cpage.evaluate(
+  async ({ shots, cols, rowLabels, colLabels, cellW }) => {
+    const cellH = Math.round(cellW * 9 / 16);
+    const pad = 6;
+    const labelW = 92;
+    const headH = 24;
+    const cv = document.createElement('canvas');
+    cv.width = labelW + colLabels.length * (cellW + pad) + pad;
+    cv.height = headH + rowLabels.length * (cellH + pad) + pad;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#0b0e12';
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.font = '500 12px system-ui, sans-serif';
+    g.textBaseline = 'middle';
+
+    colLabels.forEach((l, c) => {
+      g.fillStyle = '#8fb3a4';
+      g.fillText(String(l), labelW + c * (cellW + pad) + 6, headH / 2 + 2);
+    });
+    for (let r = 0; r < rowLabels.length; r++) {
+      const y = headH + r * (cellH + pad);
+      g.fillStyle = '#cfe0d8';
+      g.fillText(String(rowLabels[r]), 8, y + cellH / 2);
+      for (let c = 0; c < colLabels.length; c++) {
+        const img = new Image();
+        img.src = 'data:image/png;base64,' + shots[r * colLabels.length + c];
+        await img.decode();
+        g.drawImage(img, labelW + c * (cellW + pad), y, cellW, cellH);
+      }
+    }
+    return cv.toDataURL('image/png');
+  },
+  { shots, rowLabels: rows.map((r) => (Array.isArray(r) ? r[1] : r)), colLabels: cols, cellW: CELL_W }
+);
+await compose.close();
+
+const out = resolve(OUT, `sheet-${mode}.png`);
+writeFileSync(out, Buffer.from(sheetUrl.split(',')[1], 'base64'));
+console.log(`wrote ${out}`);

@@ -40,6 +40,7 @@ steps.push(await run('licence gate', ['license-gate.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));
 steps.push(await run('per-monitor layouts', ['per-monitor.mjs']));
+steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));
 steps.push(await run('typefaces load and apply', ['verify-fonts-use.mjs']));
 steps.push(await run('durable state round-trip', ['verify-persistence.mjs']));
 
