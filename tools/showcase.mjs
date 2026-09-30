@@ -58,6 +58,7 @@ const ANOMALIES = [
   { id: 'red-moon', label: 'Red Moon', blurb: 'The moon turns red. It does not happen every night.' },
   { id: 'forest-watcher', label: 'Watcher in the Pines', blurb: 'Something moves between the trees.' },
   { id: 'observatory-signal', label: 'Observatory Signal', blurb: 'The dish fires into the void. It is not random.' },
+  { id: 'lights-out', label: 'Lights Out', blurb: 'Every light goes off at once, then comes back.' },
 ];
 
 const frames = [];
@@ -111,6 +112,26 @@ await matrix('weather', WEATHER.map((w) => ({ id: w.id, label: w.label })), ({ s
 });
 
 process.stdout.write('Rendering style x anomaly (night)...\n');
+
+// The gallery has to cover every anomaly the engine actually ships. It did not:
+// 'lights-out' was missing, so a shipped anomaly had no frame in the showcase
+// and nothing said so. The list is checked against the engine rather than trusted.
+const shipped = await page.evaluate(() => window.__engine.getAnomalies().getDefinitions().map((d) => d.id));
+const shown = new Set(ANOMALIES.map((a) => a.id));
+const missing = shipped.filter((id) => !shown.has(id));
+const unknown = [...shown].filter((id) => !shipped.includes(id));
+if (missing.length || unknown.length) {
+  console.error(
+    `\nShowcase anomaly coverage is out of date.\n` +
+    (missing.length ? `  not rendered: ${missing.join(', ')}\n` : '') +
+    (unknown.length ? `  listed but not shipped: ${unknown.join(', ')}\n` : '') +
+    `  shipped: ${shipped.length}, listed: ${ANOMALIES.length}\n` +
+    `  Fix the ANOMALIES list in tools/showcase.mjs.`
+  );
+  process.exit(1);
+}
+process.stdout.write(`  ${ANOMALIES.length} anomalies, all shipped anomalies covered\n`);
+
 await matrix('anomaly', ANOMALIES, ({ style, item }) => {
   window.__engine.setStyle(style);
   window.__engine.setSimulatedHour(22);
