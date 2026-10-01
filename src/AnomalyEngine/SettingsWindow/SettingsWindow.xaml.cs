@@ -22,13 +22,33 @@ namespace AnomalyEngine.SettingsWindow;
 /// </summary>
 public partial class SettingsWindow : Window
 {
-    private readonly WallpaperHost? _host;
+    private readonly IEngineBridge? _host;
     private readonly Logger? _logger;
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromSeconds(1) };
 
     // Guards the SelectionChanged handlers while we are writing values into
     // them programmatically, which would otherwise fire them as user actions.
     private bool _loading = true;
+
+    /// <summary>
+    /// Set once the window is closing. Checked after every await, because a poll
+    /// that started while the window was open will otherwise resume against a
+    /// closed window and a WebView that may already have been torn down.
+    /// </summary>
+    private bool _closing;
+
+    /// <summary>
+    /// True while a poll is in flight. The one-second timer can fire again while
+    /// a slow poll is still awaiting the engine, which would stack overlapping
+    /// round trips and pile more work onto a UI thread that is already busy.
+    /// </summary>
+    private bool _pollInFlight;
+
+    /// <summary>
+    /// Identifies the state the display pickers were last built for, so they are
+    /// rebuilt on change rather than every tick.
+    /// </summary>
+    private string? _displayRowFingerprint;
 
     /// <summary>
     /// Mirror of the engine's per-display world assignments, keyed by display
@@ -38,7 +58,7 @@ public partial class SettingsWindow : Window
     private Dictionary<string, string> _displayWorlds = new();
     private bool _paused;
 
-    public SettingsWindow(WallpaperHost? host = null, Logger? logger = null)
+    public SettingsWindow(IEngineBridge? host = null, Logger? logger = null)
     {
         InitializeComponent();
         _host = host;
@@ -50,7 +70,11 @@ public partial class SettingsWindow : Window
             _poll.Tick += (_, _) => _ = RefreshAsync();
             _poll.Start();
         };
-        Closed += (_, _) => _poll.Stop();
+        Closed += (_, _) =>
+        {
+            _closing = true;
+            _poll.Stop();
+        };
     }
 
     private async System.Threading.Tasks.Task ApplyInitialSelection()
@@ -220,23 +244,40 @@ public partial class SettingsWindow : Window
 
     /* ------------------------------- worlds ------------------------------- */
 
-    private async System.Threading.Tasks.Task RefreshAsync()
+    private async Task RefreshAsync()
     {
-        if (_host is null) return;
+        if (_host is null || _closing) return;
+
+        // The timer can fire again while a slow poll is still awaiting the
+        // engine. Overlapping polls stack round trips and, because the awaits
+        // resume on the UI thread, they also queue up UI work back to back.
+        if (_pollInFlight) return;
+        _pollInFlight = true;
         try
         {
             var status = await GetStatusAsync();
+            if (_closing) return;
             if (status is not null) ApplyStatus(status.Value);
 
-            if (WorldsSection.Visibility == Visibility.Visible) await RefreshWorldsAsync();
+            if (WorldsSection.Visibility == Visibility.Visible)
+            {
+                await RefreshWorldsAsync();
+                if (_closing) return;
+            }
+
+            await ApplyDisplaysAsync();
         }
         catch (Exception ex)
         {
             _logger?.Debug($"Settings poll failed: {ex.Message}");
         }
+        finally
+        {
+            _pollInFlight = false;
+        }
     }
 
-    private async System.Threading.Tasks.Task RefreshWorldsAsync()
+    private async Task RefreshWorldsAsync()
     {
         var json = await _host!.EvaluateAsync("JSON.stringify(window.__engine.getWorldDetails())");
         if (string.IsNullOrWhiteSpace(json)) return;
@@ -249,7 +290,7 @@ public partial class SettingsWindow : Window
         foreach (var w in worlds) WorldList.Items.Add(BuildWorldRow(w));
         WorldCountText.Text = $"{worlds.Count} world{(worlds.Count == 1 ? "" : "s")} · all are data, not art";
 
-        RefreshWorldIntegrity();
+        await RefreshWorldIntegrityAsync();
     }
 
     /// <summary>
@@ -261,15 +302,16 @@ public partial class SettingsWindow : Window
     /// changed, not that something is wrong. The point is that the change is never
     /// silent.
     /// </summary>
-    private void RefreshWorldIntegrity()
+    private async Task RefreshWorldIntegrityAsync()
     {
         WorldChangedPanel.Visibility = Visibility.Collapsed;
         if (_host is null) return;
         try
         {
-            var json = _host.EvaluateAsync("JSON.stringify(window.__engine.getChangedWorlds())")
-                             .GetAwaiter().GetResult();
-            if (string.IsNullOrWhiteSpace(json)) return;
+            // Awaited, never waited on synchronously. See ReadDisplayWorldsAsync
+            // for why blocking here deadlocks the UI thread.
+            var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getChangedWorlds())");
+            if (_closing || string.IsNullOrWhiteSpace(json)) return;
             var changed = JsonSerializer.Deserialize<List<string>>(JsonNode.Parse(json)?.ToString() ?? "[]");
             if (changed is null || changed.Count == 0) return;
 
@@ -290,11 +332,11 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void BtnAcceptWorldChanges_Click(object sender, RoutedEventArgs e)
+    private async void BtnAcceptWorldChanges_Click(object sender, RoutedEventArgs e)
     {
         if (_host is null) return;
-        _host.EvaluateAsync("window.__engine.acceptWorldChanges()").GetAwaiter().GetResult();
-        RefreshWorldIntegrity();
+        await _host.EvaluateAsync("window.__engine.acceptWorldChanges()");
+        await RefreshWorldIntegrityAsync();
     }
 
     private Border BuildWorldRow(WorldRow w)
@@ -615,127 +657,194 @@ public partial class SettingsWindow : Window
         MonitorListText.Text = string.Join(Environment.NewLine, Screen.AllScreens.Select(sc =>
             $"{sc.DeviceName} · {sc.Bounds.Width}x{sc.Bounds.Height}" +
             (sc.Primary ? " · primary (wallpaper attaches here)" : "")));
+    }
+
+    /// <summary>
+    /// Refreshes the per-display section: the assignment mirror, then the pickers.
+    ///
+    /// Separate from <see cref="ApplyStatus"/> because it has to cross into the
+    /// engine, and therefore has to be awaited. ApplyStatus runs from a path that
+    /// cannot wait without blocking the thread the completion needs.
+    /// </summary>
+    private async Task ApplyDisplaysAsync()
+    {
+        if (_closing) return;
 
         // Refreshed before the pickers are built, so they are populated from the
         // engine's real state rather than from whatever was last picked here.
-        _displayWorlds = ReadDisplayWorlds();
-        BuildDisplayWorldRows();
+        _displayWorlds = await ReadDisplayWorldsAsync();
+        if (_closing) return;
+        await BuildDisplayWorldRowsAsync();
     }
 
-    private Dictionary<string, string> ReadDisplayWorlds()
+    /// <summary>
+    /// Reads the engine's per-display assignments.
+    ///
+    /// Asynchronous, and deliberately so. WebView2 marshals the completion of
+    /// ExecuteScriptAsync back onto the UI thread's message loop, so waiting for
+    /// one synchronously from the UI thread blocks the very loop that has to
+    /// deliver it. That is a deadlock, and because this ran from the one-second
+    /// poll it froze the window once a second.
+    /// </summary>
+    private async Task<Dictionary<string, string>> ReadDisplayWorldsAsync()
     {
         if (_host is null) return new();
         try
         {
-            var json = _host.EvaluateAsync("JSON.stringify(window.__engine.getDisplayWorlds())")
-                             .GetAwaiter().GetResult();
-            if (string.IsNullOrWhiteSpace(json)) return new();
+            var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getDisplayWorlds())");
+            if (_closing || string.IsNullOrWhiteSpace(json)) return new();
             return JsonSerializer.Deserialize<Dictionary<string, string>>(
                        JsonNode.Parse(json)?.ToString() ?? "{}")
                    ?? new();
         }
         catch
         {
+            // The engine is not answering. The window is still usable; the pickers
+            // just show no assignments until the next tick.
             return new();
         }
     }
 
     /// <summary>
-    /// Builds one world picker per attached display.
+    /// Rebuilds the per-display world pickers.
     ///
-    /// Rebuilt from scratch on every refresh rather than diffed, because the
-    /// number of displays can change while the window is open and a picker bound
-    /// to a display that is no longer attached would write to a dead id.
+    /// Only runs when something it depends on has actually changed. This used to
+    /// clear the panel and construct a fresh TextBlock and ComboBox per display on
+    /// every one-second tick, which threw away focus, discarded any in-progress
+    /// interaction and churned the visual tree sixty times a minute for no reason.
+    ///
+    /// The fingerprint covers the display set, the world list and the current
+    /// selections, so a display appearing or disappearing rebuilds, and nothing
+    /// else does.
     /// </summary>
-    private void BuildDisplayWorldRows()
+    private async Task BuildDisplayWorldRowsAsync()
     {
-        DisplayWorldPanel.Children.Clear();
-        ClearDisplayWorlds.Visibility = Visibility.Collapsed;
+        ClearDisplayWorlds.Visibility =
+            _displayWorlds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         if (_host is null) return;
         List<WorldRow>? worlds;
         try
         {
-            var json = _host.EvaluateAsync("JSON.stringify(window.__engine.getWorldDetails())")
-                             .GetAwaiter().GetResult();
-            if (string.IsNullOrWhiteSpace(json)) return;
+            var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getWorldDetails())");
+            if (_closing || string.IsNullOrWhiteSpace(json)) return;
             worlds = JsonSerializer.Deserialize<List<WorldRow>>(JsonNode.Parse(json)?.ToString() ?? "[]");
         }
         catch
         {
-            // The engine is not answering yet. The displays list below still
-            // renders from Screen.AllScreens, so this is a partial page, not a
-            // broken one.
+            // The engine is not answering yet. The display list below still renders
+            // from Screen.AllScreens, so this is a partial page, not a broken one.
             return;
         }
         if (worlds is null || worlds.Count == 0) return;
 
+        var fingerprint = BuildWorldRowFingerprint(worlds);
+        if (fingerprint == _displayRowFingerprint) return;
+        _displayRowFingerprint = fingerprint;
+
+        var wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            DisplayWorldPanel.Children.Clear();
+
+            foreach (var screen in Screen.AllScreens)
+            {
+                var deviceName = screen.DeviceName ?? string.Empty;
+                var assigned = _displayWorlds.TryGetValue(deviceName, out var w) ? w : null;
+
+                var label = new TextBlock
+                {
+                    Text = screen.Primary
+                        ? $"{deviceName} · primary · {screen.Bounds.Width}x{screen.Bounds.Height}"
+                        : $"{deviceName} · {screen.Bounds.Width}x{screen.Bounds.Height}",
+                    Style = (Style)FindResource("Note"),
+                    Margin = new Thickness(0, 10, 0, 4),
+                };
+
+                var combo = new ComboBox { MinWidth = 320, Margin = new Thickness(0, 0, 0, 4) };
+                combo.Items.Add("Follow the active world");
+                foreach (var world in worlds) combo.Items.Add(world.Name);
+                // Index 0 is "follow", so a stored world sits one past it.
+                combo.SelectedIndex = 0;
+                if (assigned is not null)
+                {
+                    var at = worlds.FindIndex(x => x.Id == assigned);
+                    if (at >= 0) combo.SelectedIndex = at + 1;
+                }
+
+                var worldIds = worlds.Select(x => x.Id).ToList();
+                combo.SelectionChanged += (_, _) =>
+                {
+                    if (_loading || _closing) return;
+                    var pick = combo.SelectedIndex <= 0 ? null : worldIds[combo.SelectedIndex - 1];
+                    _ = SetDisplayWorldAsync(deviceName, pick);
+                };
+
+                DisplayWorldPanel.Children.Add(label);
+                DisplayWorldPanel.Children.Add(combo);
+            }
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    /// <summary>
+    /// Identifies the current display-picker state, so the rows are only rebuilt
+    /// when something they display has changed.
+    /// </summary>
+    private string BuildWorldRowFingerprint(List<WorldRow> worlds)
+    {
+        var sb = new System.Text.StringBuilder();
         foreach (var screen in Screen.AllScreens)
         {
-            var deviceName = screen.DeviceName ?? string.Empty;
-            var assigned = _displayWorlds.TryGetValue(deviceName, out var w) ? w : null;
-            if (assigned is not null) ClearDisplayWorlds.Visibility = Visibility.Visible;
-
-            var label = new TextBlock
-            {
-                Text = screen.Primary
-                    ? $"{deviceName} · primary · {screen.Bounds.Width}x{screen.Bounds.Height}"
-                    : $"{deviceName} · {screen.Bounds.Width}x{screen.Bounds.Height}",
-                Style = (Style)FindResource("Note"),
-                Margin = new Thickness(0, 10, 0, 4),
-            };
-
-            var combo = new ComboBox { MinWidth = 320, Margin = new Thickness(0, 0, 0, 4) };
-            combo.Items.Add("Follow the active world");
-            foreach (var world in worlds) combo.Items.Add(world.Name);
-            // Index 0 is "follow", so a stored world sits one past it.
-            combo.SelectedIndex = 0;
-            if (assigned is not null)
-            {
-                var at = worlds.FindIndex(x => x.Id == assigned);
-                if (at >= 0) combo.SelectedIndex = at + 1;
-            }
-
-            var worldIds = worlds.Select(x => x.Id).ToList();
-            combo.SelectionChanged += (_, _) =>
-            {
-                if (_loading) return;
-                var pick = combo.SelectedIndex <= 0 ? null : worldIds[combo.SelectedIndex - 1];
-                SetDisplayWorld(deviceName, pick);
-            };
-
-            DisplayWorldPanel.Children.Add(label);
-            DisplayWorldPanel.Children.Add(combo);
+            var id = screen.DeviceName ?? string.Empty;
+            sb.Append(id).Append('=').Append(screen.Bounds.Width).Append('x').Append(screen.Bounds.Height)
+              .Append(screen.Primary ? '!' : '.').Append(';');
+            if (_displayWorlds.TryGetValue(id, out var w)) sb.Append('>').Append(w);
+            sb.Append('|');
         }
+        sb.Append('#');
+        foreach (var w in worlds) sb.Append(w.Id).Append(',');
+        return sb.ToString();
     }
 
     /// <summary>
     /// Applies a per-display world choice, updating the local mirror only when
     /// the engine accepted it so the pickers cannot drift from the real state.
     /// </summary>
-    private void SetDisplayWorld(string deviceId, string? worldId)
+    private async Task SetDisplayWorldAsync(string deviceId, string? worldId)
     {
         // Held in a local because _host is a field, and the compiler does not
-        // carry a null check on a field across a call that could reassign it.
+        // carry a null check on a field across an await that could reassign it.
         var host = _host;
         if (host is null) return;
-        // EvaluateAsync returns null when the engine cannot be reached, which is
-        // a normal state before the renderer has loaded rather than an error.
-        var reply = host.EvaluateAsync(
-            $"window.__engine.setDisplayWorld({JsonSerializer.Serialize(deviceId)}, " +
-            $"{(worldId is null ? "null" : JsonSerializer.Serialize(worldId))})")
-            .GetAwaiter().GetResult();
-        if (reply?.Trim() != "true") return;
+        try
+        {
+            // Returns null when the engine cannot be reached, which is a normal
+            // state before the renderer has loaded rather than an error.
+            var reply = await host.EvaluateAsync(
+                $"window.__engine.setDisplayWorld({JsonSerializer.Serialize(deviceId)}, " +
+                $"{(worldId is null ? "null" : JsonSerializer.Serialize(worldId))})");
+            if (_closing || reply?.Trim() != "true") return;
+        }
+        catch
+        {
+            return;
+        }
 
         if (worldId is null) _displayWorlds.Remove(deviceId);
         else _displayWorlds[deviceId] = worldId;
         ClearDisplayWorlds.Visibility = _displayWorlds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void BtnClearDisplayWorlds_Click(object sender, RoutedEventArgs e)
+    private async void BtnClearDisplayWorlds_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var id in _displayWorlds.Keys.ToList()) SetDisplayWorld(id, null);
-        BuildDisplayWorldRows();
+        foreach (var id in _displayWorlds.Keys.ToList()) await SetDisplayWorldAsync(id, null);
+        _displayRowFingerprint = null;
+        await BuildDisplayWorldRowsAsync();
     }
 
     private class WorldRow

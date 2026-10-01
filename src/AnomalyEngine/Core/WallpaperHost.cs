@@ -11,7 +11,7 @@ using Microsoft.Web.WebView2.Wpf;
 
 namespace AnomalyEngine.Core;
 
-public class WallpaperHost : IDisposable
+public class WallpaperHost : IEngineBridge, IDisposable
 {
     private readonly Logger _logger;
     private readonly MonitorManager _monitorManager;
