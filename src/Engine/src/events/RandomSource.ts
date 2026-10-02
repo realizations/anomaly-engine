@@ -25,6 +25,7 @@ const EVENT_DEFS: RandomEventDef[] = [
   { type: 'random.radio_static', rarity: 'uncommon', payload: { frequency: 73.4 }, cooldown: 3600, duration: 15 },
   { type: 'random.meteor', rarity: 'rare', payload: { brightness: 0.8 }, cooldown: 7200, duration: 5 },
   { type: 'random.observatory_flash', rarity: 'rare', payload: {}, cooldown: 14400, duration: 10 },
+  { type: 'random.lights_out', rarity: 'rare', payload: {}, cooldown: 14400, duration: 10 },
   { type: 'random.second_moon', rarity: 'very_rare', payload: { duration: 8 }, cooldown: 86400, duration: 8 },
   { type: 'random.forest_creature', rarity: 'very_rare', payload: { type: 'deer' }, cooldown: 43200, duration: 12 },
   { type: 'random.red_moon', rarity: 'legendary', payload: {}, cooldown: 604800, duration: 300 },
