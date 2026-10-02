@@ -10,12 +10,21 @@
  * still persists when run in a plain browser during development.
  */
 import type { NativeBridge } from './NativeBridge.js';
+import { clamp01 } from '../renderer/motion.js';
 
 export interface PersistedState {
   version: number;
   worldId: string | null;
   style: string | null;
   reducedMotion: boolean | null;
+  /**
+   * How much of the scene moves, 0..1.
+   *
+   * Kept separate from reducedMotion, which is an accessibility preference rather
+   * than a taste one. Reduced motion lowers this; it does not replace it, because a
+   * completely frozen wallpaper reads as a screenshot rather than as calm.
+   */
+  motionIntensity: number | null;
   totalSessions: number;
   firstRun: string | null;
   lastSeen: string | null;
@@ -83,6 +92,7 @@ export function emptyState(): PersistedState {
     worldId: null,
     style: null,
     reducedMotion: null,
+    motionIntensity: null,
     totalSessions: 0,
     firstRun: null,
     lastSeen: null,
@@ -111,6 +121,9 @@ export function reconcile(raw: unknown): PersistedState {
     worldId: str(s.worldId),
     style: str(s.style),
     reducedMotion: bool(s.reducedMotion),
+    motionIntensity: s.motionIntensity === null || s.motionIntensity === undefined
+      ? null
+      : clamp01(Number(s.motionIntensity)),
     totalSessions: Math.max(0, num(s.totalSessions, 0)),
     firstRun: str(s.firstRun),
     lastSeen: str(s.lastSeen),

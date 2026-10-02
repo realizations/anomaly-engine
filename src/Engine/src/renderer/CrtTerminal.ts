@@ -23,6 +23,7 @@
 
 import { css, mixRgb, mulberry32 } from '../render/noise.js';
 import type { SkyGrade } from '../render/palette.js';
+import { SCAN_BAR } from './motion.js';
 
 /** Phosphor colours. Deliberately not green: the default green terminal is the
  *  single most predictable choice available and it dates the piece instantly. */
@@ -140,7 +141,8 @@ export class CrtTerminal {
     }
     this._boot = Math.min(1, this._boot + dt * 0.7);
     this._flicker += dt;
-    this._scan = (this._scan + dt * 0.06) % 1;
+    // Driven off SCAN_BAR so the rate and the on/off decision live together.
+    if (SCAN_BAR.enabled) this._scan = (this._scan + dt / SCAN_BAR.periodSeconds) % 1;
 
     // Small and low. The landscape is the subject; the terminal is a piece of
     // equipment standing at the edge of it, not a second wallpaper competing
@@ -406,16 +408,23 @@ export class CrtTerminal {
       g.fillRect(x, y + sy, w, Math.max(1, step * 0.5));
     }
 
-    // Slow bright scan bar travelling down the tube.
-    const barY = y + this._scan * h;
-    const barH = h * 0.06;
-    const bar = g.createLinearGradient(0, barY - barH, 0, barY + barH);
-    bar.addColorStop(0, 'rgba(160,255,200,0)');
-    bar.addColorStop(0.5, 'rgba(160,255,200,0.09)');
-    bar.addColorStop(1, 'rgba(160,255,200,0)');
-    g.globalAlpha = 1;
-    g.fillStyle = bar;
-    g.fillRect(x, barY - barH, w, barH * 2);
+// Slow bright scan bar travelling down the tube.
+    //
+    // Off by default. A bright band crossing the screen every sixteen seconds was
+    // the most tiring single element in the build, and it is decorative: a real
+    // CRT's refresh is far faster than this and reads as an even phosphor glow
+    // rather than as a travelling band. Opt-in, for anyone who wants it.
+    if (SCAN_BAR.enabled) {
+      const barY = y + this._scan * h;
+      const barH = h * 0.06;
+      const bar = g.createLinearGradient(0, barY - barH, 0, barY + barH);
+      bar.addColorStop(0, 'rgba(160,255,200,0)');
+      bar.addColorStop(0.5, `rgba(160,255,200,${SCAN_BAR.peakAlpha})`);
+      bar.addColorStop(1, 'rgba(160,255,200,0)');
+      g.globalAlpha = 1;
+      g.fillStyle = bar;
+      g.fillRect(x, barY - barH, w, barH * 2);
+    }
     g.restore();
   }
 

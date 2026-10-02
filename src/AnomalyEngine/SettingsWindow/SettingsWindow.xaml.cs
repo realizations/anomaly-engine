@@ -56,11 +56,23 @@ public partial class SettingsWindow : Window
     /// pickers do not have to call into the engine for every row.
     /// </summary>
     private Dictionary<string, string> _displayWorlds = new();
+
+  /// True while the motion slider's thumb is down, so the value is treated as a
+  /// preview and only sent to the engine when the drag ends.
+  private bool _motionDragging;
+
+  /// Mirrors DEFAULT_MOTION_INTENSITY on the renderer, as a percentage for the slider.
+  private const double DefaultMotionPercent = 35;
     private bool _paused;
 
     public SettingsWindow(IEngineBridge? host = null, Logger? logger = null)
     {
         InitializeComponent();
+
+        // Default set here rather than in XAML: a Value attribute fires ValueChanged
+        // during parse, before the label beside the slider exists.
+        MotionSlider.Value = DefaultMotionPercent;
+        UpdateMotionLabels();
         _host = host;
         _logger = logger;
 
@@ -550,12 +562,79 @@ public partial class SettingsWindow : Window
         StatusText.Text = $"Art style: {styles[i]}";
     }
 
-    private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
+private async void ReducedMotion_Checked(object sender, RoutedEventArgs e)
+  {
+  if (_loading) return;
+  _host?.SetReducedMotion(true);
+  StatusText.Text = "Following the Windows reduce-motion setting: the scene stays alive but stops pulsing.";
+  }
+
+  /// <summary>
+  /// Motion level slider.
+  ///
+  /// Sent on release rather than on every tick of the drag, so dragging the slider
+  /// does not push a hundred WebView2 calls at the renderer while the user is still
+  /// deciding where to put it.
+  /// </summary>
+private void MotionSlider_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
+  {
+    _motionDragging = true;
+  }
+
+  private void MotionSlider_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+  {
+    _motionDragging = false;
+    if (_loading) return;
+    PushMotionLevel();
+  }
+
+  private void MotionSlider_ValueChanged(object sender, RoutedEventArgs e)
+{
+    // The handler can fire while the XAML tree is still being parsed, before the
+    // label beside the slider exists, so it cannot assume it is there.
+    if (MotionValueText is null) return;
+    UpdateMotionLabels();
+    if (_loading) return;
+    // While the thumb is down the value is a preview, not a decision. Pushing it
+    // on every tick would send a hundred calls at the renderer while the user is
+    // still choosing, which is both wasteful and visibly laggy on the desktop.
+    if (_motionDragging) return;
+    PushMotionLevel();
+  }
+
+  private void PushMotionLevel()
+  {
+    var value = MotionSlider.Value / 100.0;
+    _host?.SendToRenderer($"window.__engine.setMotionIntensity({value.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
+    StatusText.Text = $"Motion level set to {MotionSlider.Value:0}%.";
+  }
+
+  /// <summary>
+  /// Reflects the motion level in the window.
+  ///
+  /// Reads nothing from the engine. The motion level and the reduce-motion flag
+  /// both arrive in the status document the one-second poll already fetches, so
+  /// this costs no additional round trips -- and, more importantly, cannot block
+  /// the UI thread waiting on one.
+  /// </summary>
+  private void RefreshMotionControls(EngineStatus? status)
+  {
+    if (status is not null) MotionSlider.Value = Math.Round(status.Value.MotionIntensity * 100);
+    MotionReducedNote.Visibility = status?.ReducedMotion == true ? Visibility.Visible : Visibility.Collapsed;
+    UpdateMotionLabels();
+  }
+
+  private void UpdateMotionLabels()
+  {
+    var v = MotionSlider.Value;
+    MotionValueText.Text = v switch
     {
-        if (_loading) return;
-        _host?.SetReducedMotion(true);
-        StatusText.Text = "Reduced motion on: ambient animation scaled to 25%.";
-    }
+      < 12 => "still",
+      < 40 => "calm",
+      < 70 => "alive",
+      _ => "lively",
+    };
+  }
 
     private void ReducedMotion_Unchecked(object sender, RoutedEventArgs e)
     {
@@ -577,6 +656,8 @@ public partial class SettingsWindow : Window
         public string WorldName;
         public int FpsLimit;
         public bool ReducedMotion;
+  /// Motion level the renderer is actually using, 0..1.
+  public double MotionIntensity;
         public bool Paused;
         public int JournalCount;
         public int SecretsFound;
@@ -609,6 +690,7 @@ public partial class SettingsWindow : Window
             WorldName = S("worldName"),
             FpsLimit = I("fpsLimit"),
             ReducedMotion = B("reducedMotion"),
+            MotionIntensity = Math.Clamp(Db("motionIntensity"), 0, 1),
             Paused = B("paused"),
             JournalCount = I("journalCount"),
             SecretsFound = I("secretsFound"),
@@ -617,7 +699,7 @@ public partial class SettingsWindow : Window
         };
     }
 
-    private void ApplyStatus(EngineStatus s)
+private void ApplyStatus(EngineStatus s)
     {
         if (!_paused) _paused = s.Paused;
         UpdateQuickControls();
@@ -652,6 +734,8 @@ public partial class SettingsWindow : Window
             : $"Most recent: {s.WorldName}. Every observation is stored with at least one plausible " +
               "explanation alongside it, so anything you think you saw stays something you could " +
               "reasonably decide you imagined.";
+
+        RefreshMotionControls(s);
 
         MonitorCountText.Text = $"{Screen.AllScreens.Length} display{(Screen.AllScreens.Length == 1 ? "" : "s")} detected";
         MonitorListText.Text = string.Join(Environment.NewLine, Screen.AllScreens.Select(sc =>

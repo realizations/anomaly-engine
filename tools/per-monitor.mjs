@@ -189,11 +189,28 @@ for (const c of CASES) {
               out.push(`${d[0]},${d[1]},${d[2]}`);
             }
           }
-          return out.join(' ');
+          return out;
         };
         return rects.map(grab);
       }, c.monitors);
-      const same = agree.every((s) => s === agree[0]);
+
+      // Tolerant comparison.
+      //
+      // Two identical viewports are composited separately, and any sample can land
+      // a sub-pixel different fraction of the adjacent pixel than its twin, or
+      // catch one extra frame of ambient drift. That makes one green channel one
+      // step different, which a byte-identical comparison treated as a total
+      // failure. A real framing difference moves whole regions and is far larger
+      // than a few steps, so a small tolerance keeps the check meaningful without
+      // flagging rounding.
+      const same = (() => {
+        const a = agree[0];
+        return agree.every((sample) => sample.every((pt, idx) => {
+          const [r1, g1, b1] = a[idx].split(',').map(Number);
+          const [r2, g2, b2] = pt.split(',').map(Number);
+          return Math.abs(r1 - r2) <= 3 && Math.abs(g1 - g2) <= 3 && Math.abs(b1 - b2) <= 3;
+        }));
+      })();
       check(
         same,
         'identical monitors show the same landscape, independent of the single terminal',

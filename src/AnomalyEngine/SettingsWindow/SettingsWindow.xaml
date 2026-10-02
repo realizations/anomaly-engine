@@ -267,6 +267,77 @@
             </Setter>
         </Style>
 
+        <!--
+            A Slider paints itself from a ControlTemplate as well. Left to the
+            default it renders as a grey Windows track against a dark phosphor
+            interface, which is the same defect the ComboBoxes had.
+        -->
+        <Style TargetType="Slider">
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="IsSnapToTickEnabled" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <!-- Track -->
+                            <Border Height="4" CornerRadius="2" Background="{StaticResource SurfaceBrush}"
+                                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"/>
+                            <!-- Filled portion, from the left edge to the thumb. -->
+                            <Border x:Name="PART_Fill" Height="4" CornerRadius="2"
+                                    Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"/>
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14" Height="14">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Grid x:Name="Knob">
+                                                    <Ellipse Fill="{StaticResource AccentBrush}"/>
+                                                    <!-- Focus ring, so the thumb is reachable by keyboard. -->
+                                                    <Ellipse x:Name="Ring" Stroke="{StaticResource FocusBrush}"
+                                                             StrokeThickness="2" Margin="-3" Opacity="0"/>
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Knob" Property="RenderTransform">
+                                                            <Setter.Value>
+                                                                <ScaleTransform ScaleX="1.15" ScaleY="1.15"/>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Trigger>
+                                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                                        <Setter TargetName="Ring" Property="Opacity" Value="1"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="ProgressBar">
             <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
@@ -437,10 +508,40 @@
                                    Text="All three are complete renderer treatments rather than filters over one image, and each is designed to hold up across the whole day and night cycle."/>
 
                         <TextBlock Style="{StaticResource Heading}" Text="MOTION" Margin="0,28,0,10"/>
-                        <CheckBox x:Name="ReducedMotion" Content="Reduce motion (scales ambient animation to a quarter speed)"
-                                  Checked="ReducedMotion_Checked" Unchecked="ReducedMotion_Unchecked"/>
+<CheckBox x:Name="ReducedMotion" Content="Follow the Windows reduce-motion setting"
+   Checked="ReducedMotion_Checked" Unchecked="ReducedMotion_Unchecked"/>
                         <TextBlock Style="{StaticResource Note}"
                                    Text="Follows the Windows reduce-motion setting when first enabled. This surface can run for hours at a time, so constant drift is a real accessibility concern rather than a preference."/>
+
+                        <!--
+                            Motion level.
+
+                            Present because the scene contains several independently
+                            animating things, and asking someone to have an opinion
+                            about each of them is not a reasonable thing to ask. One
+                            dial sets the overall level and the renderer decides how
+                            much each kind of motion gives up, which is the point,
+                            because turning motion down should calm the scene rather
+                            than freeze it.
+
+                            Values are the ones the renderer documents as calm and
+                            lively, not an arbitrary 0-100.
+                        -->
+                        <TextBlock Style="{StaticResource Heading}" Text="MOTION LEVEL" Margin="0,26,0,0"/>
+                        <TextBlock x:Name="MotionHintText" Style="{StaticResource Note}"
+                                   Text="How much of the scene moves."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Slider x:Name="MotionSlider" Width="320" Minimum="0" Maximum="100"
+                                    IsSnapToTickEnabled="True" TickFrequency="5" TickPlacement="BottomRight"
+                                    Thumb.DragStarted="MotionSlider_DragStarted"
+                                    Thumb.DragCompleted="MotionSlider_DragCompleted"
+                                    ValueChanged="MotionSlider_ValueChanged"/>
+                            <TextBlock x:Name="MotionValueText" Margin="14,0,0,0" VerticalAlignment="Center"
+                                       FontSize="13" Foreground="{StaticResource AccentBrush}" MinWidth="86"/>
+                        </StackPanel>
+                        <TextBlock x:Name="MotionReducedNote" Style="{StaticResource Note}" Margin="0,6,0,0"
+                                   Visibility="Collapsed"
+                                   Text="Windows reduce-motion is on, so this is capped low regardless of the setting."/>
                     </StackPanel>
 
                     <!-- ======================== PERFORMANCE ========================= -->

@@ -1,6 +1,16 @@
 import { RGB, mixRgb, css, shade, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
 import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
+import {
+  amplitude,
+  BEACON,
+  clamp01,
+  DEFAULT_MOTION_INTENSITY,
+  rate,
+  type MotionCategory,
+  type MotionIntensity,
+  TWINKLE,
+} from './motion.js';
 import { BUILT_IN_WORLDS } from '../worlds/registry.js';
 import { CrtTerminal } from './CrtTerminal.js';
 import { LiminalInterior } from './LiminalInterior.js';
@@ -164,7 +174,8 @@ export class WorldRenderer {
   private _h = 0;
   private _dpr = 1;
   private _seed = 1337;
-  private _motionScale = 1;
+  /** User-facing motion level, 0..1. See motion.ts. */
+  private _motionIntensity: MotionIntensity = DEFAULT_MOTION_INTENSITY;
   private _highContrast = false;
   private _world: WorldDefinition = BUILT_IN_WORLDS[0];
   private _buffer: HTMLCanvasElement | null = null;
@@ -745,10 +756,39 @@ export class WorldRenderer {
     return Math.max(grade.ambient, 0.3);
   }
 
-  // Scales all ambient animation (drift, twinkle, fog, motes). Used to honour
-  // the OS reduced-motion preference on a surface that runs for hours.
-  setMotionScale(scale: number): void {
-    this._motionScale = Math.max(0, Math.min(1, scale));
+  /**
+   * Sets how much of the scene moves.
+   *
+   * Replaces a single scalar that scaled the animation clock. Scaling the clock
+   * slows everything equally, so turning motion down made the world look sluggish
+   * rather than calm, and it could not damp brightness oscillation at all --
+   * slower flicker is still flicker.
+   *
+   * Intensity is now resolved per category, so environment drift keeps most of
+   * its motion while glow and twinkle are damped hard. See motion.ts.
+   */
+  setMotionIntensity(intensity: number): void {
+    this._motionIntensity = clamp01(intensity);
+  }
+
+  getMotionIntensity(): number {
+    return this._motionIntensity;
+  }
+
+  /**
+   * Effective amplitude for a category of motion at the current intensity.
+   *
+   * Drawing code asks for its absolute amplitude and gets back how much of it to
+   * actually use, which keeps the constants in one place and the drawing code
+   * readable.
+   */
+  private _amp(category: MotionCategory, base: number): number {
+    return amplitude(category, this._motionIntensity, base);
+  }
+
+  /** Effective rate, in rad/s, for positional animation. */
+  private _rate(category: MotionCategory, base: number): number {
+    return rate(category, this._motionIntensity, base);
   }
 
   setHighContrast(on: boolean): void {
@@ -810,7 +850,9 @@ export class WorldRenderer {
     const now = performance.now();
     const dt = this._last === 0 ? 16.7 : Math.min(50, now - this._last);
     this._last = now;
-    this._t += (dt / 1000) * this._motionScale;
+    // The clock itself is never scaled. Motion intensity is applied per category by
+    // _amp and _rate, so reducing it damps the parts that are tiring without
+    // making everything look frozen.
 
     const out = this._outCtx!;
     out.setTransform(1, 0, 0, 1, 0, 0);
@@ -1084,7 +1126,7 @@ export class WorldRenderer {
     for (const s of this._stars) {
       const px = s.x * this._w + this._mouse.px * 5;
       const py = s.y * this._h + this._mouse.py * 3;
-      const tw = 0.78 + 0.22 * Math.sin(this._t * 1.7 + s.tw);
+      const tw = 1 - TWINKLE.amplitude + this._amp('twinkle', TWINKLE.amplitude) * (0.5 + 0.5 * Math.sin(this._t * this._rate('twinkle', TWINKLE.rate) + s.tw));
       const alpha = a * (0.16 + s.mag * 0.84) * tw;
       if (alpha < 0.02) continue;
 
@@ -1402,7 +1444,7 @@ export class WorldRenderer {
     const tipY = baseY - h;
     const tierStep = h / tiers;
     const droop = tierStep * (0.3 + rnd() * 0.22);
-    const sway = Math.sin(this._t * 0.42 + seed) * h * 0.007;
+    const sway = Math.sin(this._t * this._rate('environment', 0.42) + seed) * h * 0.007 * (1 - this._motionIntensity * 0.35);
     const wind = 0.4 + this._weather.windSpeed;
 
     g.fillStyle = css(shade(col, -0.42));
@@ -2169,17 +2211,29 @@ export class WorldRenderer {
       g.fill();
 
       if (sig > 0.05) {
-        g.strokeStyle = css(col, sig * 0.5);
+        // One slow breath, not three expanding rings.
+        //
+        // The rings were each individually reasonable: a ring that expands and
+        // fades is how a signal is drawn. Three of them at phases 0.33 apart, on
+        // a `lighter` composite, at 0.8 rad/s, meant three brightness pulses per
+        // cycle across the brightest point in the scene. Individually calm,
+        // collectively a strobe, and it was the single worst offender.
+        //
+        // A breath is a slow rise and fall in intensity at a fixed radius. One
+        // cycle, about forty seconds, which is below conscious notice -- a lamp
+        // with a filament, not an animation.
+        const breath = 0.5 + 0.5 * Math.sin(this._t * this._rate('glow', BEACON.breathRate));
+        const bright = BEACON.minScale + (1 - BEACON.minScale) * breath;
+        const radius = w * (1.6 + sig * 3) * (1 + (BEACON.radiusScale - 1) * breath);
+
+        // A single steady ring rather than a travelling one, brightened by the
+        // breath so the signal still reads as transmitting.
+        g.strokeStyle = css(col, this._amp('glow', sig * 0.5 * bright));
         g.lineWidth = Math.max(1, this._h * 0.0016);
-        for (let i = 0; i < 3; i++) {
-          const pulse = (this._t * 0.8 + i * 0.33) % 1;
-          const r = w * (0.8 + pulse * 5);
-          g.globalAlpha = sig * (1 - pulse);
-          g.beginPath();
-          g.arc(lx, ly, r, -Math.PI * 0.42, -Math.PI * 0.08);
-          g.stroke();
-        }
         g.globalAlpha = 1;
+        g.beginPath();
+        g.arc(lx, ly, radius * 0.55, -Math.PI * 0.42, -Math.PI * 0.08);
+        g.stroke();
       }
       g.restore();
     }
@@ -2481,7 +2535,7 @@ export class WorldRenderer {
       const blades = 2 + Math.floor(rnd() * 3);
       for (let b = 0; b < blades; b++) {
         const ox = px + (b - blades / 2) * hh * 0.32;
-        const sway = Math.sin(this._t * 0.85 + i * 1.7 + b) * hh * 0.34 * (0.35 + this._weather.windSpeed);
+        const sway = Math.sin(this._t * this._rate('environment', 0.85) + i * 1.7 + b) * hh * 0.34 * (0.35 + this._weather.windSpeed) * (1 - this._motionIntensity * 0.3);
         g.beginPath();
         g.moveTo(ox, py);
         g.quadraticCurveTo(ox + sway * 0.45, py - hh * 0.58, ox + sway, py - hh);
@@ -2797,7 +2851,7 @@ export class WorldRenderer {
     for (const m of this._motes) {
       const px = m.x * this._w + Math.sin(this._t * m.sp + m.ph) * this.h0(0.024);
       const py = m.y * this._h + Math.cos(this._t * m.sp * 0.8 + m.ph * 1.7) * this.h0(0.011);
-      const b = 0.5 + 0.5 * Math.sin(this._t * 2.1 + m.ph * 3);
+      const b = 0.5 + 0.5 * Math.sin(this._t * this._rate('particles', 2.1) + m.ph * 3);
       const a = Math.pow(b, 4.5) * 0.42 * (1 - grade.ambient);
       if (a < 0.015) continue;
       const r = this._h * 0.0011;
@@ -2843,7 +2897,7 @@ export class WorldRenderer {
           s.y = -0.03;
           s.x = Math.random();
         }
-        const px = s.x * this._w + Math.sin(this._t * 0.7 + s.ph) * this.h0(0.01);
+        const px = s.x * this._w + Math.sin(this._t * this._rate('particles', 0.7) + s.ph) * this.h0(0.01);
         const py = s.y * this._h;
         const r = s.r * (this._h / 1080);
         g.fillStyle = 'rgba(246,248,255,0.62)';
@@ -3026,7 +3080,7 @@ export class WorldRenderer {
     const watcher = this._anom('forest-watcher');
     if (watcher > 0) {
       const g = this._ctx;
-      const x = this._w * (0.2 + Math.sin(this._t * 0.4) * 0.05) + this._mouse.px * 12;
+      const x = this._w * (0.2 + Math.sin(this._t * this._rate('environment', 0.4)) * 0.05) + this._mouse.px * 12;
       const y = this.h0(0.688);
       const h = this._h * 0.085;
       g.save();
@@ -3043,7 +3097,14 @@ export class WorldRenderer {
       g.ellipse(x, y - h * 0.94, h * 0.17, h * 0.15, 0, 0, Math.PI * 2);
       g.fill();
 
-      const look = Math.sin(this._t * 1.3) > 0.55;
+      // Slower, and rarer.
+      //
+      // This was a threshold on a 1.3 rad/s sine, which put a bright additive
+      // highlight on the creature roughly every 1.2 seconds for as long as the
+      // anomaly lasted. A periodic bright event is exactly what makes a scene feel
+      // like it is twitching. Slowing the cycle and raising the threshold turns it
+      // into an occasional glance, which is what the thing should read as.
+      const look = Math.sin(this._t * this._rate('glow', 0.35)) > 0.82;
       if (look) {
         g.save();
         g.globalCompositeOperation = 'lighter';

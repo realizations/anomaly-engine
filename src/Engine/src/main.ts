@@ -1,6 +1,7 @@
 import { EventBus } from './core/EventBus.js';
 import { EventScheduler } from './core/EventScheduler.js';
 import { digestWorld, verifyWorld } from './worlds/digest.js';
+import { clamp01, DEFAULT_MOTION_INTENSITY, REDUCED_MOTION_INTENSITY } from './renderer/motion.js';
 import { EntityManager } from './core/EntityManager.js';
 import { StateManager } from './core/StateManager.js';
 import { ClockSource } from './events/ClockSource.js';
@@ -134,6 +135,17 @@ class Engine {
     this._canvas = document.getElementById('wallpaper-canvas') as HTMLCanvasElement;
     this._renderer = new WorldRenderer(this._canvas);
 
+    // Accessibility is applied here rather than where the system is constructed,
+    // because it pushes settings into the renderer and the renderer does not exist
+    // yet at construction time. Reduced motion reaches the canvas through the
+    // motion intensity, which is the only surface that actually moves.
+    this._applyAccessibility();
+    this._accessibility.onConfigChange((cfg) => {
+      this._renderer.setHighContrast(cfg.highContrast);
+      this._applyMotionPreference();
+      this._persistence?.update({ reducedMotion: cfg.reducedMotion });
+    });
+
     // Durable state is pushed in by the host, or read from localStorage in a
     // plain browser. Restoring before the first frame means a saved world and
     // style apply without a visible switch.
@@ -225,18 +237,6 @@ class Engine {
     // weather and the world stayed permanently "clear".
     this._weather.start(42.3, -122.7);
 
-    // Respect the OS reduced-motion preference: this is an ambient surface that
-    // sits on the desktop for hours, so constant drift is a real accessibility
-    // problem rather than a cosmetic one.
-    const a11y = this._accessibility.getConfig();
-    this._renderer.setMotionScale(a11y.reducedMotion ? 0.25 : 1);
-    this._renderer.setHighContrast(a11y.highContrast);
-    this._accessibility.onConfigChange((cfg) => {
-      this._renderer.setMotionScale(cfg.reducedMotion ? 0.25 : 1);
-      this._renderer.setHighContrast(cfg.highContrast);
-      this._persistence?.update({ reducedMotion: cfg.reducedMotion });
-    });
-
     this._bus.emit({
       id: 'engine_start',
       type: 'app.started',
@@ -253,6 +253,69 @@ class Engine {
     });
 
     this._loop();
+  }
+
+    /**
+   * Resolves the user's motion level against the accessibility preference.
+   *
+   * The user's choice wins, but reduced motion has the final say: someone who has
+   * asked their operating system for less motion gets less motion regardless of
+   * what the slider says, because the slider is not how they expressed it.
+   */
+  private _applyMotionPreference(): void {
+    const reduced = this._accessibility.shouldReduceMotion();
+    const wanted = this._persistence?.get().motionIntensity ?? DEFAULT_MOTION_INTENSITY;
+    this._renderer.setMotionIntensity(
+      reduced ? Math.min(wanted, REDUCED_MOTION_INTENSITY) : wanted
+    );
+    this._reflectReducedMotion(reduced);
+  }
+
+  /**
+   * Reflects the reduced-motion preference in the document.
+   *
+   * This was previously the only thing reduced motion did: it set a class on the
+   * root element, in a project with no stylesheets, so the preference had no
+   * effect on the canvas at all -- the only surface that actually moves. The
+   * intensity above is what makes it real; the class is kept so anything that
+   * later does have a stylesheet can honour it too.
+   */
+  private _reflectReducedMotion(on: boolean): void {
+    const root = document.documentElement;
+    if (on) root.classList.add('anomaly-reduced-motion');
+    else root.classList.remove('anomaly-reduced-motion');
+  }
+
+  /** Motion level, 0..1. */
+  getMotionIntensity(): number {
+    return this._renderer.getMotionIntensity();
+  }
+
+  /** Sets the motion level and remembers it. */
+  setMotionIntensity(value: number): void {
+    const clamped = clamp01(value);
+    this._persistence?.update({ motionIntensity: clamped });
+    this._applyMotionPreference();
+    this._bridge.sendLog('motion:intensity', { value: clamped });
+  }
+
+  /** Current reduced-motion state, so settings can show it. */
+  isReducedMotion(): boolean {
+    return this._accessibility.shouldReduceMotion();
+  }
+
+  /**
+   * Wires the accessibility preferences into the renderer.
+   *
+   * Reduced motion lowers the motion intensity rather than switching motion off.
+   * A completely frozen scene reads as a screenshot, which is its own kind of
+   * wrong; what should go is the parts that are tiring, which is what the
+   * per-category responses in motion.ts are for.
+   */
+  private _applyAccessibility(): void {
+    const cfg = this._accessibility.getConfig();
+    this._renderer.setHighContrast(cfg.highContrast);
+    this._applyMotionPreference();
   }
 
   stop(): void {

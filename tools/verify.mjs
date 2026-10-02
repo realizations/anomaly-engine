@@ -43,6 +43,8 @@ steps.push(await run('per-monitor layouts', ['per-monitor.mjs']));
 steps.push(await run('per-display worlds', ['per-display-worlds.mjs']));
 steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));
 steps.push(await run('renderer performance on the real GPU', ['perf-gpu.mjs']));
+steps.push(await run('motion model present, oscillators routed', ['motion-oscillators.mjs']));
+steps.push(await run('flicker is bounded', ['flicker.mjs']));
 steps.push(await run('settings window renders every page', ['settings-shot.mjs']));
 steps.push(await run('no UI-thread blocking in settings', ['verify-settings-blocking.mjs']));
 steps.push(await run('published build is complete', ['verify-publish.mjs']));
