@@ -144,10 +144,21 @@ export class CrtTerminal {
     // Driven off SCAN_BAR so the rate and the on/off decision live together.
     if (SCAN_BAR.enabled) this._scan = (this._scan + dt / SCAN_BAR.periodSeconds) % 1;
 
-    // Small and low. The landscape is the subject; the terminal is a piece of
-    // equipment standing at the edge of it, not a second wallpaper competing
-    // for the same space. It reads as a detail you notice, not a UI panel.
-    const boxW = Math.min(w * 0.17, 230);
+// The terminal is a piece of equipment standing at the edge of the landscape,
+    // not a second wallpaper. It was previously fixed at a fraction of the width
+    // that made its readout illegible on anything smaller than a large monitor,
+    // and proportional to the width on ultrawide, where it could grow far past the
+    // size of any real equipment and into wallpaper that competes with the scene.
+    //
+    // So it is sized off both dimensions now: wide enough to read the status
+    // lines, and capped so that on a tall or short screen it cannot grow larger
+    // than a real terminal would, and cannot overflow on small screens, where the
+    // scene has to remain the subject.
+    const boxW = Math.min(
+      Math.max(360, w * 0.24),
+      460,
+      Math.max(280, (h * 0.52) / 0.7)
+    );
     const boxH = boxW * 0.7;
     // Sits low-left, in the ground region, where a real terminal would stand.
     const bx = w * 0.045;
