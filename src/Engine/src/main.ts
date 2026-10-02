@@ -2,6 +2,7 @@ import { EventBus } from './core/EventBus.js';
 import { EventScheduler } from './core/EventScheduler.js';
 import { digestWorld, verifyWorld } from './worlds/digest.js';
 import { clamp01, DEFAULT_MOTION_INTENSITY, REDUCED_MOTION_INTENSITY } from './renderer/motion.js';
+import { setDirection } from './renderer/VisualDirection.js';
 import { EntityManager } from './core/EntityManager.js';
 import { StateManager } from './core/StateManager.js';
 import { ClockSource } from './events/ClockSource.js';
@@ -284,6 +285,20 @@ class Engine {
     const root = document.documentElement;
     if (on) root.classList.add('anomaly-reduced-motion');
     else root.classList.remove('anomaly-reduced-motion');
+  }
+
+  /** Current art direction. */
+  getDirection(): string {
+    return this._renderer.getDirection();
+  }
+
+  /** Sets the art direction. */
+  setDirection(direction: string): void {
+    const d = (['depth', 'atmospheric', 'darker'] as const).find((x) => x === direction);
+    if (!d) return;
+    setDirection(d);
+    this._renderer.setDirection(d);
+    this._bridge.sendLog('direction:set', { direction });
   }
 
   /** Motion level, 0..1. */

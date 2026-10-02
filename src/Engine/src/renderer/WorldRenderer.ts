@@ -13,6 +13,7 @@ import {
 } from './motion.js';
 import { BUILT_IN_WORLDS } from '../worlds/registry.js';
 import { CrtTerminal } from './CrtTerminal.js';
+import { applyDirection, getDirection, type Direction } from './VisualDirection.js';
 import { LiminalInterior } from './LiminalInterior.js';
 import { UncannyLayer } from './UncannyLayer.js';
 
@@ -159,6 +160,8 @@ export class WorldRenderer {
   private _risoBucket = -1;
   private _weatherTick = 0;
 
+  /** Active art direction. Each direction is a different finished look on the same scene. */
+  private _direction: Direction = getDirection();
   /** Phase timing samples, in ms, read by the perf tool. */
   private _phases = { scene: 0, grade: 0, post: 0, blit: 0, total: 0 };
   private _profile = false;
@@ -775,6 +778,18 @@ export class WorldRenderer {
     return this._motionIntensity;
   }
 
+  /** Art direction, so a direction can be switched live. */
+  setDirection(direction: Direction): void {
+    this._direction = direction;
+    // The finish layer is cached per size and the direction changes how that cache
+    // should read, so rebuild it.
+    this._finish = null;
+    this._risoCacheValid = false;
+  }
+  getDirection(): Direction {
+    return this._direction;
+  }
+
   /**
    * Effective amplitude for a category of motion at the current intensity.
    *
@@ -999,6 +1014,7 @@ export class WorldRenderer {
       if (!this._finish) this._buildFinish();
       this._drawGrade(grade);
       mark('grade');
+      applyDirection(this._ctx, this._w, this._h, grade, this._direction);
       this._drawVignette();
       this._drawGrain();
     } else {
