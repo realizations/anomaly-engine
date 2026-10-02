@@ -218,6 +218,18 @@ export class CrtTerminal {
     }
     g.restore();
 
+    // A short base plinth at the foot of the case. Without it the panel stood on
+    // two invisible points and read as something floated in fixed by the layout;
+    // a small plinth seats it in the same ground the rest of the world sits on.
+    // The plinth is coloured from the same grade the bezel is, so it melts into
+    // the terrain at the same hour as everything around it rather than reading as
+    // a separate material.
+    g.fillStyle = css(mixRgb(BEZEL_LO, grade.haze, 0.35));
+    const plinthH = h * 0.05;
+    g.fillRect(x + w * 0.03, y + h, w * 0.94, plinthH);
+    g.fillStyle = css(mixRgb(BEZEL_LO, grade.haze, 0.55));
+    g.fillRect(x, y + h + plinthH, w, plinthH * 0.4);
+
     // Case: a vertical plastic gradient, lit from the sky.
     const grd = g.createLinearGradient(x, y, x, y + h);
     grd.addColorStop(0, css(mixRgb(BEZEL_HI, grade.lightColor, 0.1 * lit)));
