@@ -198,8 +198,7 @@ export class WorldRenderer {
 
   private _dither: HTMLCanvasElement | null = null;
   private _stars: Array<{ x: number; y: number; mag: number; tw: number; hue: number }> = [];
-  private _cloudBands: Array<{ y: number; scale: number; speed: number; alpha: number; thickness: number }> = [];
-  private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
+private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   private _snow: Array<{ x: number; y: number; r: number; ph: number; sp: number }> = [];
   private _motes: Array<{ x: number; y: number; ph: number; sp: number }> = [];
   private _smoke: Array<{ t: number; sp: number }> = [];
@@ -386,7 +385,6 @@ export class WorldRenderer {
    */
   private _buildScatter(): void {
     this._stars.length = 0;
-    this._cloudBands.length = 0;
     this._rain.length = 0;
     this._snow.length = 0;
     this._motes.length = 0;
@@ -395,7 +393,6 @@ export class WorldRenderer {
 
     const rnd = mulberry32(this._seed);
     const starDensity = this._world.sky?.starDensity ?? 1;
-    const cloudiness = this._world.sky?.cloudiness ?? 0.22;
 
     for (let i = 0; i < Math.round(420 * starDensity); i++) {
       this._stars.push({
@@ -407,15 +404,11 @@ export class WorldRenderer {
       });
     }
 
-    for (let i = 0; i < 7; i++) {
-      this._cloudBands.push({
-        y: 0.06 + rnd() * 0.3,
-        scale: 0.7 + rnd() * 1.5,
-        speed: 0.0016 + rnd() * 0.0042,
-        alpha: (0.16 + rnd() * 0.3) * (0.6 + cloudiness),
-        thickness: 0.018 + rnd() * 0.05,
-      });
-    }
+    // The cloud deck is no longer scattered here. CloudField lays its own banks
+    // out per frame from the plan's cloudiness, because the bank heights have to
+    // be relative to the horizon, and the horizon is now plan-dependent. The old
+    // per-world band list could not be, which is part of why every direction ended
+    // up with the same sky.
 
     for (let i = 0; i < 260; i++) {
       this._rain.push({ x: rnd(), y: rnd(), len: 0.02 + rnd() * 0.05, sp: 1.1 + rnd() * 1.1 });
@@ -1331,10 +1324,15 @@ export class WorldRenderer {
 
     g.save();
     g.globalCompositeOperation = 'lighter';
-    const halo = g.createRadialGradient(p.x, p.y, r * 0.6, p.x, p.y, r * 11);
-    const haloA = (0.16 + red * 0.3) * alpha;
+    // The halo starts at the moon's edge rather than inside it. Starting it at
+    // 0.6r put the gradient's brightest stop in a ring *outside* the disc, which
+    // showed as a hard bright circle floating around the moon in every night
+    // render — a ring of light that has no source.
+    const halo = g.createRadialGradient(p.x, p.y, r * 0.98, p.x, p.y, r * 11);
+    const haloA = (0.2 + red * 0.3) * alpha;
     halo.addColorStop(0, css(body, haloA));
-    halo.addColorStop(0.35, css(body, haloA * 0.24));
+    halo.addColorStop(0.06, css(body, haloA * 0.6));
+    halo.addColorStop(0.35, css(body, haloA * 0.2));
     halo.addColorStop(1, css(body, 0));
     g.fillStyle = halo;
     g.beginPath();
@@ -2559,7 +2557,7 @@ export class WorldRenderer {
     if (presence <= 0.01) return;
     g.save();
     g.globalAlpha = presence;
-    const dirt = mixRgb(mixRgb(shade(ground, 0.06), this._roadColor(), 0.22 * grade.ambient), { r: 0, g: 0, b: 0 }, 0.12);
+    const dirt = mixRgb(mixRgb(shade(ground, 0.1), this._roadColor(), 0.4 * grade.ambient), { r: 0, g: 0, b: 0 }, 0.06);
 
     const vanishX = this._w * 0.52;
     const bottomX = this._w * 0.16;
@@ -2572,6 +2570,13 @@ export class WorldRenderer {
 
     const l = edge(-1);
     const r = edge(1);
+
+    const trace = (side: number) => (g: CanvasRenderingContext2D) => {
+      const e = edge(side);
+      g.beginPath();
+      g.moveTo(e(0).x, e(0).y);
+      for (let i = 1; i <= 18; i++) g.lineTo(e(i / 18).x, e(i / 18).y);
+    };
 
     g.beginPath();
     g.moveTo(l(0).x, l(0).y);
@@ -2602,17 +2607,51 @@ export class WorldRenderer {
       g.lineTo(rr.x + (r(t).x - rr.x) * (0.3 + (i % 3) * 0.2), rr.y);
       g.stroke();
     }
+
+    // Worn patches. A dirt road that is one flat value from the vanishing point
+    // to the bottom of the frame is a ribbon; real track wears where it is used
+    // and stays dark where it is not.
+    for (let i = 0; i < 7; i++) {
+      const t = 0.1 + (i / 7) * 0.85;
+      const a = l(t);
+      const b = r(t);
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      const w = Math.abs(b.x - a.x) * (0.24 + (i % 3) * 0.12);
+      const hh = Math.abs(b.y - a.y) * 0.16 + this._h * 0.004;
+      const worn = shade(dirt, i % 2 === 0 ? 0.14 : -0.2);
+      const patch = g.createRadialGradient(cx, cy, 0, cx, cy, w);
+      patch.addColorStop(0, css(worn, 0.3));
+      patch.addColorStop(1, css(worn, 0));
+      g.fillStyle = patch;
+      g.save();
+      g.translate(cx, cy);
+      g.scale(1, hh / w);
+      g.beginPath();
+      g.arc(0, 0, w, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
     g.restore();
 
-    g.strokeStyle = css(shade(ground, -0.2), 0.5);
-    g.lineWidth = Math.max(1, this._h * 0.0016);
+    // Feathered shoulders instead of an outline.
+    //
+    // The road used to be finished with a hard 1px stroke down each edge, which
+    // is what made it read as a strip of paper laid on the ground: a real track
+    // has no drawn outline, it has a soft transition into the grass. Six
+    // progressively tighter strokes of the road's own colour, each fainter and
+    // wider than the last, build that shoulder for a handful of fills.
     for (const side of [-1, 1]) {
-      const e = edge(side);
-      g.beginPath();
-      g.moveTo(e(0).x, e(0).y);
-      for (let i = 1; i <= 18; i++) g.lineTo(e(i / 18).x, e(i / 18).y);
-      g.stroke();
+      for (let k = 5; k >= 1; k--) {
+        const w = this._h * 0.0032 * k;
+        g.strokeStyle = css(dirt, 0.05);
+        g.lineWidth = w;
+        g.lineCap = 'round';
+        trace(side)(g);
+        g.stroke();
+      }
     }
+    g.lineCap = 'butt';
     g.restore();
   }
 

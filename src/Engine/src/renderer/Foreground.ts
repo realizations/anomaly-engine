@@ -89,9 +89,9 @@ function planeColor(ctx: ForegroundContext, value: number): RGB {
  * looks like: the mass is black, the edges are silver.
  */
 function tipLight(ctx: ForegroundContext, col: RGB): RGB {
-  const strength = ctx.grade.sunAlpha > 0.05 ? 0.34 : ctx.grade.moonAlpha * 0.3;
+  const strength = ctx.grade.sunAlpha > 0.05 ? 0.2 : ctx.grade.moonAlpha * 0.22;
   const lit = ctx.grade.sunAlpha > 0.05 ? ctx.grade.lightColor : { r: 172, g: 186, b: 216 };
-  return mixRgb(col, lit, strength * 0.5);
+  return mixRgb(col, lit, strength * 0.6);
 }
 
 /* ------------------------------ clumping ------------------------------ */
@@ -150,16 +150,27 @@ function drawGrass(ctx: ForegroundContext, top: number, col: RGB, density: numbe
   const { w, h } = ctx;
   const g = ctx.g;
 const rnd = mulberry32(ctx.seed ^ 0x2b71);
-  const mass = scaleValue(col, 0.78);
+  // Three values, and the ordering is the whole design of this plane: the mass
+  // the blades grow out of is the darkest thing in the frame, the blade bodies sit
+  // just above it, and a sparse second pass lifts only the *tips*. Drawing every
+  // blade at its lit value — which is what the first version did — filled the band
+  // with pale straw and made the nearest plane the brightest one in the picture,
+  // which inverts the scene's depth cue at exactly the point it should be strongest.
+  const mass = scaleValue(col, 0.55);
   const tip = tipLight(ctx, col);
-  // Blades are rooted low and reach well past the crest. This is the whole point
-  // of the plane: the silhouette the viewer reads has to be the *tallest blades*,
-  // and if the mass fills up to the crest then the blades are hidden behind it
-  // and the foreground is just a dark band.
-  const rootY = h * (top + 0.24);
+  const bladeTone = (row: number) =>
+    row === 0 ? mixRgb(mass, ctx.grade.haze, 0.34) : row === 1 ? col : scaleValue(col, 0.78);
+
+  // Blades are rooted below the bottom of the frame and the base mass is a strip
+  // along the lower edge, so blades are visible across the depth of the plane
+  // rather than as a fringe along its top. That was the difference between "a grass
+  // bank" and "a dark band with a fuzzy top".
+  const rootY = h * (top + 0.26);
   const swayAmp = amplitude('environment', ctx.intensity, h * 0.016);
   const swayRate = rate('environment', ctx.intensity, 0.085);
-  const count = Math.round(260 * density);
+  // Dense enough to read as ground cover. A blade is only a few pixels wide, so a
+  // sparse scatter samples as bare ground at 1:1 no matter how long it is.
+  const count = Math.round(560 * density);
 
   const blade = (x: number, y: number, len: number, width: number, lean: number) => {
     // Quadratic blade with the control point offset along the lean, so a leaning
@@ -172,79 +183,108 @@ const rnd = mulberry32(ctx.seed ^ 0x2b71);
     g.fill();
   };
 
+  // A laid-out blade, so the tip pass can reuse the same geometry.
+  const laid: Array<{ x: number; y: number; len: number; w: number; lean: number; row: number }> = [];
   for (let i = 0; i < count; i++) {
     // Three depths inside the plane. Only the front row carries the silhouette;
     // the rest exist to give the mass behind it some thickness.
     const row = i % 3;
-    const back = row === 0;
     const t = Math.pow(rnd(), 0.62);
-    const x = (rnd() * 1.1 - 0.05) * w;
-    const y = rootY - (1 - row) * h * 0.02 + t * h * 0.06;
-    // Long enough that a good number of blades clear the crest by a wide margin.
-    const len = h * (back ? 0.16 : 0.21) * (0.5 + t * 1.05) * (0.85 + density * 0.25);
-    const lean = (fbm1D(i * 1.9 + 4.2, ctx.seed + 77, 3) - 0.35) * len * 0.42
-      + Math.sin(ctx.t * swayRate + i * 0.9) * swayAmp * len * 5;
-    const width = Math.max(0.9, h * 0.0024 * (0.6 + t));
-
-    // Back blades sit in the haze and get no tip light; front blades catch it.
-    g.fillStyle = back
-      ? css(mixRgb(mass, ctx.grade.haze, 0.4), 0.5)
-      : css(row === 2 ? mass : mixRgb(mass, tip, 0.4), 0.96);
-    blade(x, y, len, width, lean);
+    const len = h * 0.16 * (0.5 + t * 1.15) * (0.85 + density * 0.25);
+    laid.push({
+      x: (rnd() * 1.1 - 0.05) * w,
+      y: rootY - (1 - row) * h * 0.03 + t * h * 0.07,
+      len,
+      w: Math.max(1.4, h * 0.0038 * (0.45 + t)),
+      lean:
+        (fbm1D(i * 1.9 + 4.2, ctx.seed + 77, 3) - 0.35) * len * 0.42 +
+        Math.sin(ctx.t * swayRate + i * 0.9) * swayAmp * len * 5,
+      row,
+    });
   }
 
-  // The mass the blades grow out of, well below the crest so the blades stand
-  // clear of it.
+  for (const b of laid) {
+    g.fillStyle = css(bladeTone(b.row), b.row === 0 ? 0.6 : 0.97);
+    blade(b.x, b.y, b.len, b.w, b.lean);
+  }
+
+  // Tips. A sparse pass over roughly a fifth of the blades, each shortened to its
+  // top third and drawn in the lit tone. This is what a backlit bank looks like
+  // from a distance: black bodies with a few bright edges, not uniformly pale
+  // straw. One fill each, so it costs a fraction of the bodies.
+  g.fillStyle = css(tip, 0.8);
+  for (let i = 0; i < laid.length; i += 5) {
+    const b = laid[i];
+    blade(b.x, b.y, b.len * 0.34, b.w * 0.6, b.lean * 0.34);
+  }
+
+  // The mass the blades grow out of: a strip along the bottom of the frame.
   g.fillStyle = css(mass, 1);
-  crest(ctx, top + 0.11, 0.0055, 0.05);
+  crest(ctx, top + 0.185, 0.0055, 0.04);
   g.fill();
 }
 
 /* ------------------------------ heather ------------------------------- */
 
+/**
+ * A low mat of vegetation.
+ *
+ * The first version drew each clump as a handful of large overlapping ellipses
+ * with a radial highlight. At wallpaper scale that is not heather, it is a row of
+ * glossy black eggs: the lobes were big enough to be read individually, the
+ * highlight made them look moulded, and the clumps sat at a near-constant height
+ * so the band read as a row.
+ *
+ * What heather actually looks like from twenty metres away is a dense, uneven
+ * mat with no individual plant resolvable — a texture, not a set of shapes. So
+ * this draws many small tufts instead of a few large lobes, at strongly varied
+ * heights, with no specular highlight: a faint top-light on each tuft and
+ * nothing else. The eye reads the aggregate as ground cover, which is the point.
+ */
 function drawHeather(ctx: ForegroundContext, top: number, col: RGB, density: number): void {
   const { w, h } = ctx;
   const g = ctx.g;
-  const list = clumps(Math.round(30 * density), ctx.seed + 5);
-  const baseY = h * (top + 0.1);
+  const rnd = mulberry32(ctx.seed ^ 0x51d3);
+  const mass = scaleValue(col, 0.66);
+  const tuftLight = tipLight(ctx, col);
 
-  for (const c of list) {
-    const cx = c.x * w;
-    const rx = w * (0.022 + c.s * 0.038);
-    const ry = h * (0.022 + c.s * 0.05) * (0.75 + density * 0.35);
-    const y = baseY + fbm1D(c.x * 9, ctx.seed, 3) * h * 0.03;
+  // Root the tufts along a line below the crest, and let them stand a little
+  // proud of it, so the crest reads as vegetation rather than as an edge.
+  const rootY = h * (top + 0.2);
+  const swayAmp = amplitude('environment', ctx.intensity, h * 0.009);
+  const swayRate = rate('environment', ctx.intensity, 0.12);
 
-    // A clump is several overlapping lobes, not one ellipse. The lobes break the
-    // outline, which is the only thing that makes a soft mass read as a plant
-    // instead of as a smudge.
-    for (let l = 0; l < 5; l++) {
-      const a = (l / 5) * Math.PI * 2 + c.k;
-      const lx = cx + Math.cos(a) * rx * 0.42;
-      const ly = y - Math.abs(Math.sin(a)) * ry * 0.62;
-      const lrx = rx * (0.42 + ((l * 37) % 11) / 30);
-      const lry = ry * (0.44 + ((l * 53) % 13) / 34);
+  const count = Math.round(520 * density);
+  for (let i = 0; i < count; i++) {
+    const t = Math.pow(rnd(), 0.7);
+    const x = (rnd() * 1.08 - 0.04) * w;
+    const y = rootY + t * h * 0.09;
+    const len = h * (0.035 + t * 0.085) * (0.55 + rnd() * 0.9);
+    const width = Math.max(0.8, h * 0.0016 * (0.6 + t));
+    // Tufts fan rather than stand: a small spread of tips from one root.
+    const spread = (rnd() - 0.5) * len * 0.9;
+    const lean = spread + Math.sin(ctx.t * swayRate + i * 1.3) * swayAmp * len * 3;
 
-      g.save();
-      g.translate(lx, ly);
-      g.scale(1, lry / lrx);
-      const grd = g.createRadialGradient(-lrx * 0.24, -lrx * 0.3, 0, 0, 0, lrx);
-      grd.addColorStop(0, css(shade(col, 0.12), 0.96));
-      grd.addColorStop(1, css(col, 0.96));
-      g.fillStyle = grd;
-      g.beginPath();
-      g.arc(0, 0, lrx, 0, Math.PI * 2);
-      g.fill();
-      g.restore();
-    }
+    const grd = g.createLinearGradient(x, y, x + lean, y - len);
+    grd.addColorStop(0, css(mass, 1));
+    grd.addColorStop(1, css(mixRgb(col, tuftLight, 0.42), 1));
+    g.fillStyle = grd;
+
+    g.beginPath();
+    g.moveTo(x - width, y);
+    g.quadraticCurveTo(x + lean * 0.4 - width * 0.7, y - len * 0.62, x + lean, y - len);
+    g.quadraticCurveTo(x + lean * 0.4 + width * 0.7, y - len * 0.62, x + width, y);
+    g.closePath();
+    g.fill();
   }
 
-  // A soft bank rather than a hard edge, so the plane dissolves into the ground
-  // instead of sitting on it.
-  const bankTop = h * (top + 0.06);
+  // The mat itself. Drawn last so it hides the roots, which is what stops the
+  // tufts looking like blades standing on a shelf.
+  const bankTop = h * (top + 0.09);
   const bank = g.createLinearGradient(0, bankTop, 0, h);
-  bank.addColorStop(0, css(col, 0));
-  bank.addColorStop(0.5, css(col, 0.82));
-  bank.addColorStop(1, css(shade(col, -0.28), 1));
+  bank.addColorStop(0, css(mass, 0));
+  bank.addColorStop(0.45, css(mass, 0.94));
+  bank.addColorStop(1, css(scaleValue(mass, 0.7), 1));
   g.fillStyle = bank;
   g.fillRect(0, bankTop, w, h - bankTop);
 }
@@ -397,13 +437,19 @@ export function renderForeground(ctx: ForegroundContext, spec: ForegroundSpec): 
   }
   g.restore();
 
-  // A haze wash back over the plane's far edge. The foreground is the closest
-  // thing in the scene, so it should be the *least* hazy — but it meets the
-  // ground across a soft transition rather than a cut, and a hard seam there
-  // reads as a pasted strip.
-  const seam = g.createLinearGradient(0, ctx.h * (top - 0.03), 0, ctx.h * (top + 0.09));
-  seam.addColorStop(0, css(ctx.grade.haze, 0.14));
-  seam.addColorStop(1, css(ctx.grade.haze, 0));
-  g.fillStyle = seam;
-  g.fillRect(0, ctx.h * (top - 0.03), ctx.w, ctx.h * 0.12);
+// --- the far edge ------------------------------------------------------------
+// A haze wash over the top of the plane, so it meets the ground across a soft
+// transition rather than a cut. A hard seam here reads as a pasted strip, and it
+// is easy to get wrong: the gradient has to start at *zero* alpha at the top of
+// the rect. Peaking at the top instead put a full-strength band of haze against
+// an un-washed background above it, which measured as a 12-luma step across the
+// full width of the frame.
+const seamTop = ctx.h * (top - 0.05);
+const seamH = ctx.h * 0.16;
+const seam = g.createLinearGradient(0, seamTop, 0, seamTop + seamH);
+seam.addColorStop(0, css(ctx.grade.haze, 0));
+seam.addColorStop(0.22, css(ctx.grade.haze, 0.16));
+seam.addColorStop(1, css(ctx.grade.haze, 0));
+g.fillStyle = seam;
+g.fillRect(0, seamTop, ctx.w, seamH);
 }

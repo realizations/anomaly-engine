@@ -57,9 +57,42 @@ internal static class SettingsShot
         // hung for reasons that had nothing to do with the thing it was testing.
         // Running them in one process also meant a pass in one could hide a fail in
         // the other. They are independent checks and now run independently.
-        var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal))
+var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal))
                     ?? "--capture";
-return RunCaptureMode(outDir);
+        return mode switch
+        {
+            "--heartbeat" => RunHeartbeatMode(),
+            _ => RunCaptureMode(outDir),
+        };
+    }
+
+    /// <summary>
+    /// The UI-thread heartbeat.
+    ///
+    /// Runs alone, in its own process, with no page capture before it. Capturing
+    /// nine pages means driving the dispatcher by hand with nested
+    /// DispatcherFrames, and doing that first left the dispatcher in a state where
+    /// Dispatcher.Run() no longer pumped timers — so the heartbeat hung for reasons
+    /// that had nothing to do with the thing it was testing. Separate processes,
+    /// separate dispatchers, no cross-contamination.
+    /// </summary>
+    private static int RunHeartbeatMode()
+    {
+        _ = new Application();
+
+        // The stub completes only when the dispatcher runs, which is the whole
+        // point: it reproduces the marshalling that makes the deadlock possible.
+        // A stub that returned synchronously would let a blocking caller finish,
+        // and the test would pass against the exact bug it exists to catch.
+        var stub = new MarshallingStubBridge(Dispatcher.CurrentDispatcher, StubStatusJson());
+        var window = LoadSettingsWindow(stub);
+        if (window is null)
+        {
+            Console.Error.WriteLine("Could not construct SettingsWindow.");
+            return 1;
+        }
+
+        return RunHeartbeat(window, stub) ? 0 : 1;
     }
 
     private static int RunCaptureMode(string outDir)

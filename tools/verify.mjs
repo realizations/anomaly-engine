@@ -48,6 +48,7 @@ steps.push(await run('motion model present, oscillators routed', ['motion-oscill
 steps.push(await run('flicker is bounded', ['flicker.mjs']));
 steps.push(await run('settings window renders every page', ['settings-shot.mjs']));
 steps.push(await run('no UI-thread blocking in settings', ['verify-settings-blocking.mjs']));
+steps.push(await run('settings poll leaves the UI thread responsive', ['settings-heartbeat.mjs']));
 steps.push(await run('published build is complete', ['verify-publish.mjs']));
 steps.push(await run('typefaces load and apply', ['verify-fonts-use.mjs']));
 steps.push(await run('durable state round-trip', ['verify-persistence.mjs']));

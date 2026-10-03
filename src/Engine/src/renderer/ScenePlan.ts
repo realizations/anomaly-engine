@@ -136,13 +136,13 @@ function aerial(...values: number[]): readonly number[] {
  *
  * Low horizon, so there is air above the land and the sky has room to do
  * something. Strong aerial perspective on the far planes, so distance is
- * unambiguous. A tall grass foreground that is genuinely the darkest thing in
- * the frame, because it is genuinely the closest. Light arrives as soft volumes
+ * unambiguous. A tall grass foreground that is genuinely the darkest thing in the
+ * frame, because it is genuinely the closest. Light arrives as soft volumes
  * off the moon rather than as a wash.
  */
 const DEPTH: ScenePlan = {
   horizonScale: 0.92,
-  ramp: ramp(1.0, 1.02, 0.9, 0.8, 0.86, 0.74, 0.6, 0.42, 0.26),
+  ramp: ramp(1.0, 1.02, 0.9, 0.8, 0.86, 0.78, 0.66, 0.56, 0.42),
   aerial: aerial(0, 0.72, 0.55, 0.34, 0.4, 0.16, 0.1, 0.04, 0),
   foreground: 'grass',
   foregroundTop: 0.76,
@@ -163,7 +163,7 @@ const DEPTH: ScenePlan = {
  */
 const ATMOSPHERIC: ScenePlan = {
   horizonScale: 1.04,
-  ramp: ramp(1.06, 1.12, 1.0, 0.94, 1.0, 0.86, 0.72, 0.5, 0.34),
+  ramp: ramp(1.06, 1.12, 1.0, 0.94, 1.0, 0.9, 0.78, 0.64, 0.5),
   aerial: aerial(0.06, 0.86, 0.74, 0.6, 0.62, 0.3, 0.18, 0.06, 0.02),
   foreground: 'heather',
   foregroundTop: 0.82,
@@ -185,7 +185,7 @@ const ATMOSPHERIC: ScenePlan = {
  */
 const DARKER: ScenePlan = {
   horizonScale: 0.98,
-  ramp: ramp(0.78, 0.7, 0.56, 0.44, 0.5, 0.4, 0.3, 0.2, 0.12),
+  ramp: ramp(0.78, 0.7, 0.56, 0.44, 0.5, 0.44, 0.34, 0.26, 0.18),
   aerial: aerial(0, 0.5, 0.36, 0.22, 0.26, 0.1, 0.06, 0.02, 0),
   foreground: 'fence',
   foregroundTop: 0.8,

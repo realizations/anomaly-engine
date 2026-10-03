@@ -562,79 +562,81 @@ public partial class SettingsWindow : Window
         StatusText.Text = $"Art style: {styles[i]}";
     }
 
-private async void ReducedMotion_Checked(object sender, RoutedEventArgs e)
-  {
-  if (_loading) return;
-  _host?.SetReducedMotion(true);
-  StatusText.Text = "Following the Windows reduce-motion setting: the scene stays alive but stops pulsing.";
-  }
-
-  /// <summary>
-  /// Motion level slider.
-  ///
-  /// Sent on release rather than on every tick of the drag, so dragging the slider
-  /// does not push a hundred WebView2 calls at the renderer while the user is still
-  /// deciding where to put it.
-  /// </summary>
-private void MotionSlider_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
-  {
-    _motionDragging = true;
-  }
-
-  private void MotionSlider_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
-  {
-    _motionDragging = false;
-    if (_loading) return;
-    PushMotionLevel();
-  }
-
-  private void MotionSlider_ValueChanged(object sender, RoutedEventArgs e)
-{
-    // The handler can fire while the XAML tree is still being parsed, before the
-    // label beside the slider exists, so it cannot assume it is there.
-    if (MotionValueText is null) return;
-    UpdateMotionLabels();
-    if (_loading) return;
-    // While the thumb is down the value is a preview, not a decision. Pushing it
-    // on every tick would send a hundred calls at the renderer while the user is
-    // still choosing, which is both wasteful and visibly laggy on the desktop.
-    if (_motionDragging) return;
-    PushMotionLevel();
-  }
-
-  private void PushMotionLevel()
-  {
-    var value = MotionSlider.Value / 100.0;
-    _host?.SendToRenderer($"window.__engine.setMotionIntensity({value.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
-    StatusText.Text = $"Motion level set to {MotionSlider.Value:0}%.";
-  }
-
-  /// <summary>
-  /// Reflects the motion level in the window.
-  ///
-  /// Reads nothing from the engine. The motion level and the reduce-motion flag
-  /// both arrive in the status document the one-second poll already fetches, so
-  /// this costs no additional round trips -- and, more importantly, cannot block
-  /// the UI thread waiting on one.
-  /// </summary>
-  private void RefreshMotionControls(EngineStatus? status)
-  {
-    if (status is not null) MotionSlider.Value = Math.Round(status.Value.MotionIntensity * 100);
-    MotionReducedNote.Visibility = status?.ReducedMotion == true ? Visibility.Visible : Visibility.Collapsed;
-    UpdateMotionLabels();
-  }
-
-  private void UpdateMotionLabels()
-  {
-    var v = MotionSlider.Value;
-    MotionValueText.Text = v switch
+private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
     {
-      < 12 => "still",
-      < 40 => "calm",
-      < 70 => "alive",
-      _ => "lively",
-    };
-  }
+        if (_loading) return;
+        _host?.SetReducedMotion(true);
+        StatusText.Text = "Following the Windows reduce-motion setting: the scene stays alive but stops pulsing.";
+    }
+
+    /* ------------------------------- motion ------------------------------- */
+
+    /// <summary>
+    /// Motion level slider.
+    ///
+    /// Sent on release rather than on every tick of the drag, so dragging the slider
+    /// does not push a hundred WebView2 calls at the renderer while the user is still
+    /// deciding where to put it.
+    /// </summary>
+    private void MotionSlider_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
+    {
+        _motionDragging = true;
+    }
+
+    private void MotionSlider_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        _motionDragging = false;
+        if (_loading) return;
+        PushMotionLevel();
+    }
+
+    private void MotionSlider_ValueChanged(object sender, RoutedEventArgs e)
+    {
+        // The handler can fire while the XAML tree is still being parsed, before the
+        // label beside the slider exists, so it cannot assume it is there.
+        if (MotionValueText is null) return;
+        UpdateMotionLabels();
+        if (_loading) return;
+        // While the thumb is down the value is a preview, not a decision. Pushing it
+        // on every tick would send a hundred calls at the renderer while the user is
+        // still choosing, which is both wasteful and visibly laggy on the desktop.
+        if (_motionDragging) return;
+        PushMotionLevel();
+    }
+
+    private void PushMotionLevel()
+    {
+        var value = MotionSlider.Value / 100.0;
+        _host?.SendToRenderer($"window.__engine.setMotionIntensity({value.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
+        StatusText.Text = $"Motion level set to {MotionSlider.Value:0}%.";
+    }
+
+    /// <summary>
+    /// Reflects the motion level in the window.
+    ///
+    /// Reads nothing from the engine. The motion level and the reduce-motion flag
+    /// both arrive in the status document the one-second poll already fetches, so
+    /// this costs no additional round trips -- and, more importantly, cannot block
+    /// the UI thread waiting on one.
+    /// </summary>
+    private void RefreshMotionControls(EngineStatus? status)
+    {
+        if (status is not null) MotionSlider.Value = Math.Round(status.Value.MotionIntensity * 100);
+        MotionReducedNote.Visibility = status?.ReducedMotion == true ? Visibility.Visible : Visibility.Collapsed;
+        UpdateMotionLabels();
+    }
+
+    private void UpdateMotionLabels()
+    {
+        var v = MotionSlider.Value;
+        MotionValueText.Text = v switch
+        {
+            < 12 => "still",
+            < 40 => "calm",
+            < 70 => "alive",
+            _ => "lively",
+        };
+    }
 
     private void ReducedMotion_Unchecked(object sender, RoutedEventArgs e)
     {
