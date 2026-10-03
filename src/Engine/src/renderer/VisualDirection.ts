@@ -3,24 +3,45 @@
  *
  * This is the mockup laboratory: one place, one layout, rendered three very
  * different ways, so a direction can be chosen by looking at it rather than
- * arguing about it in words. Each direction is a set of full-screen passes that
- * modify how the composed scene is finished.
+ * arguing about it in words.
  *
- * They are not mere recolours. Each aims at a different theory of why the base
- * wallpaper feels flat:
+ * ## Where a direction actually lives
  *
- *   A. depth -- the missing close foreground, and too little separation between
- *      the planes of the scene. Atmospheric perspective, light shafts, and a
- *      dark foreground band that anchors the viewer in the air.
- *   B. atmospheric -- a vacant gradient sky and too little air between the
- *      world. Structured cloud, a heavier horizon band, soft edges.
- *   C. darker/designed -- too much equal weight and a full, even glow. A
- *      darker base, negative space high in the frame, and light gathered on the
- *      one thing that earns it.
+ * An earlier version of this file did all three directions here, as full-screen
+ * passes over the finished scene. That produced three images that were
+ * recognisably the same picture in three tints, and it could not fix either of
+ * the two things that actually made the wallpaper look flat: every plane ended
+ * in the same value range, and nothing was drawn between the camera and the near
+ * treeline. Neither of those is a post-process problem.
+ *
+ * So a direction now has two halves, and this file holds only the cheap one:
+ *
+ *   `ScenePlan.ts`  the composition — framing, the value ladder, aerial
+ *                   perspective, what stands close to the camera, where light
+ *                   lands. Applied while the scene is drawn.
+ *   this file       the finish — a small unifying grade so the three still look
+ *                   like one product.
+ *
+ * The finish is deliberately restrained. Its job is to bind the planes together,
+ * not to repaint them; a direction whose identity lives in a filter will always
+ * collapse into the next one, which is precisely what the previous version did.
+ *
+ * ## The theory behind each
+ *
+ *   A. depth      the viewer is standing in the valley. Air above the land,
+ *                 unambiguous distance, a dark close plane to give the image a
+ *                 front edge, light arriving in soft volumes off the moon.
+ *   B. atmospheric the subject is the weather. Raised horizon, banked cloud, hard
+ *                 aerial perspective, and a low soft foreground so the eye is
+ *                 handed off into haze instead of stopped by a shape.
+ *   C. darker     the world withholds. Fewest elements, each worth looking at,
+ *                 strong negative space, and one pool of light so the subject is
+ *                 unambiguous.
  */
 
-import { fbm1D, mixRgb, css, shade } from '../render/noise.js';
+import { css, mixRgb } from '../render/noise.js';
 import type { SkyGrade } from '../render/palette.js';
+import type { ScenePlan } from './ScenePlan.js';
 
 export const DIRECTIONS = ['depth', 'atmospheric', 'darker'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
@@ -36,212 +57,170 @@ export function getDirection(): Direction {
   return current;
 }
 
-export function applyDirection(
-  g: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  grade: SkyGrade,
-  direction: Direction = current
-): void {
+/**
+ * Everything the finish needs to know about the frame it is finishing.
+ *
+ * A single object rather than five positional parameters, because the horizon in
+ * particular has to be the *resolved* one. The earlier version of this file
+ * hardcoded `h * 0.72` to line its overlays up with the landscape, which is a
+ * comment admitting the seam exists; now the landscape's horizon is itself
+ * plan-driven, so the finish has to be told rather than guessing.
+ */
+export interface FinishContext {
+  g: CanvasRenderingContext2D;
+  w: number;
+  h: number;
+  grade: SkyGrade;
+  plan: ScenePlan;
+  /** Sky meets land, as a fraction of height. */
+  horizon: number;
+}
+
+export function applyDirection(ctx: FinishContext, direction: Direction = current): void {
   switch (direction) {
     case 'depth':
-      applyDepth(g, w, h, grade);
+      applyDepth(ctx);
       break;
     case 'atmospheric':
-      applyAtmospheric(g, w, h, grade);
+      applyAtmospheric(ctx);
       break;
     case 'darker':
-      applyDarker(g, w, h, grade);
+      applyDarker(ctx);
       break;
   }
 }
 
 /* ------------------------------ shared ------------------------------ */
 
-function horizonY(h: number): number {
-  // Matches the renderer's terrain ground line, so overlays land on the same seam
-  // the scene itself uses.
-  return h * 0.72;
-}
-
-/** A soft shadow pushed into the top of the scene, for negative space. */
+/**
+ * Negative space, held down at the top of the frame.
+ *
+ * The one shared device. A frame whose top edge is the brightest thing in it has
+ * nowhere for the eye to rest, which is a large part of why a wallpaper reads as
+ * busy even when nothing in it is actually moving. The strength comes from the
+ * plan rather than from here, because how much sky should be given away is a
+ * compositional decision and not a per-direction effect.
+ */
 function topShadow(g: CanvasRenderingContext2D, w: number, h: number, strength: number): void {
-  const grd = g.createLinearGradient(0, 0, 0, h * 0.45);
-  grd.addColorStop(0, `rgba(5,8,16,${strength})`);
+  if (strength <= 0.001) return;
+  const grd = g.createLinearGradient(0, 0, 0, h * 0.52);
+  grd.addColorStop(0, `rgba(5,8,16,${strength.toFixed(3)})`);
+  grd.addColorStop(0.55, `rgba(5,8,16,${(strength * 0.28).toFixed(3)})`);
   grd.addColorStop(1, 'rgba(5,8,16,0)');
   g.fillStyle = grd;
-  g.fillRect(0, 0, w, h * 0.45);
+  g.fillRect(0, 0, w, h * 0.52);
+}
+
+/**
+ * Light gathered at one place.
+ *
+ * Used by `darker` only. This is not "a glow over the middle" — it is the single
+ * place the frame is allowed to be bright, which is the whole mechanism that
+ * direction is built on.
+ */
+function lightPool(
+  { g, grade }: FinishContext,
+  cx: number,
+  cy: number,
+  radius: number,
+  alpha: number
+): void {
+  const tint = grade.sunAlpha > 0.05 ? grade.lightColor : { r: 236, g: 196, b: 140 };
+  g.save();
+  g.globalCompositeOperation = 'screen';
+  const grd = g.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grd.addColorStop(0, css(tint, alpha));
+  grd.addColorStop(0.35, css(tint, alpha * 0.34));
+  grd.addColorStop(1, css(tint, 0));
+  g.fillStyle = grd;
+  g.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+  g.restore();
 }
 
 /* ----------------------------- direction A ----------------------------- */
 
-export function applyDepth(
-  g: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  grade: SkyGrade
-): void {
-  const hy = horizonY(h);
+/**
+ * Depth: air, and a front edge.
+ *
+ * Almost nothing is added. The plan has already pushed the far planes toward the
+ * haze and dropped the foreground to the darkest value in the frame; the only
+ * thing left to do here is bind the planes with a thin band of horizon light, so
+ * the distance reads as air rather than as a colour change between two shapes.
+ */
+function applyDepth({ g, w, h, grade, plan, horizon }: FinishContext): void {
+  const hy = h * horizon;
+  const lit = grade.sunAlpha > 0.05 ? grade.lightColor : { r: 200, g: 212, b: 238 };
 
-  // --- atmospheric perspective -------------------------------------------
-  // Far things melt toward the sky's colour.
-  const sky = grade.skyHorizon;
-  const haze = g.createLinearGradient(0, hy - h * 0.28, 0, hy + h * 0.05);
-  haze.addColorStop(0, `rgba(${sky.r},${sky.g},${sky.b},0)`);
-  haze.addColorStop(0.65, `rgba(${sky.r},${sky.g},${sky.b},0.28)`);
-  haze.addColorStop(1, `rgba(${sky.r},${sky.g},${sky.b},0)`);
-  g.fillStyle = haze;
-  g.fillRect(0, hy - h * 0.28, w, h * 0.33);
+  // A thin, wide band of light sitting on the horizon. The old pass filled a
+  // quarter of the frame with this; a band that large is a lit rectangle, not
+  // air, and it was the reason the sky looked like a gradient with fog on it.
+  const band = g.createLinearGradient(0, hy - h * 0.1, 0, hy + h * 0.06);
+  band.addColorStop(0, css(lit, 0));
+  band.addColorStop(0.62, css(lit, 0.075));
+  band.addColorStop(1, css(lit, 0));
+  g.fillStyle = band;
+  g.fillRect(0, hy - h * 0.1, w, h * 0.16);
 
-  // --- a suggestion of light volume ----------------------------------------
-  if (grade.sunAlpha > 0.05 || grade.moonAlpha > 0.05) {
-    g.save();
-    g.globalCompositeOperation = 'screen';
-    for (let i = 0; i < 2; i++) {
-      const x0 = w * (0.62 + i * 0.16);
-      const tint = grade.sunAlpha > 0.05 ? grade.lightColor : { r: 190, g: 200, b: 225 };
-      const a = (grade.sunAlpha > 0.05 ? grade.sunAlpha : grade.moonAlpha) * 0.10;
-      const grd = g.createLinearGradient(x0, 0, x0 - w * 0.28, h * 0.9);
-      grd.addColorStop(0, `rgba(${tint.r},${tint.g},${tint.b},${a})`);
-      grd.addColorStop(1, `rgba(${tint.r},${tint.g},${tint.b},0)`);
-      g.fillStyle = grd;
-      g.beginPath();
-      g.moveTo(x0, 0);
-      g.lineTo(x0 + w * 0.16, 0);
-      g.lineTo(x0 - w * 0.10, h);
-      g.lineTo(x0 - w * 0.30, h);
-      g.closePath();
-      g.fill();
-    }
-    g.restore();
-  }
-
-  // --- the foreground the base render lacked --------------------------------
-  // A dark, close silhouette in the bottom third: tall grass along the line of
-  // the ground.
-  const dark = shade(grade.haze, -0.5);
-  const fg = g.createLinearGradient(0, hy + h * 0.14, 0, h);
-  fg.addColorStop(0, css(dark, 0.92));
-  fg.addColorStop(1, css(dark, 1));
-
-  g.fillStyle = fg;
-  g.beginPath();
-  g.moveTo(0, h);
-  const seed = 771;
-  for (let x = 0; x <= w; x += 8) {
-    const t = fbm1D(x * 0.006, seed, 4);
-    g.lineTo(x, h * (0.94 + (t - 0.5) * 0.09));
-  }
-  g.lineTo(w, h);
-  g.closePath();
-  g.fill();
-
-  // Fine grass strokes rising from that ground line.
-  g.strokeStyle = css(shade(dark, 0.25), 0.6);
-  g.lineWidth = Math.max(1, h * 0.0016);
-  const fronds = 90;
-  for (let i = 0; i < fronds; i++) {
-    const n = fbm1D(i * 0.73, seed + 13, 3);
-    const x = n * w;
-    const ground = h * (0.95 + fbm1D(x * 0.006, seed, 4) * 0.05);
-    const tall = h * (0.03 + fbm1D(i * 1.31, seed + 5, 3) * 0.1);
-    g.beginPath();
-    g.moveTo(x, ground);
-    g.quadraticCurveTo(x + (n - 0.5) * 14, ground - tall * 0.6, x + (n - 0.5) * 26, ground - tall);
-    g.stroke();
-  }
-
-  topShadow(g, w, h, 0.25);
+  topShadow(g, w, h, plan.skyHold);
 }
 
 /* ----------------------------- direction B ----------------------------- */
 
-export function applyAtmospheric(
-  g: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  grade: SkyGrade
-): void {
-  const hy = horizonY(h);
+/**
+ * Atmospheric: unify the air.
+ *
+ * The plan already banked the fog and raised the horizon. All that is left is a
+ * single wash of haze across the whole frame, which is what makes the planes
+ * feel like they are in the same volume of air rather than stacked on top of one
+ * another.
+ */
+function applyAtmospheric({ g, w, h, grade, plan }: FinishContext): void {
+  const lit = mixRgb(grade.haze, grade.skyHorizon, 0.55);
+  const wash = g.createLinearGradient(0, 0, 0, h);
+  wash.addColorStop(0, css(lit, 0.03));
+  wash.addColorStop(0.55, css(lit, 0.1));
+  wash.addColorStop(1, css(lit, 0.02));
+  g.fillStyle = wash;
+  g.fillRect(0, 0, w, h);
 
-  // --- cloud, tinted toward the sky's own colours --------------------------
-  g.save();
-  g.globalCompositeOperation = 'screen';
-  for (let i = 0; i < 5; i++) {
-    const n = fbm1D(i * 3.1, 42, 4);
-    const cy = h * (0.10 + n * 0.22);
-    const cx = ((n * 6.1 + i * 0.19) % 1) * w;
-    const cloudW = w * (0.22 + fbm1D(i * 2.3, 7, 4) * 0.3);
-    const cloudH = h * (0.045 + fbm1D(i * 1.1, 9, 4) * 0.05);
-    const tint = mixRgb(grade.skyTop, grade.skyHorizon, 0.55 + fbm1D(i * 4.7, 3, 3) * 0.3);
-    const alpha = 0.10 + grade.ambient * 0.10;
-    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, cloudW);
-    grd.addColorStop(0, css(tint, alpha));
-    grd.addColorStop(1, css(tint, 0));
-    g.save();
-    g.translate(cx, cy);
-    g.scale(1, cloudH / cloudW);
-    g.translate(-cx, -cy);
-    g.fillStyle = grd;
-    g.beginPath();
-    g.arc(cx, cy, cloudW, 0, Math.PI * 2);
-    g.fill();
-    g.restore();
-  }
-  g.restore();
-
-  // --- horizon band --------------------------------------------------------
-  const hz = grade.skyHorizon;
-  const band = g.createLinearGradient(0, hy - h * 0.16, 0, hy + h * 0.08);
-  band.addColorStop(0, `rgba(${hz.r},${hz.g},${hz.b},0)`);
-  band.addColorStop(0.7, `rgba(${hz.r},${hz.g},${hz.b},0.30)`);
-  band.addColorStop(1, `rgba(${hz.r},${hz.g},${hz.b},0)`);
-  g.fillStyle = band;
-  g.fillRect(0, hy - h * 0.16, w, h * 0.24);
-
-  // The clouds are low, so the very top darkens a little to seat them.
-  topShadow(g, w, h, 0.16);
+  topShadow(g, w, h, plan.skyHold);
 }
 
 /* ----------------------------- direction C ----------------------------- */
 
-export function applyDarker(
-  g: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  grade: SkyGrade
-): void {
-  const hy = horizonY(h);
-
-  // Hold the sky down; let darkness supply the negative space.
-  topShadow(g, w, h, 0.55);
-
-  // Gather the light low in the frame, around the one thing that earns it.
-  g.save();
-  g.globalCompositeOperation = 'screen';
+/**
+ * Darker: one lit thing, and the frame held down around it.
+ *
+ * Everything expensive here already happened in the plan — the ramp is steeper,
+ * the foreground is sparse and man-made, the sky is given away. This adds the
+ * pool and a matching falloff, and then multiplies the whole frame toward a cool
+ * neutral so that nothing in it can be warmer or brighter than the subject by
+ * accident.
+ */
+function applyDarker(ctx: FinishContext): void {
+  const { g, w, h, grade, plan, horizon } = ctx;
+  const hy = h * horizon;
   const lx = w * 0.48;
-  const ly = hy + h * 0.03;
-  const tint = grade.sunAlpha > 0.05 ? grade.lightColor : { r: 235, g: 185, b: 120 };
-  const a = 0.16 + (grade.sunAlpha > 0.05 ? grade.sunAlpha : 0.25) * 0.2;
-  const grd = g.createRadialGradient(lx, ly, 0, lx, ly, w * 0.42);
-  grd.addColorStop(0, `rgba(${tint.r},${tint.g},${tint.b},${a})`);
-  grd.addColorStop(0.4, `rgba(${tint.r},${tint.g},${tint.b},${a * 0.35})`);
-  grd.addColorStop(1, `rgba(${tint.r},${tint.g},${tint.b},0)`);
-  g.fillStyle = grd;
-  g.fillRect(0, 0, w, h);
-  g.restore();
+  const ly = hy + h * 0.02;
 
-  // Push the outlying ground back, so the light reads as a place, not a gradient.
-  const focus = g.createRadialGradient(lx, hy + h * 0.1, 0, lx, hy + h * 0.1, w * 0.5);
+  lightPool(ctx, lx, ly, w * 0.38, 0.15 + grade.ambient * 0.12);
+
+  // The counter-shape: everything outside the pool is pushed down, so the light
+  // reads as a place rather than as a gradient.
+  const focus = g.createRadialGradient(lx, ly, 0, lx, ly, w * 0.52);
   focus.addColorStop(0, 'rgba(0,0,0,0)');
-  focus.addColorStop(1, 'rgba(3,6,12,0.42)');
+  focus.addColorStop(1, 'rgba(3,6,12,0.5)');
   g.fillStyle = focus;
   g.fillRect(0, 0, w, h);
 
-  // Hold every light down so the one lit thing carries the frame.
+  // A cool multiply. Small, but it is what stops every warm element in the
+  // world — the road, the cabin window, the tower lamp — from competing with the
+  // subject for attention.
   g.save();
   g.globalCompositeOperation = 'multiply';
-  g.fillStyle = 'rgba(96,106,128,0.22)';
+  g.fillStyle = 'rgba(122,132,152,0.3)';
   g.fillRect(0, 0, w, h);
   g.restore();
+
+  topShadow(g, w, h, plan.skyHold);
 }

@@ -32,6 +32,32 @@ const PHOSPHOR_WARN = { r: 214, g: 108, b: 96 };
 const BEZEL_HI = { r: 96, g: 94, b: 88 };
 const BEZEL_LO = { r: 34, g: 33, b: 31 };
 
+/**
+ * Instrument geometry.
+ *
+ * The readout is five or six short lines in a tube three times as tall as they
+ * are long, which left most of the screen as an empty black rectangle. An empty
+ * rectangle does not read as equipment — it reads as a UI panel someone dropped
+ * on a picture, which is the specific thing this module exists to avoid.
+ *
+ * So the lower two thirds of the tube carries the instruments: a carrier trace,
+ * a spectrum bar, and a footer rule. They are all driven from the same clock the
+ * readout uses and they are all *quiet* — they never brighten, never sweep, and
+ * never draw the eye away from the text. Their job is only to make the black
+ * area legible as a screen that is doing something.
+ */
+const INSTRUMENT = {
+  /** Trace sits below this fraction of the tube height. */
+  traceTop: 0.52,
+  traceBottom: 0.8,
+  /** Bars occupy the band under the trace. */
+  barsTop: 0.83,
+  barsBottom: 0.93,
+  bars: 22,
+  /** Peak alpha of the trace. Low: it is a background reading, not a graphic. */
+  traceAlpha: 0.5,
+} as const;
+
 /** The state the terminal reports about the world it is looking at. */
 export interface TerminalState {
   worldName: string;
@@ -197,38 +223,34 @@ export class CrtTerminal {
   private _drawBezel(
     g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, grade: SkyGrade
   ): void {
-    const lit = 0.25 + grade.ambient * 0.75;
+const lit = 0.25 + grade.ambient * 0.75;
 
-    // Drop shadow onto the ground. A canvas blur filter here was measurably
-    // one of the most expensive operations in the whole frame; a soft radial
-    // gradient underneath the case is visually equivalent at this size and
-    // costs a fraction of it.
+    // Contact shadow.
+    //
+    // A single wide, low-alpha ellipse rather than three tighter ones. The stack
+    // was opaque enough to read as a dark oval *drawn on the grass* instead of as
+    // the case blocking the light, which put an inexplicable smudge in the middle
+    // of the foreground in every render.
     g.save();
-    g.fillStyle = 'rgba(0,0,0,0.5)';
-    for (let i = 3; i >= 1; i--) {
-      g.globalAlpha = 0.16;
-      g.filter = 'none';
-      g.fillStyle = 'rgba(0,0,0,0.55)';
-      g.beginPath();
-      g.ellipse(
-        x + w * 0.5, y + h * 1.02,
-        w * (0.5 + i * 0.06), h * (0.06 + i * 0.04), 0, 0, Math.PI * 2
-      );
-      g.fill();
-    }
+    g.fillStyle = 'rgba(0,0,0,0.34)';
+    g.beginPath();
+    g.ellipse(x + w * 0.52, y + h * 1.03, w * 0.66, h * 0.075, 0, 0, Math.PI * 2);
+    g.fill();
     g.restore();
 
-    // A short base plinth at the foot of the case. Without it the panel stood on
-    // two invisible points and read as something floated in fixed by the layout;
-    // a small plinth seats it in the same ground the rest of the world sits on.
-    // The plinth is coloured from the same grade the bezel is, so it melts into
-    // the terrain at the same hour as everything around it rather than reading as
-    // a separate material.
-    g.fillStyle = css(mixRgb(BEZEL_LO, grade.haze, 0.35));
-    const plinthH = h * 0.05;
-    g.fillRect(x + w * 0.03, y + h, w * 0.94, plinthH);
-    g.fillStyle = css(mixRgb(BEZEL_LO, grade.haze, 0.55));
-    g.fillRect(x, y + h + plinthH, w, plinthH * 0.4);
+    // A short base plinth at the foot of the case, so the panel stands on the
+    // ground instead of floating. Coloured from the same grade the bezel is, and
+    // *darker* than the case rather than lighter: the previous version mixed it
+    // toward the haze, which at golden hour made it a pale beige slab under a dark
+    // box and read as a coffee table.
+    const plinthH = h * 0.045;
+    g.fillStyle = css(mixRgb(BEZEL_LO, { r: 0, g: 0, b: 0 }, 0.3));
+    g.fillRect(x + w * 0.04, y + h, w * 0.92, plinthH);
+    // A thin lit edge along the top of the plinth, so it has a front face.
+    g.fillStyle = css(mixRgb(BEZEL_HI, grade.lightColor, 0.12 * lit), 0.7);
+    g.fillRect(x + w * 0.04, y + h, w * 0.92, Math.max(1, h * 0.006));
+    g.fillStyle = css(mixRgb(BEZEL_LO, { r: 0, g: 0, b: 0 }, 0.55));
+    g.fillRect(x + w * 0.08, y + h + plinthH, w * 0.84, plinthH * 0.35);
 
     // Case: a vertical plastic gradient, lit from the sky.
     const grd = g.createLinearGradient(x, y, x, y + h);
@@ -339,7 +361,7 @@ export class CrtTerminal {
       g.shadowBlur = 0;
     });
 
-    // Cursor block.
+// Cursor block.
     if (this._current && cursorVisible) {
       const idx = shown.length - 1;
       if (idx >= 0) {
@@ -349,6 +371,93 @@ export class CrtTerminal {
         g.fillRect(x + padX + cw + 1, y + padY + idx * lineH, fs * 0.55, fs * 1.05);
       }
     }
+
+    this._drawInstruments(g, x, y, w, h, padX, shown.length * lineH + padY, state);
+  }
+
+  /**
+   * The carrier trace, the spectrum bar and the footer rule.
+   *
+   * Drawn from the terminal's own clock rather than from the renderer's, so they
+   * keep moving when the scene is held still — a screen whose instruments freeze
+   * reads as a picture of a terminal rather than as a terminal.
+   *
+   * Everything here is low-contrast and low-alpha on purpose. A scope trace drawn
+   * at full phosphor brightness would out-shout the readout, and the readout is
+   * the only part of this panel the viewer is meant to read.
+   */
+  private _drawInstruments(
+    g: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    padX: number,
+    textBottom: number,
+    state: TerminalState
+  ): void {
+    const fade = this._boot;
+    if (fade <= 0.02) return;
+
+    const innerW = w - padX * 2;
+    // Sit below the text if there is room, otherwise shrink to fit under it. The
+    // gap is generous because a trace that starts immediately under the last
+    // line reads as a strikethrough rather than as a separate instrument.
+    const top = Math.max(textBottom + h * 0.1, y + h * INSTRUMENT.traceTop);
+    const bottom = y + h * INSTRUMENT.traceBottom;
+    if (bottom - top < h * 0.06) return;
+
+    const t = this._flicker;
+
+    // --- the trace ------------------------------------------------------------
+    // A carrier with a slow wobble on it. Two sines at incommensurate rates,
+    // because one sine is obviously a sine and two are obviously not.
+    const steps = 72;
+    g.strokeStyle = css(PHOSPHOR, INSTRUMENT.traceAlpha * fade);
+    g.lineWidth = Math.max(1, h * 0.0035);
+    g.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const u = i / steps;
+      const phase = u * 9 - t * 1.1;
+      const carrier = Math.sin(phase) * 0.62 + Math.sin(phase * 2.37 + t * 0.43) * 0.26;
+      // A quiet floor of noise, so the line is never mathematically clean.
+      const grain = (Math.sin(u * 61.7 + t * 2.7) + Math.sin(u * 137.3 - t * 1.9)) * 0.035;
+      const amp = (bottom - top) * 0.5;
+      const px = x + padX + innerW * u;
+      const py = top + amp - (carrier + grain) * amp * 0.82;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.stroke();
+
+    // A dim centre rule, so the trace has something to be read against.
+    g.strokeStyle = css(PHOSPHOR, 0.1 * fade);
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(x + padX, top + (bottom - top) * 0.5);
+    g.lineTo(x + padX + innerW, top + (bottom - top) * 0.5);
+    g.stroke();
+
+    // --- the spectrum bar ------------------------------------------------------
+    const barsTop = y + h * INSTRUMENT.barsTop;
+    const barsBottom = y + h * INSTRUMENT.barsBottom;
+    const bw = innerW / INSTRUMENT.bars;
+    const seed = state.worldCode.charCodeAt(0) * 37;
+    for (let i = 0; i < INSTRUMENT.bars; i++) {
+      // A fixed per-world spectral shape, breathing slowly. Deterministic from
+      // the world and the clock, so it is the same reading on every visit.
+      const base = 0.5 + Math.sin(i * 0.7 + seed) * 0.3 + Math.sin(i * 1.9 + seed * 0.5) * 0.2;
+      const breathe = 0.5 + 0.5 * Math.sin(t * 0.32 + i * 0.4 + seed);
+      const v = Math.max(0.06, base * (0.55 + breathe * 0.45));
+      const bh = (barsBottom - barsTop) * v;
+      g.fillStyle = css(PHOSPHOR, 0.13 * fade);
+      g.fillRect(x + padX + i * bw + bw * 0.22, barsBottom - bh, bw * 0.56, bh);
+    }
+
+    // --- the footer rule -------------------------------------------------------
+    const fy = y + h * 0.965;
+    g.fillStyle = css(PHOSPHOR, 0.16 * fade);
+    g.fillRect(x + padX, fy, innerW, 1);
   }
 
   /**

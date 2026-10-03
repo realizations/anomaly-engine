@@ -1,4 +1,4 @@
-import { RGB, mixRgb, css, shade, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
+import { RGB, mixRgb, css, shade, scaleValue, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
 import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
 import {
@@ -16,6 +16,9 @@ import { CrtTerminal } from './CrtTerminal.js';
 import { applyDirection, getDirection, type Direction } from './VisualDirection.js';
 import { LiminalInterior } from './LiminalInterior.js';
 import { UncannyLayer } from './UncannyLayer.js';
+import { renderForeground } from './Foreground.js';
+import { renderClouds } from './CloudField.js';
+import { PLANE, PLANE_COUNT, planFor, type ScenePlan } from './ScenePlan.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -437,9 +440,13 @@ export class WorldRenderer {
     const dens = this._world.terrain.forestDensity ?? [1, 1, 1];
     const scale = (n: number, m: number) => Math.max(0, Math.round(n * m));
 
-    this._treesFar = this._scatterForest(d + 3101, scale(118, dens[0]), 0.028, 0.05, 0.09, 0.028);
-    this._treesMid = this._scatterForest(d + 7717, scale(66, dens[1]), 0.055, 0.105, 0.16, 0.02);
-    this._treesNear = this._scatterForest(d + 4409, scale(15, dens[2]), 0.16, 0.3, 0.34, 0.05);
+    // Far trees are small and tightly spaced because they are a distant treeline, and
+    // uniformity is correct at that distance. The mid band carries most of the
+    // scene's silhouette, so its height range is deliberately wide. The near band
+    // is sparse and large: it is read as individual trees, not as a mass.
+    this._treesFar = this._scatterForest(d + 3101, scale(118, dens[0]), 0.028, 0.062, 0.09, 0.0055);
+    this._treesMid = this._scatterForest(d + 7717, scale(66, dens[1]), 0.05, 0.175, 0.19, 0.0085);
+    this._treesNear = this._scatterForest(d + 4409, scale(15, dens[2]), 0.15, 0.36, 0.4, 0.026);
   }
 
   private _scatterForest(
@@ -460,10 +467,19 @@ export class WorldRenderer {
       guard++;
       const anchor = clusters[Math.floor(rnd() * clusters.length)];
       const x = Math.min(1.02, Math.max(-0.02, anchor + (rnd() - 0.5) * cluster));
-      if (out.some((t) => Math.abs(t.x - x) < jitter * 0.4)) continue;
+      // Spacing is enforced against the already-placed trees in this cluster only.
+      // A global minimum turned a clustered scatter into an even one, which is
+      // what made the treeline read as a picket fence: evenly spaced, evenly
+      // sized, evenly toned triangles.
+      if (out.some((t) => Math.abs(t.x - x) < jitter)) continue;
 
-      const sizeRoll = rnd();
-      const h = minH + (maxH - minH) * Math.pow(sizeRoll, 1.7);
+      // Height. The distribution matters more than the range: a uniform draw over
+      // a wide range produces a flat-topped mass, and a strong power bias toward
+      // the minimum produces a row of identical stumps. A gentle bias toward the
+      // middle with a thin tail of tall trees is what a real stand looks like.
+      const roll = rnd();
+      const tall = roll > 0.86 ? rnd() : 0;
+      const h = minH + (maxH - minH) * (Math.pow(roll, 0.85) * 0.62 + tall * 0.38);
       out.push({ x, h, s: Math.floor(rnd() * 1e6) });
       placed++;
     }
@@ -738,6 +754,86 @@ export class WorldRenderer {
     return this._world.palette?.ground ?? GROUND_DEFAULT;
   }
 
+  /**
+   * The active composition plan.
+   *
+   * Recomputed from `_direction` rather than stored alongside it, because the
+   * direction can be changed from the settings window at any moment and a cached
+   * plan would silently keep composing the previous one.
+   */
+  private _plan(): ScenePlan {
+    return planFor(this._direction);
+  }
+
+  /**
+   * Where sky meets land, as a fraction of the viewport height.
+   *
+   * The world's `groundY` says where the author wants the horizon; the plan's
+   * `horizonScale` says how much of the frame that horizon is allowed to occupy.
+   * Scaling rather than replacing keeps a world author's composition intact while
+   * still letting a direction reframe the shot, which is what makes three
+   * directions of the same world comparable instead of three different worlds.
+   */
+  private _horizonFrac(): number {
+    const authored = this._world.terrain.groundY ?? 0.7;
+    return Math.max(0.42, Math.min(0.88, authored * this._plan().horizonScale));
+  }
+
+  /**
+   * Applies one plane's rung of the value ladder.
+   *
+   * `ramp` is a multiplier on the authored colour, and `aerial` is how far that
+   * plane then mixes toward the haze. Together they are the whole depth model:
+   * a plane that is dark *and* hazed is far away, a plane that is dark and clear
+   * is close, and a plane that is dark and neither is in shadow. Colour alone
+   * cannot say any of that.
+   *
+   * Ramp values above 1 lift a plane toward the light, which is how a direction
+   * can pull the far ridges forward instead of only pushing the near ones back.
+   *
+   * `authoredDepth` is the world's own haze amount for this plane. It is folded
+   * into the plan's aerial term rather than added to it: two independent haze
+   * contributions that both apply would sum past 1 and turn a far ridge into sky,
+   * and the failure would only appear on worlds that set both.
+   *
+   * ## The night floor
+   *
+   * Night used to land the ground at about 5% luminance. The authored palettes
+   * are already dark, and the ambient term darkened them again, and the plan's
+   * ramp darkened them a third time: three darkenings stacked on a colour that
+   * was never bright to begin with. A frame that is 97% inside the darkest eighth
+   * of the range is not atmospheric, it is a black rectangle with some stars on
+   * it, and there is nothing in it to reward looking at.
+   *
+   * So after darkening, each plane is lifted toward whichever light is actually
+   * in the sky, by an amount that goes to zero as the light rises. That keeps the
+   * day and the golden hour untouched, and makes the deep night a moonlit
+   * landscape instead of an absence of one.
+   */
+  private _plane(col: RGB, plane: keyof typeof PLANE, authoredDepth = 0, ambientFalloff = 0.38): RGB {
+    const plan = this._plan();
+    const grade = this._grade;
+    const i = PLANE[plane];
+    const graded = scaleValue(
+      mixRgb(col, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * ambientFalloff),
+      plan.ramp[i]
+    );
+    const haze = Math.min(0.95, authoredDepth + plan.aerial[i] * 0.5);
+
+    // How much light is actually available, and what colour it is. Moonlight
+    // counts for more than it should, because it is the only light in the frame
+    // and a plane with nothing lighting it is a hole.
+    const moon = grade.moonAlpha;
+    const sun = grade.sunAlpha;
+    const lift = Math.max(moon * 0.55, sun * 0.3);
+    if (lift <= 0.02) return mixRgb(graded, this._haze(), haze);
+
+    const lit = sun > 0.05 ? grade.lightColor : { r: 150, g: 168, b: 205 };
+    // Nearer planes get more of it: they are the ones facing the sky.
+    const facing = 1 - i / (PLANE_COUNT - 1);
+    return mixRgb(mixRgb(graded, this._haze(), haze), lit, lift * 0.3 * facing);
+  }
+
   private _roadColor(): RGB {
     return this._world.palette?.road ?? ROAD_DEFAULT;
   }
@@ -969,7 +1065,7 @@ export class WorldRenderer {
       this._drawStars(grade);
       this._drawSun(grade, hour);
       this._drawMoon(grade, hour, date);
-      this._drawClouds(grade);
+      this._drawClouds(grade, hour);
       this._drawRidges(grade);
       this._drawHazeBands(grade);
       this._drawForestFar();
@@ -978,6 +1074,11 @@ export class WorldRenderer {
       this._drawForestMid();
       this._drawFog(grade);
       this._drawForestNear();
+      // Atmospheric light sits above the near forest but below the foreground,
+      // because a shaft crossing in front of the closest plane would read as a
+      // projection rather than as air in the valley.
+      this._drawLightVolumes(grade, hour);
+      this._drawForeground(grade);
     }
 
     this._drawMotes(grade);
@@ -1014,7 +1115,17 @@ export class WorldRenderer {
       if (!this._finish) this._buildFinish();
       this._drawGrade(grade);
       mark('grade');
-      applyDirection(this._ctx, this._w, this._h, grade, this._direction);
+      applyDirection(
+        {
+          g: this._ctx,
+          w: this._w,
+          h: this._h,
+          grade,
+          plan: this._plan(),
+          horizon: this._horizonFrac(),
+        },
+        this._direction
+      );
       this._drawVignette();
       this._drawGrain();
     } else {
@@ -1102,7 +1213,7 @@ export class WorldRenderer {
     // A real gradient, not a stack of hard strips. Six visible steps across a
     // smooth ramp is exactly what a broken gradient looks like, which is what
     // the banded version read as.
-    const horizonY = this._h * (this._world.terrain.groundY ?? 0.7) + 2;
+    const horizonY = this._h * this._horizonFrac() + 2;
     const grd = g.createLinearGradient(0, 0, 0, horizonY);
     grd.addColorStop(0, css(grade.skyTop));
     grd.addColorStop(0.34, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.22)));
@@ -1318,47 +1429,50 @@ export class WorldRenderer {
     }
   }
 
-  private _drawClouds(grade: SkyGrade): void {
+  private _drawClouds(grade: SkyGrade, hour: number): void {
     const overcast =
       this._weather.condition === 'storm' ? 0.86 :
       this._weather.condition === 'rain' ? 0.66 :
       this._weather.condition === 'cloudy' ? 0.5 :
       this._weather.condition === 'snow' ? 0.6 : 0.22;
 
-    const g = this._ctx;
-    g.save();
-    for (const band of this._cloudBands) {
-      const off = (this._t * band.speed * (1 + this._weather.windSpeed * 2.2)) % 1.6;
-      const y = band.y * this._h + this._mouse.py * 4;
-      const hgt = Math.max(6, band.thickness * this._h);
-      const baseAlpha = band.alpha * overcast;
+    // The old pass drew each cloud as its own squashed radial gradient, so a
+    // screen of them at one alpha summed into a single horizontal smear. The
+    // structured field replaces it: banked heights, a lit side, a shaded base.
+    // See CloudField.ts.
+    const light = sunPosition(hour, this._w, this._h);
+    const moon = moonPosition(hour, this._w, this._h);
+    const lightX = light.visible ? light.x / this._w : moon.visible ? moon.x / this._w : 0.5;
 
-      for (let pass = 0; pass < 2; pass++) {
-        const ph = pass * 0.5;
-        for (let i = -1; i < 4; i++) {
-          const cx = ((i / 3 + off + ph) % 1.4 - 0.2) * this._w;
-          const n = fbm1D(i * 3.7 + off * 12 + band.scale * 10, Math.floor(band.scale * 1000), 4);
-          const w = this._w * (0.2 + n * 0.26) * band.scale;
-          const hh = hgt * (0.6 + n * 0.7);
-          const lit = pass === 0 ? 0.1 : -0.14;
-          const col = mixRgb(grade.haze, grade.lightColor, grade.ambient * 0.35 + 0.1);
-          const grd = g.createRadialGradient(cx, y, 0, cx, y, w * 0.5);
-          grd.addColorStop(0, css(shade(col, lit), baseAlpha * (pass === 0 ? 0.55 : 1)));
-          grd.addColorStop(0.55, css(col, baseAlpha * (pass === 0 ? 0.3 : 0.5)));
-          grd.addColorStop(1, css(col, 0));
-          g.save();
-          g.translate(cx, y);
-          g.scale(1, hh / (w * 0.5));
-          g.fillStyle = grd;
-          g.beginPath();
-          g.arc(0, 0, w * 0.5, 0, Math.PI * 2);
-          g.fill();
-          g.restore();
-        }
-      }
-    }
-    g.restore();
+    // Accumulated, not derived from the clock, so the deck keeps drifting in one
+    // direction no matter how many frames were skipped.
+    this._cloudDrift +=
+      rate('environment', this._motionIntensity, 0.0016 + this._weather.windSpeed * 0.004);
+
+    renderClouds(this._ctx, {
+      w: this._w,
+      h: this._h,
+      skyTop: this._h * 0.02,
+      horizon: this._h * this._horizonFrac(),
+      grade,
+      cloudiness: Math.min(
+        1,
+        (this._world.sky?.cloudiness ?? 0.22) * overcast * this._plan().cloudiness
+      ),
+      drift: this._cloudDrift % 1,
+      windSpeed: this._weather.windSpeed,
+      lightX: Math.max(0, Math.min(1, lightX)),
+      seed: this._seed + 4404,
+    });
   }
+
+  /**
+   * Accumulated cloud travel, in fractions of the frame width.
+   *
+   * Not reset when the world changes: the deck is weather, and weather does not
+   * reset when you switch scene.
+   */
+  private _cloudDrift = 0;
 
   private _drawRidges(grade: SkyGrade): void {
     const g = this._ctx;
@@ -1369,16 +1483,20 @@ export class WorldRenderer {
     const freq = T.ridgeFreq ?? [0.0019, 0.0033, 0.0056];
     const presence = T.ridgePresence ?? [1, 1, 1];
     const d = T.seed;
-    const layers: Array<{ base: RGB; depth: number; amp: number; baseY: number; freq: number; seed: number; oct: number }> = [
-      { base: cols[0], depth: 0.76, amp: amp[0], baseY: baseY[0], freq: freq[0], seed: d + 1201, oct: 5 },
-      { base: cols[1], depth: 0.52, amp: amp[1], baseY: baseY[1], freq: freq[1], seed: d + 3307, oct: 5 },
-      { base: cols[2], depth: 0.28, amp: amp[2], baseY: baseY[2], freq: freq[2], seed: d + 5501, oct: 6 },
+    const layers: Array<{ base: RGB; plane: 'ridgeFar' | 'ridgeMid' | 'ridgeNear'; depth: number; amp: number; baseY: number; freq: number; seed: number; oct: number }> = [
+      { base: cols[0], plane: 'ridgeFar', depth: 0.76, amp: amp[0], baseY: baseY[0], freq: freq[0], seed: d + 1201, oct: 5 },
+      { base: cols[1], plane: 'ridgeMid', depth: 0.52, amp: amp[1], baseY: baseY[1], freq: freq[1], seed: d + 3307, oct: 5 },
+      { base: cols[2], plane: 'ridgeNear', depth: 0.28, amp: amp[2], baseY: baseY[2], freq: freq[2], seed: d + 5501, oct: 6 },
     ];
 
     for (let li = 0; li < layers.length; li++) {
       const L = layers[li];
       if (presence[li] <= 0.001) continue;
-      const col = mixRgb(mixRgb(L.base, { r: 0, g: 0, b: 0 }, (1 - grade.ambient) * 0.55), this._haze(), L.depth * presence[li]);
+      const depth = L.depth * presence[li];
+      const col = this._plane(L.base, L.plane, depth);
+      // Aerial perspective is applied inside _plane, which folds the world's own
+      // depth into the plan's term so the two cannot sum past 1. `depth` survives
+      // only to scale how much light the crest catches.
       const step = 4;
       g.beginPath();
       g.moveTo(0, this._h);
@@ -1435,7 +1553,7 @@ export class WorldRenderer {
     // Anchored to the real ground line and much softer than before. The old
     // stack of three narrow bands sat at a hardcoded height and read as a lit
     // rectangle laid over the scene rather than as air.
-    const horizon = this._h * (this._world.terrain.groundY ?? 0.7) - this._h * 0.12;
+    const horizon = this._h * this._horizonFrac() - this._h * 0.12;
     const d = this._detail(grade);
     for (let i = 0; i < 3; i++) {
       const spread = this._h * (0.05 + i * 0.055);
@@ -1542,14 +1660,10 @@ export class WorldRenderer {
   private _drawForestBand(
     trees: Array<{ x: number; h: number; s: number }>,
     base: RGB, depth: number, baseYFrac: number, detail: boolean, amp: number,
+    plane: 'forestFar' | 'forestMid' | 'forestNear',
     clearing?: { x: number; halfW: number }
   ): void {
-    const ambient = Math.max(this._grade.ambient, 0.24);
-    const col = mixRgb(
-      mixRgb(base, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.5),
-      this._haze(),
-      depth
-    );
+    const col = this._plane(base, plane, depth);
     const baseY = this._h * baseYFrac;
     const detailAmt = this._detail(this._grade);
 
@@ -1569,12 +1683,12 @@ export class WorldRenderer {
 
   private _drawForestFar(): void {
     const c = this._forestColors();
-    this._drawForestBand(this._treesFar, c[0], 0.66, 0.668, false, 0.016);
+    this._drawForestBand(this._treesFar, c[0], 0.66, 0.668, false, 0.016, 'forestFar');
   }
 
   private _drawForestMid(): void {
     const c = this._forestColors();
-    this._drawForestBand(this._treesMid, c[1], 0.36, 0.706, true, 0.022, {
+    this._drawForestBand(this._treesMid, c[1], 0.36, 0.706, true, 0.022, 'forestMid', {
       x: 0.2,
       halfW: 0.052,
     });
@@ -1582,7 +1696,7 @@ export class WorldRenderer {
 
   private _drawForestNear(): void {
     const c = this._forestColors();
-    this._drawForestBand(this._treesNear, c[2], 0.05, 0.87, true, 0.03, {
+    this._drawForestBand(this._treesNear, c[2], 0.05, 0.87, true, 0.03, 'forestNear', {
       x: 0.2,
       halfW: 0.07,
     });
@@ -1674,7 +1788,7 @@ export class WorldRenderer {
     const ambient = grade.ambient;
     const lit = s.lit ?? false;
     const light = s.lightColor ?? { r: 255, g: 200, b: 130 };
-    const groundY = this._h * (this._world.terrain.groundY ?? 0.7);
+    const groundY = this._h * this._horizonFrac();
 
     // Structures read as silhouettes, not as lit objects. Letting ambient lift
     // them toward their base tone made a mid-grey lighthouse disappear against a
@@ -2327,16 +2441,12 @@ export class WorldRenderer {
 
   private _drawGround(grade: SkyGrade): void {
     const g = this._ctx;
-    const y0 = this._h * (this._world.terrain.groundY ?? 0.7);
+    const y0 = this._h * this._horizonFrac();
     // Ground has to sit below the sky in value at every hour. The old constant
     // left it lighter than the sky above the horizon after dark, which inverted
     // the scene's main depth cue and made the lower third read as a hole.
     const dark = 0.52 + (1 - grade.ambient) * 0.26;
-    const base = mixRgb(
-      mixRgb(this._groundColor(), { r: 0, g: 0, b: 0 }, dark),
-      this._haze(),
-      0.1
-    );
+    const base = this._plane(this._groundColor(), 'ground', 0.1, dark * 0.5);
 
     g.save();
     g.beginPath();
@@ -2378,7 +2488,7 @@ export class WorldRenderer {
     const g = this._ctx;
     const rnd = mulberry32(this._seed ^ 0x5f3a);
     const d = this._detail(grade);
-    const top = this._h * (this._world.terrain.groundY ?? 0.7);
+    const top = this._h * this._horizonFrac();
     for (let i = 0; i < 18; i++) {
       const px = rnd() * this._w;
       const py = top + Math.pow(rnd(), 0.72) * (this._h - top);
@@ -2590,7 +2700,7 @@ export class WorldRenderer {
   /** Standing water in tide pools, plus the polygonal salt crust around it. */
   private _drawSaltFlat(grade: SkyGrade, base: RGB): void {
     const g = this._ctx;
-    const y0 = this._h * (this._world.terrain.groundY ?? 0.66);
+    const y0 = this._h * this._horizonFrac();
     const rnd = mulberry32(this._seed + 4241);
 
     // Salt crust: faint pale polygons.
@@ -2647,7 +2757,7 @@ export class WorldRenderer {
   /** Wind-carved snow: drifts, not blades. */
   private _drawSnowfield(grade: SkyGrade, base: RGB): void {
     const g = this._ctx;
-    const y0 = this._h * (this._world.terrain.groundY ?? 0.76);
+    const y0 = this._h * this._horizonFrac();
     const rnd = mulberry32(this._seed + 8081);
 
     // Broad drift bands give the flat a sense of scale.
@@ -2715,7 +2825,7 @@ export class WorldRenderer {
   /** Polygonal desiccation cracks, the signature of a dried lake bed. */
   private _drawDryCracks(grade: SkyGrade, base: RGB): void {
     const g = this._ctx;
-    const y0 = this._h * (this._world.terrain.groundY ?? 0.68);
+    const y0 = this._h * this._horizonFrac();
     const rnd = mulberry32(this._seed + 1616);
 
     g.strokeStyle = css(shade(base, -0.44), 0.52);
@@ -2763,7 +2873,7 @@ export class WorldRenderer {
    */
   private _drawCoast(grade: SkyGrade, base: RGB): void {
     const g = this._ctx;
-    const y0 = this._h * (this._world.terrain.groundY ?? 0.7);
+    const y0 = this._h * this._horizonFrac();
     const rnd = mulberry32(this._seed + 7373);
 
     // Wet sand: a broad reflective sheet, brightest right at the waterline.
@@ -2845,6 +2955,10 @@ export class WorldRenderer {
   private _drawFog(grade: SkyGrade, _unused?: number): void {
     const amt = this._weather.condition === 'fog' ? 0.85 : this._weather.condition === 'rain' ? 0.28 : this._weather.condition === 'storm' ? 0.34 : 0.08;
     if (amt <= 0.02) return;
+    // Scaled by the plan, because the depth of the fog floor is a compositional
+    // choice: an atmospheric direction wants it banked up into the midground, a
+    // darker direction wants it held back so the frame keeps its negative space.
+    const depth = this._plan().fogDepth;
     const g = this._ctx;
     for (let i = 0; i < 4; i++) {
       const y = this._h * (0.6 + i * 0.075) + Math.sin(this._t * 0.12 + i) * this.h0(0.008);
@@ -2852,11 +2966,134 @@ export class WorldRenderer {
       const drift = Math.sin(this._t * 0.07 + i * 2) * this.h0(0.03);
       const grd = g.createLinearGradient(0, y - hgt, 0, y + hgt);
       grd.addColorStop(0, css(grade.haze, 0));
-      grd.addColorStop(0.5, css(grade.haze, amt * (0.5 - i * 0.09)));
+      grd.addColorStop(0.5, css(grade.haze, amt * (0.5 - i * 0.09) * depth));
       grd.addColorStop(1, css(grade.haze, 0));
       g.fillStyle = grd;
       g.fillRect(drift - this.h0(0.05), y - hgt, this._w + this.h0(0.1), hgt * 2);
     }
+  }
+
+  /**
+   * Volumetric light.
+   *
+   * ## What this replaces
+   *
+   * The `depth` direction used to draw two hard-edged parallelograms on a `screen`
+   * composite, at a fixed diagonal, unrelated to where the sun or moon actually
+   * was. In the mockups those read as two panes of tinted glass laid over the
+   * scene — the most obviously wrong thing in the frame, and the reason "light
+   * shafts" ended up on the list of things this renderer was bad at.
+   *
+   * The problem is not softness, it is that a shaft has to come from somewhere.
+   * A shaft that does not originate at the light source, does not widen with
+   * distance, and does not fade before it reaches the ground is a rectangle.
+   * Those three properties are what this draws.
+   *
+   * ## Why it is drawn in slices
+   *
+   * Canvas 2D has no isolated group blending: every composite operator blends
+   * with the whole backdrop, so a shaft cannot be cross-faded by a second
+   * gradient. Each shaft is therefore accumulated from short slices along its
+   * axis, each slice a soft-edged trapezoid at a falling alpha. That gives both
+   * of the things a single fill cannot — a cross-section that fades to nothing on
+   * both sides, and a length that fades toward the ground — for the cost of a
+   * dozen small fills.
+   */
+  private _drawLightVolumes(grade: SkyGrade, hour: number): void {
+    const plan = this._plan();
+    if (plan.light === 'diffuse') return;
+
+    const g = this._ctx;
+    const sun = sunPosition(hour, this._w, this._h);
+    const moon = moonPosition(hour, this._w, this._h);
+    const fromSun = sun.visible && grade.sunAlpha > 0.05;
+    const fromMoon = moon.visible && grade.moonAlpha > 0.05;
+    if (!fromSun && !fromMoon) return;
+
+    const src = fromSun ? sun : moon;
+    const tint = fromSun ? grade.lightColor : { r: 186, g: 200, b: 232 };
+    const strength = (fromSun ? grade.sunAlpha : grade.moonAlpha * 0.55) * this._detail(grade);
+
+    const groundY = this._h * this._horizonFrac();
+    const reach = (groundY - src.y) * (plan.light === 'focus' ? 0.4 : 0.9);
+    if (reach <= this._h * 0.02) return;
+
+    const focused = plan.light === 'focus';
+    const count = focused ? 2 : 4;
+    const slices = 12;
+
+    g.save();
+    g.globalCompositeOperation = 'screen';
+
+    for (let i = 0; i < count; i++) {
+      // Shafts fan away from the source on a fixed fan, so they keep their
+      // relationship to the light as it crosses the sky instead of sliding
+      // independently of it.
+      const fan = (i - (count - 1) / 2) * 0.19 + fbm1D(i * 3.7, 6611, 3) * 0.07;
+      const spread = this._w * (0.07 + fbm1D(i * 2.1, 8821, 3) * 0.08);
+      const skew = fan * reach * 1.3;
+      const topHalf = spread * 0.2;
+      const botHalf = spread * (1 + reach / this._h) * (focused ? 1.5 : 1);
+
+      for (let s = 0; s < slices; s++) {
+        const t0 = s / slices;
+        const t1 = (s + 1) / slices;
+        const y0 = src.y + reach * t0;
+        const y1 = src.y + reach * t1;
+        const cx0 = src.x + skew * t0;
+        const cx1 = src.x + skew * t1;
+        const h0 = topHalf + (botHalf - topHalf) * t0;
+        const h1 = topHalf + (botHalf - topHalf) * t1;
+
+        // Rise fast off the source, then fall away. Zero at both ends so no seam
+        // shows where the slices meet.
+        const fall = Math.sin(Math.PI * Math.pow(t0, 0.62)) * (focused ? 1 : 0.85);
+        const a = strength * (focused ? 0.13 : 0.075) * fall;
+        if (a < 0.004) continue;
+
+        const mid = (cx0 + cx1) / 2;
+        const half = (h0 + h1) / 2;
+        const across = g.createLinearGradient(mid - half, 0, mid + half, 0);
+        across.addColorStop(0, css(tint, 0));
+        across.addColorStop(0.5, css(tint, a));
+        across.addColorStop(1, css(tint, 0));
+
+        g.fillStyle = across;
+        g.beginPath();
+        g.moveTo(cx0 - h0, y0);
+        g.lineTo(cx0 + h0, y0);
+        g.lineTo(cx1 + h1, y1);
+        g.lineTo(cx1 - h1, y1);
+        g.closePath();
+        g.fill();
+      }
+    }
+
+    g.restore();
+  }
+
+  /** Draws the near foreground plane. See Foreground.ts. */
+  private _drawForeground(grade: SkyGrade): void {
+    const plan = this._plan();
+    renderForeground(
+      {
+        g: this._ctx,
+        w: this._w,
+        h: this._h,
+        t: this._t,
+        seed: this._seed,
+        grade,
+        intensity: this._motionIntensity,
+        windSpeed: this._weather.windSpeed,
+        ground: this._groundColor(),
+      },
+      {
+        kind: plan.foreground,
+        top: plan.foregroundTop,
+        density: plan.foregroundDensity,
+        value: plan.ramp[PLANE.foreground],
+      }
+    );
   }
 
   private _drawMotes(grade: SkyGrade, _unused?: number): void {

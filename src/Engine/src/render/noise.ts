@@ -102,3 +102,27 @@ export function shade(c: RGB, amount: number): RGB {
     b: Math.round(c.b * k),
   };
 }
+
+/**
+ * Scales a colour's value about its own luminance.
+ *
+ * This is *not* `shade`. `shade(c, 0.7)` means "move 70% of the way toward white",
+ * so it cannot be used to express "this plane should be about 70% as bright as
+ * authored" — passing a depth multiplier of 0.7 to it brightened every near
+ * plane instead of darkening it, which inverted the scene's main depth cue and
+ * left the ground lighter than the sky above it.
+ *
+ * `k` below 1 darkens toward black, above 1 lightens toward white, and both
+ * preserve hue far better than lerping to a fixed grey, which is what a value
+ * ladder across nine depth planes needs in order not to turn a forest blue.
+ */
+export function scaleValue(c: RGB, k: number): RGB {
+  if (k === 1) return c;
+  const target = k >= 1 ? 255 : 0;
+  const t = k >= 1 ? (k - 1) * 0.72 : 1 - k;
+  return {
+    r: Math.max(0, Math.min(255, Math.round(lerp(c.r, target, t)))),
+    g: Math.max(0, Math.min(255, Math.round(lerp(c.g, target, t)))),
+    b: Math.max(0, Math.min(255, Math.round(lerp(c.b, target, t)))),
+  };
+}

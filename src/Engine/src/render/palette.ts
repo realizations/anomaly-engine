@@ -17,11 +17,16 @@ const KEYS: Array<{ hour: number; grade: SkyGrade }> = [
     hour: 0,
     grade: {
       name: 'deep night',
-      skyTop: { r: 6, g: 8, b: 26 },
-      skyHorizon: { r: 16, g: 18, b: 44 },
-      lightColor: { r: 150, g: 165, b: 210 },
-      ambient: 0.06,
-      haze: { r: 22, g: 26, b: 54 },
+      // Lifted from {6,8,26}/{16,18,44}. At the original values the whole frame
+      // sat inside the darkest eighth of the range — measured, 97% of pixels —
+      // which is not an atmosphere, it is a black rectangle. A moonlit sky is
+      // dark, but it is not the absence of light; the horizon in particular
+      // always carries some glow from whatever is below it.
+      skyTop: { r: 11, g: 14, b: 36 },
+      skyHorizon: { r: 26, g: 30, b: 60 },
+      lightColor: { r: 158, g: 172, b: 214 },
+      ambient: 0.1,
+      haze: { r: 28, g: 33, b: 62 },
       starAlpha: 1,
       sunAlpha: 0,
       moonAlpha: 1,
@@ -31,11 +36,11 @@ const KEYS: Array<{ hour: number; grade: SkyGrade }> = [
     hour: 4.5,
     grade: {
       name: 'first light',
-      skyTop: { r: 14, g: 18, b: 48 },
-      skyHorizon: { r: 58, g: 42, b: 78 },
-      lightColor: { r: 170, g: 160, b: 190 },
-      ambient: 0.14,
-      haze: { r: 62, g: 48, b: 82 },
+      skyTop: { r: 18, g: 23, b: 56 },
+      skyHorizon: { r: 66, g: 49, b: 86 },
+      lightColor: { r: 176, g: 166, b: 196 },
+      ambient: 0.18,
+      haze: { r: 70, g: 55, b: 90 },
       starAlpha: 0.7,
       sunAlpha: 0,
       moonAlpha: 0.6,
@@ -134,11 +139,11 @@ const KEYS: Array<{ hour: number; grade: SkyGrade }> = [
     hour: 24,
     grade: {
       name: 'deep night',
-      skyTop: { r: 6, g: 8, b: 26 },
-      skyHorizon: { r: 16, g: 18, b: 44 },
-      lightColor: { r: 150, g: 165, b: 210 },
-      ambient: 0.06,
-      haze: { r: 22, g: 26, b: 54 },
+      skyTop: { r: 11, g: 14, b: 36 },
+      skyHorizon: { r: 26, g: 30, b: 60 },
+      lightColor: { r: 158, g: 172, b: 214 },
+      ambient: 0.1,
+      haze: { r: 28, g: 33, b: 62 },
       starAlpha: 1,
       sunAlpha: 0,
       moonAlpha: 1,
