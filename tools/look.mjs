@@ -20,13 +20,14 @@
  * rule it violates is simple — a wash must be zero where it starts and zero
  * where it ends — and this checks it rather than trusting it.
  *
- * A seam is a single large jump in row luminance. Grass blades and tree edges
- * produce many small jumps; a real seam produces one big one.
+ * A seam is a full-width jump in row luminance. Weather and landmarks can move a
+ * span or two; a real seam moves all four sampled spans.
  */
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { analyseFrame, formatSeams } from './lib/frame-stats.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +52,14 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 await page.goto(pathToFileURL(DEPLOYED).href);
 await page.waitForFunction(() => window.__engine !== undefined, { timeout: 30000 });
+// Serialised into the page, because it has to run against the live canvas.
+// Passed as an argument and eval'd there rather than handed to page.evaluate as a
+// string: an expression string containing a multi-line function body with block
+// comments is at the mercy of how the driver parses it, and when it did not parse
+// the checker silently reported "no seams" on a frame with a 15-luma step in it.
+await page.evaluate((src) => {
+  window.__frameStats = eval(`(${src})`);
+}, analyseFrame.toString());
 
 await page.evaluate(
   ({ dir, hour, weather, world, style, motion, anomaly }) => {
@@ -60,7 +69,7 @@ await page.evaluate(
     window.__engine.setSimulatedHour(hour);
     window.__engine.setSimulatedWeather(weather);
     window.__engine.setMotionIntensity(motion);
-    if (anomaly) window.__engine.fireAnomaly(anomaly);
+    if (anomaly) window.__engine.forceAnomaly(anomaly);
   },
   {
     dir: arg('dir', 'depth'),
@@ -77,35 +86,7 @@ await page.waitForTimeout(Number(arg('wait', 1400)));
 const analysis = await page.evaluate((crop) => {
   const src = document.getElementById('wallpaper-canvas');
   const g = src.getContext('2d', { willReadFrequently: true });
-
-  // Row luminance over a span that avoids the terminal, whose own hard edges
-  // would otherwise dominate the measurement.
-  const x0 = Math.round(src.width * 0.55);
-  const span = Math.round(src.width * 0.4);
-  const rows = new Float64Array(src.height);
-  for (let y = 0; y < src.height; y++) {
-    const d = g.getImageData(x0, y, span, 1).data;
-    let s = 0;
-    for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-    rows[y] = s / span;
-  }
-
-  // Median absolute step, as the noise floor a real seam has to clear.
-  const steps = [];
-  for (let y = 1; y < rows.length; y++) steps.push(Math.abs(rows[y] - rows[y - 1]));
-  const sorted = Array.from(steps).sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)] || 0;
-
-  const seams = [];
-  for (let y = 1; y < rows.length; y++) {
-    const step = rows[y] - rows[y - 1];
-    // A wash-rect seam measures 9-13 luma; the strongest legitimate content edge
-    // in these scenes — a treeline meeting the ground, the near-forest band — is
-    // around 4. The threshold sits between the two on purpose: low enough to
-    // catch the defect, high enough not to report the landscape.
-    if (Math.abs(step) > Math.max(6, median * 12)) seams.push({ y, step: +step.toFixed(2) });
-  }
-
+  const stats = window.__frameStats(g, src.width, src.height);
   let url = src.toDataURL('image/png');
   if (crop) {
     const [cx, cy, cw, ch] = crop;
@@ -115,7 +96,7 @@ const analysis = await page.evaluate((crop) => {
     t.getContext('2d').drawImage(src, cx, cy, cw, ch, 0, 0, cw, ch);
     url = t.toDataURL('image/png');
   }
-  return { url, seams, median: +median.toFixed(3) };
+  return { url, ...stats };
 }, CROP ? CROP.split(',').map(Number) : null);
 
 const name = [
@@ -129,11 +110,6 @@ writeFileSync(out, Buffer.from(analysis.url.split(',')[1], 'base64'));
 await browser.close();
 
 console.log(out);
-console.log(`typical row-to-row change: ${analysis.median}`);
-if (analysis.seams.length === 0) {
-  console.log('PASS  no full-width horizontal seams');
-} else {
-  console.log(`FAIL  ${analysis.seams.length} full-width horizontal seam(s):`);
-  for (const s of analysis.seams.slice(0, 10)) console.log(`        y=${s.y} (${((s.y / H) * 100).toFixed(1)}% down)  step ${s.step > 0 ? '+' : ''}${s.step}`);
-}
+console.log(`mean luma ${analysis.luma}   value spread ${analysis.spread}   ${analysis.bins.map((b) => (b * 100).toFixed(0).padStart(3)).join('')}`);
+console.log(formatSeams(analysis.seams, H));
 process.exit(analysis.seams.length === 0 ? 0 : 1);

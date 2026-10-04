@@ -1,0 +1,397 @@
+{
+  "note": "Recorded by tools/visual-cases.mjs --write-baseline",
+  "cases": [
+    {
+      "name": "depth-night",
+      "dir": "depth",
+      "hour": 1.4,
+      "weather": "clear",
+      "luma": 15.58,
+      "bins": [
+        0.942,
+        0.056,
+        0.002,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.942,
+      "seams": 0
+    },
+    {
+      "name": "depth-sunset",
+      "dir": "depth",
+      "hour": 18.7,
+      "weather": "clear",
+      "luma": 33.85,
+      "bins": [
+        0.502,
+        0.456,
+        0.042,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.502,
+      "seams": 0
+    },
+    {
+      "name": "depth-storm",
+      "dir": "depth",
+      "hour": 15.2,
+      "weather": "storm",
+      "luma": 84.59,
+      "bins": [
+        0.177,
+        0.203,
+        0.202,
+        0.191,
+        0.165,
+        0.058,
+        0.004,
+        0
+      ],
+      "spread": 0.203,
+      "seams": 0
+    },
+    {
+      "name": "depth-fog",
+      "dir": "depth",
+      "hour": 6.4,
+      "weather": "fog",
+      "luma": 45.32,
+      "bins": [
+        0.324,
+        0.438,
+        0.228,
+        0.009,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.438,
+      "seams": 0
+    },
+    {
+      "name": "atmospheric-night",
+      "dir": "atmospheric",
+      "hour": 1.4,
+      "weather": "clear",
+      "luma": 15.92,
+      "bins": [
+        0.972,
+        0.027,
+        0.001,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.972,
+      "seams": 0
+    },
+    {
+      "name": "atmospheric-sunset",
+      "dir": "atmospheric",
+      "hour": 18.7,
+      "weather": "clear",
+      "luma": 39.42,
+      "bins": [
+        0.337,
+        0.575,
+        0.088,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.575,
+      "seams": 2
+    },
+    {
+      "name": "atmospheric-storm",
+      "dir": "atmospheric",
+      "hour": 15.2,
+      "weather": "storm",
+      "luma": 93.04,
+      "bins": [
+        0.129,
+        0.179,
+        0.202,
+        0.222,
+        0.185,
+        0.079,
+        0.005,
+        0
+      ],
+      "spread": 0.222,
+      "seams": 0
+    },
+    {
+      "name": "darker-night",
+      "dir": "darker",
+      "hour": 1.4,
+      "weather": "clear",
+      "luma": 12.63,
+      "bins": [
+        0.964,
+        0.035,
+        0.001,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.964,
+      "seams": 0
+    },
+    {
+      "name": "darker-sunset",
+      "dir": "darker",
+      "hour": 18.7,
+      "weather": "clear",
+      "luma": 22.05,
+      "bins": [
+        0.794,
+        0.196,
+        0.01,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.794,
+      "seams": 0
+    },
+    {
+      "name": "darker-storm",
+      "dir": "darker",
+      "hour": 15.2,
+      "weather": "storm",
+      "luma": 48.82,
+      "bins": [
+        0.384,
+        0.332,
+        0.172,
+        0.098,
+        0.014,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.384,
+      "seams": 0
+    },
+    {
+      "name": "depth-second-moon",
+      "dir": "depth",
+      "hour": 22.5,
+      "weather": "clear",
+      "anomaly": "second-moon",
+      "luma": 16.24,
+      "bins": [
+        0.94,
+        0.058,
+        0.003,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.94,
+      "seams": 0
+    },
+    {
+      "name": "depth-red-moon",
+      "dir": "depth",
+      "hour": 22.5,
+      "weather": "clear",
+      "anomaly": "red-moon",
+      "luma": 16.79,
+      "bins": [
+        0.935,
+        0.062,
+        0.002,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.935,
+      "seams": 0
+    },
+    {
+      "name": "darker-meteor",
+      "dir": "darker",
+      "hour": 23.5,
+      "weather": "clear",
+      "anomaly": "meteor",
+      "luma": 12.99,
+      "bins": [
+        0.964,
+        0.035,
+        0.001,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.964,
+      "seams": 0
+    },
+    {
+      "name": "depth-forest-watcher",
+      "dir": "depth",
+      "hour": 23.5,
+      "weather": "clear",
+      "anomaly": "forest-watcher",
+      "luma": 15.51,
+      "bins": [
+        0.941,
+        0.056,
+        0.002,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.941,
+      "seams": 0
+    },
+    {
+      "name": "depth-observatory-signal",
+      "dir": "depth",
+      "hour": 23.5,
+      "weather": "clear",
+      "anomaly": "observatory-signal",
+      "luma": 16.05,
+      "bins": [
+        0.928,
+        0.07,
+        0.002,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.928,
+      "seams": 0
+    },
+    {
+      "name": "darker-lights-out",
+      "dir": "darker",
+      "hour": 23.5,
+      "weather": "clear",
+      "anomaly": "lights-out",
+      "luma": 13.91,
+      "bins": [
+        0.934,
+        0.057,
+        0.008,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "spread": 0.934,
+      "seams": 0
+    },
+    {
+      "name": "depth-reduced-motion",
+      "dir": "depth",
+      "hour": 16.9,
+      "weather": "clear",
+      "motion": 0,
+      "luma": 77.41,
+      "bins": [
+        0.199,
+        0.225,
+        0.238,
+        0.188,
+        0.094,
+        0.05,
+        0.007,
+        0
+      ],
+      "spread": 0.238,
+      "seams": 0
+    },
+    {
+      "name": "depth-low-quality",
+      "dir": "depth",
+      "hour": 16.9,
+      "weather": "clear",
+      "scale": 0.6,
+      "luma": 77.39,
+      "bins": [
+        0.2,
+        0.224,
+        0.237,
+        0.187,
+        0.095,
+        0.05,
+        0.006,
+        0
+      ],
+      "spread": 0.237,
+      "seams": 0
+    },
+    {
+      "name": "depth-flat",
+      "dir": "depth",
+      "hour": 16.9,
+      "weather": "clear",
+      "style": "flat",
+      "seamCheck": false,
+      "luma": 106.71,
+      "bins": [
+        0.148,
+        0.207,
+        0.044,
+        0.156,
+        0.225,
+        0.145,
+        0.067,
+        0.007
+      ],
+      "spread": 0.218,
+      "seams": 0
+    },
+    {
+      "name": "depth-flat-riso",
+      "dir": "depth",
+      "hour": 16.9,
+      "weather": "clear",
+      "style": "riso",
+      "seamCheck": false,
+      "luma": 200.25,
+      "bins": [
+        0,
+        0,
+        0.001,
+        0.134,
+        0.064,
+        0.097,
+        0.281,
+        0.423
+      ],
+      "spread": 0.423,
+      "seams": 226
+    }
+  ]
+}
