@@ -100,6 +100,17 @@ export interface ScenePlan {
    * because a banked fog floor is a compositional element, not a per-plane tint.
    */
   fogDepth: number;
+
+  /**
+   * Half-width of the ground cleared around each structure, as a multiple of a
+   * nominal value.
+   *
+   * Structures are drawn before the mid treeline, which is right for depth and
+   * was hiding the cabin, the observatory and the tower entirely. A direction
+   * that withholds wants fewer landmarks showing, so it clears less ground; one
+   * that puts everything in the frame clears more.
+   */
+  structureClearance: number;
 }
 
 /** Depth-plane indices, so the renderer and the plans cannot drift apart. */
@@ -151,6 +162,7 @@ const DEPTH: ScenePlan = {
   skyHold: 0.2,
   cloudiness: 0.85,
   fogDepth: 0.5,
+  structureClearance: 1.5,
 };
 
 /**
@@ -172,6 +184,7 @@ const ATMOSPHERIC: ScenePlan = {
   skyHold: 0.1,
   cloudiness: 1.9,
   fogDepth: 0.86,
+  structureClearance: 1.15,
 };
 
 /**
@@ -194,6 +207,7 @@ const DARKER: ScenePlan = {
   skyHold: 0.62,
   cloudiness: 0.45,
   fogDepth: 0.22,
+  structureClearance: 2.1,
 };
 
 const PLANS: Record<Direction, ScenePlan> = {

@@ -196,8 +196,13 @@ export class WorldRenderer {
   private _qualityLocked = false;
   private _qualityListeners: Array<(scale: number, frameMs: number) => void> = [];
 
-  private _dither: HTMLCanvasElement | null = null;
-  private _stars: Array<{ x: number; y: number; mag: number; tw: number; hue: number }> = [];
+  /**
+   * Ground cleared in front of each structure, rebuilt every frame by
+   * `_drawStructures`. See the remarks there for why the mid treeline needs it.
+   */
+  private _structureClearings: Array<{ x: number; halfW: number }> = [];
+
+  private _dither: HTMLCanvasElement | null = null;  private _stars: Array<{ x: number; y: number; mag: number; tw: number; hue: number }> = [];
 private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   private _snow: Array<{ x: number; y: number; r: number; ph: number; sp: number }> = [];
   private _motes: Array<{ x: number; y: number; ph: number; sp: number }> = [];
@@ -1667,6 +1672,17 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
 
     for (const t of trees) {
       if (clearing && Math.abs(t.x - clearing.x) < clearing.halfW) continue;
+      // Buildings need ground cleared in front of them, or the mid treeline draws
+      // over the whole reason the world has a name. Only the mid band is thinned:
+      // the far band is behind the structures and the near band is in front of
+      // them, so neither can occlude anything.
+      if (plane === 'forestMid') {
+        let hidden = false;
+        for (const c of this._structureClearings) {
+          if (Math.abs(t.x * this._w - c.x) < c.halfW) { hidden = true; break; }
+        }
+        if (hidden) continue;
+      }
       const n = fbm1D(t.x * 7.3, 4409, 3);
       const y = baseY - (n - 0.5) * amp * this._h;
       const px = t.x * this._w + this._mouse.px * (1 - depth) * 16;
@@ -1704,7 +1720,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const g = this._ctx;
     const ambient = grade.ambient;
     const col = mixRgb(mixRgb({ r: 26, g: 24, b: 26 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.6), grade.haze, 0.28);
-    const baseY = this._h * 0.7;
+    const baseY = this._h * this._horizonFrac();
 
     const tops = this._poles.map((p) => ({
       x: p.x * this._w,
@@ -1765,6 +1781,16 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * rewritten, which keeps the diff small and the silhouettes consistent.
    */
   private _drawStructures(grade: SkyGrade): void {
+    // Cleared ground around each structure, so the mid forest is drawn with a gap
+    // in front of it.
+    //
+    // Structures are drawn before the mid treeline, which is correct for depth and
+    // was hiding the entire narrative: the cabin, the observatory and the tower
+    // are the reason the world has a name, and a dense band of pines drew over all
+    // three of them. The gap is also what makes them read as *built* rather than as
+    // scenery — people clear ground to put a building on.
+    this._structureClearings.length = 0;
+
     for (const s of this._world.structures ?? []) {
       const anchor = STRUCTURE_ANCHORS[s.kind];
       if (!anchor) continue;
@@ -1772,8 +1798,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       const defX = anchor.x * this._w;
       const defY = anchor.y * this._h;
       const sc = s.scale ?? 1;
+      const cx = s.x * this._w;
+      this._structureClearings.push({ x: cx, halfW: this._w * 0.028 * sc * this._plan().structureClearance });
       g.save();
-      g.translate(s.x * this._w, (s.y ?? anchor.y) * this._h);
+      g.translate(cx, (s.y ?? anchor.y) * this._h);
       g.scale(sc, sc);
       g.translate(-defX, -defY);
       this._drawStructure(s, grade);
@@ -2150,14 +2178,21 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   private _drawCabin(grade: SkyGrade): void {
     const g = this._ctx;
     const ambient = grade.ambient;
-    const wallBase = mixRgb(mixRgb({ r: 74, g: 52, b: 40 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.62), grade.haze, 0.2);
-    const wallDark = shade(wallBase, -0.3);
-    const roofCol = shade(mixRgb(mixRgb({ r: 44, g: 32, b: 30 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.6), grade.haze, 0.16), -0.12);
 
-    const x = this._w * 0.2 + this._mouse.px * 8;
-    const baseY = this._h * 0.748;
+    // Placed off the horizon rather than a hardcoded fraction, and put through
+    // the ground plane's rung of the value ladder. It was previously a flat-shaded
+    // box at a fixed 0.748 of the frame in a warmer, lighter tone than anything
+    // around it, so it read as a cardboard carton set on the ground rather than as
+    // a building standing in it.
+    const baseY = this._h * (this._horizonFrac() + 0.05);
+    const x = this._w * 0.33 + this._mouse.px * 8;
     const w = this._w * 0.062;
     const h = this._h * 0.042;
+
+    const wallRaw = mixRgb({ r: 74, g: 52, b: 40 }, { r: 0, g: 0, b: 0 }, 0.3);
+    const wallBase = this._plane(wallRaw, 'ground', 0.3);
+    const wallDark = shade(wallBase, -0.32);
+    const roofCol = shade(mixRgb(wallRaw, { r: 34, g: 28, b: 26 }, 0.6), -0.12);
 
     const shadow = g.createRadialGradient(x, baseY, 0, x, baseY, w * 1.1);
     shadow.addColorStop(0, 'rgba(0,0,0,0.34)');
@@ -2167,36 +2202,78 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.ellipse(x, baseY, w * 1.1, h * 0.28, 0, 0, Math.PI * 2);
     g.fill();
 
-    g.fillStyle = css(wallBase);
+    // --- walls ---------------------------------------------------------------
+    // A vertical gradient, lit from the sky, rather than one flat fill. A box
+    // with a single tone has no form; the gradient is most of what makes it read
+    // as a solid.
+    const walls = g.createLinearGradient(0, baseY - h, 0, baseY);
+    walls.addColorStop(0, css(shade(wallBase, 0.14)));
+    walls.addColorStop(0.55, css(wallBase));
+    walls.addColorStop(1, css(shade(wallBase, -0.22)));
+    g.fillStyle = walls;
     g.fillRect(x - w / 2, baseY - h, w, h);
 
-    g.fillStyle = css(wallDark);
-    g.fillRect(x + w * 0.24, baseY - h, w * 0.26, h);
-    for (let i = 0; i < 4; i++) {
-      g.fillRect(x - w / 2, baseY - h * (0.18 + i * 0.2), w, Math.max(1, h * 0.012));
+    // Log courses. Very low contrast — at this size they are a texture, and at
+    // higher contrast they read as stripes painted on a box.
+    g.fillStyle = css(wallDark, 0.4);
+    for (let i = 1; i < 4; i++) {
+      g.fillRect(x - w / 2, baseY - h + (h * i) / 4, w, Math.max(1, h * 0.01));
     }
+    // The shaded end wall.
+    g.fillStyle = css(wallDark, 0.85);
+    g.fillRect(x + w * 0.26, baseY - h, w * 0.24, h);
 
-    g.fillStyle = css(roofCol);
+    // --- roof ----------------------------------------------------------------
+    // Eaves overhang the walls on both sides. A roof that stops exactly at the
+    // wall line is the single clearest "this is a box with a hat" signal.
+    const eave = w * 0.16;
+    const ridgeX = x - w * 0.12;
+    const ridgeY = baseY - h - h * 0.78;
+
+    // Gable end, filled before the slopes so the slopes cap it.
+    g.fillStyle = css(shade(wallBase, -0.1));
     g.beginPath();
-    g.moveTo(x - w * 0.66, baseY - h);
-    g.lineTo(x + w * 0.06, baseY - h - h * 0.72);
-    g.lineTo(x + w * 0.4, baseY - h);
+    g.moveTo(x - w / 2, baseY - h);
+    g.lineTo(ridgeX, ridgeY);
+    g.lineTo(x + w * 0.5, baseY - h);
     g.closePath();
     g.fill();
-    g.fillStyle = css(shade(roofCol, -0.16));
+
+    // Near slope, catching the sky.
+    const slope = g.createLinearGradient(0, ridgeY, 0, baseY - h);
+    slope.addColorStop(0, css(shade(roofCol, 0.18)));
+    slope.addColorStop(1, css(roofCol));
+    g.fillStyle = slope;
     g.beginPath();
-    g.moveTo(x + w * 0.06, baseY - h - h * 0.72);
-    g.lineTo(x + w * 0.62, baseY - h);
-    g.lineTo(x + w * 0.4, baseY - h);
+    g.moveTo(x - w / 2 - eave, baseY - h + h * 0.04);
+    g.lineTo(ridgeX, ridgeY);
+    g.lineTo(ridgeX + w * 0.06, ridgeY + h * 0.06);
+    g.lineTo(x - w * 0.1, baseY - h + h * 0.04);
     g.closePath();
     g.fill();
 
-    g.fillStyle = css(shade(wallDark, -0.3));
-    g.fillRect(x + w * 0.22, baseY - h - h * 0.46, w * 0.09, h * 0.46);
+    // Far slope, in shadow.
+    g.fillStyle = css(shade(roofCol, -0.28));
+    g.beginPath();
+    g.moveTo(ridgeX, ridgeY);
+    g.lineTo(x + w / 2 + eave, baseY - h + h * 0.04);
+    g.lineTo(x + w * 0.5, baseY - h + h * 0.1);
+    g.lineTo(ridgeX + w * 0.06, ridgeY + h * 0.06);
+    g.closePath();
+    g.fill();
+
+    // Eave line, so the overhang has an edge to cast a shadow from.
+    g.fillStyle = css(shade(roofCol, -0.4), 0.8);
+    g.fillRect(x - w / 2 - eave, baseY - h + h * 0.04, w + eave * 2, Math.max(1, h * 0.05));
+
+    // Chimney, on the far slope so the smoke leaves clear of the roof.
+    const chX = ridgeX + w * 0.34;
+    g.fillStyle = css(shade(wallBase, -0.2));
+    g.fillRect(chX, ridgeY + h * 0.1, w * 0.09, h * 0.5);
 
     const lit = ambient < 0.42;
-    const winAlpha = lit ? 0.96 : 0.1;
-    if (winAlpha > 0.2) {
+    const winAlpha = lit ? 0.96 : 0.12;
+    if (lit) {
       g.save();
       g.globalCompositeOperation = 'lighter';
       for (const wx of [-w * 0.28, w * 0.1]) {
@@ -2213,6 +2290,11 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       }
       g.restore();
     }
+    // Recessed frames: a dark surround first, then the glass, so the window is a
+    // hole in the wall rather than a rectangle painted on it.
+    g.fillStyle = css(shade(wallDark, -0.45));
+    g.fillRect(x - w * 0.38, baseY - h * 0.8, w * 0.2, h * 0.3);
+    g.fillRect(x - w * 0.0, baseY - h * 0.8, w * 0.2, h * 0.3);
     g.fillStyle = `rgba(255,206,132,${winAlpha})`;
     g.fillRect(x - w * 0.36, baseY - h * 0.78, w * 0.16, h * 0.26);
     g.fillRect(x + w * 0.02, baseY - h * 0.78, w * 0.16, h * 0.26);
@@ -2226,8 +2308,8 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       g.globalCompositeOperation = 'lighter';
       for (const s of this._smoke) {
         const t = (this._t * s.sp + s.t) % 1;
-        const sy = baseY - h - h * 0.42 - t * this._h * 0.14;
-        const sx = x + w * 0.35 + Math.sin(t * 4 + s.t * 9) * this.h0(0.012) * (0.4 + t);
+        const sy = ridgeY + h * 0.06 - t * this._h * 0.14;
+        const sx = chX + Math.sin(t * 4 + s.t * 9) * this.h0(0.012) * (0.4 + t);
         const sr = this._h * (0.004 + t * 0.017);
         const a = (1 - t) * 0.15 * (1 - lightsOut);
         const grd = g.createRadialGradient(sx, sy, 0, sx, sy, sr);
@@ -2250,7 +2332,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const domeLit = shade(body, 0.14);
 
     const x = this._w * 0.565 + this._mouse.px * 6;
-    const baseY = this._h * 0.715;
+    const baseY = this._h * (this._horizonFrac() + 0.03);
     const w = this._w * 0.05;
     const h = this._h * 0.062;
     const r = w * 0.56;
@@ -2373,7 +2455,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const col = mixRgb(mixRgb({ r: 118, g: 118, b: 122 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.6), grade.haze, 0.2);
 
     const x = this._w * 0.775 + this._mouse.px * 5;
-    const baseY = this._h * 0.715;
+    const baseY = this._h * (this._horizonFrac() + 0.03);
     const h = this._h * 0.2;
     const halfBase = this._h * 0.017;
     const halfTop = this._h * 0.0035;
@@ -2471,8 +2553,131 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     if (this._style !== 'painterly') this._drawGroundBands(base, grade);
     this._drawRoad(grade, base, y0, this._world.terrain.road ?? 1);
     this._drawRocks(grade);
+    this._drawGroundCover(base, grade);
     this._drawGroundDetail(grade, base);
     g.restore();
+  }
+
+  
+
+  /**
+   * The band of ground between the treeline and the foreground.
+   *
+   * This used to be an unbroken gradient with a road across it — about a fifth of
+   * the frame with nothing in it, which is what made the scene read as a diorama:
+   * a treeline, a floor, and a foreground strip, with the middle missing.
+   *
+   * ## Why this is not a scatter of bushes
+   *
+   * The obvious fix is to drop some shrub shapes into the gap. Done at object
+   * scale it is worse than the gap: evenly-ish sized lumps scattered across a
+   * gradient read as pebbles or as litter, and using detail to cover a
+   * compositional hole is the same mistake as using particles to cover a weak
+   * composition. The band does not need objects in it. It needs *unevenness*.
+   *
+   * So it gets two things instead:
+   *
+   *   1. Mounds. Wide, low, soft-edged, heavily overlapping, each scaled and
+   *      hazed by how far down the band it sits. Individually none of them is a
+   *      thing; together they break the gradient into ground that has shape. This
+   *      is what a painter does with a few big scrubby strokes.
+   *   2. A ragged forest edge. A handful of low silhouettes in the top of the
+   *      band, read against the treeline behind them. Their only job is to stop
+   *      the treeline from meeting the ground along a straight line, which is the
+   *      single giveaway that a landscape was assembled rather than grown.
+   */
+  private _drawGroundCover(base: RGB, grade: SkyGrade): void {
+    const g = this._ctx;
+    const plan = this._plan();
+    const rnd = mulberry32(this._seed ^ 0x2f19);
+    const top = this._h * this._horizonFrac();
+    // Down to where the foreground plane's blades begin, not to its crest:
+    // `foregroundTop` is the top of the tallest blade, and stopping there left the
+    // lower half of the band bare.
+    const bottom = this._h * (plan.foregroundTop + 0.08);
+    const span = bottom - top;
+    if (span <= this._h * 0.04) return;
+
+    const aerial = plan.aerial[PLANE.ground];
+
+    // --- 1. mounds -----------------------------------------------------------
+    const mounds = 46;
+    for (let i = 0; i < mounds; i++) {
+      // Clustered rather than uniform, so there is open ground as well as cover.
+      const cluster = fbm1D(i * 0.61 + 2.3, this._seed + 991, 3);
+      const x = (cluster + (rnd() - 0.5) * 0.62) * this._w;
+      // Depth down the band, near-uniform. A strong bias toward the far end piles
+      // everything against the treeline's own dark base, where it is invisible.
+      const depth = Math.pow(rnd(), 0.85);
+      const y = top + span * depth;
+
+      const near = 0.28 + depth * 0.72;
+      const rx = this._w * (0.05 + rnd() * 0.1) * near;
+      const ry = this._h * (0.012 + rnd() * 0.022) * near;
+
+      // Each mound takes the ground's own colour and shifts it, so it reads as
+      // the same surface under a different light rather than as an object.
+      const warm = shade(base, (rnd() - 0.4) * 0.3);
+      const tone = mixRgb(mixRgb(warm, { r: 0, g: 0, b: 0 }, 0.16), this._haze(), aerial * (1 - depth) * 0.7);
+
+      g.save();
+      g.translate(x, y);
+      g.scale(1, ry / rx);
+      // Lit on top, falling away underneath, and fading to nothing at the edges so
+      // no ellipse outline is ever visible.
+      const grd = g.createRadialGradient(0, -rx * 0.3, 0, 0, 0, rx);
+      grd.addColorStop(0, css(tone, 0.5));
+      grd.addColorStop(0.55, css(tone, 0.24));
+      grd.addColorStop(1, css(tone, 0));
+      g.fillStyle = grd;
+      g.beginPath();
+      g.arc(0, 0, rx, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    // --- 2. a ragged edge against the treeline -------------------------------
+    const scrub = mixRgb(base, this._forestColors()[2], 0.55);
+    const edge = 30;
+    for (let i = 0; i < edge; i++) {
+      const cluster = fbm1D(i * 1.37 + 8.9, this._seed + 1777, 3);
+      const x = (cluster + (rnd() - 0.5) * 0.4) * this._w;
+      const depth = rnd() * 0.3;
+      const y = top + span * depth;
+      const rx = this._w * (0.008 + rnd() * 0.016);
+      const ry = this._h * (0.008 + rnd() * 0.016);
+      const tone = mixRgb(scrub, this._haze(), aerial * (1 - depth * 3) * 0.6);
+
+      g.fillStyle = css(tone, 0.62 + rnd() * 0.25);
+      g.beginPath();
+      // Three overlapping lobes on an irregular baseline: a bush, not a ball.
+      g.moveTo(x - rx, y);
+      for (let l = 0; l <= 4; l++) {
+        const t = l / 4;
+        const bump = Math.sin(t * Math.PI) * ry * (0.6 + fbm1D(i * 3 + l, this._seed + 5, 2) * 0.9);
+        g.lineTo(x - rx + rx * 2 * t, y - bump);
+      }
+      g.lineTo(x + rx, y);
+      g.closePath();
+      g.fill();
+    }
+
+    // A haze wash over the top of the band, tying it to the treeline. Without it
+    // the transition from forest to ground is a value step with no air in it.
+    //
+    // The gradient is anchored *above* the rect and rises to its peak inside it.
+    // Anchoring the peak to the top of the rect instead put a full-strength band
+    // of haze against an unwashed background above it, which measures as a hard
+    // step across the whole width of the frame. This is the third time this
+    // repository has had that specific bug; the rule is that a wash has to be
+    // zero where it starts and zero where it ends.
+    const washTop = top - this._h * 0.035;
+    const wash = g.createLinearGradient(0, washTop, 0, washTop + this._h * 0.14);
+    wash.addColorStop(0, css(grade.haze, 0));
+    wash.addColorStop(0.24, css(grade.haze, 0.22));
+    wash.addColorStop(1, css(grade.haze, 0));
+    g.fillStyle = wash;
+    g.fillRect(0, washTop, this._w, this._h * 0.14);
   }
 
   /**
@@ -3026,17 +3231,21 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * The problem is not softness, it is that a shaft has to come from somewhere.
    * A shaft that does not originate at the light source, does not widen with
    * distance, and does not fade before it reaches the ground is a rectangle.
-   * Those three properties are what this draws.
    *
-   * ## Why it is drawn in slices
+   * ## Why each shaft is one stretched radial gradient
    *
-   * Canvas 2D has no isolated group blending: every composite operator blends
-   * with the whole backdrop, so a shaft cannot be cross-faded by a second
-   * gradient. Each shaft is therefore accumulated from short slices along its
-   * axis, each slice a soft-edged trapezoid at a falling alpha. That gives both
-   * of the things a single fill cannot — a cross-section that fades to nothing on
-   * both sides, and a length that fades toward the ground — for the cost of a
-   * dozen small fills.
+   * The obvious way to get both a soft cross-section and a soft length is to
+   * accumulate short slices along the axis. That was tried and it does not work:
+   * canvas 2D has no isolated group blending, so adjacent slices composite against
+   * the backdrop independently and each shared edge double-composites into a
+   * visible bright line. The result was a fan of thin diagonal streaks across the
+   * lower frame that looked like scratches on the lens.
+   *
+   * A radial gradient scaled along the shaft's axis gives both falloffs in a
+   * single fill and has no internal edges at all: the circle becomes a long soft
+   * beam, bright where it leaves the light and gone before it reaches the ground.
+   * It is also an order of magnitude cheaper — one fill per shaft rather than
+   * twelve.
    */
   private _drawLightVolumes(grade: SkyGrade, hour: number): void {
     const plan = this._plan();
@@ -3054,12 +3263,11 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const strength = (fromSun ? grade.sunAlpha : grade.moonAlpha * 0.55) * this._detail(grade);
 
     const groundY = this._h * this._horizonFrac();
-    const reach = (groundY - src.y) * (plan.light === 'focus' ? 0.4 : 0.9);
+    const reach = (groundY - src.y) * (plan.light === 'focus' ? 0.42 : 0.92);
     if (reach <= this._h * 0.02) return;
 
     const focused = plan.light === 'focus';
     const count = focused ? 2 : 4;
-    const slices = 12;
 
     g.save();
     g.globalCompositeOperation = 'screen';
@@ -3068,44 +3276,32 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       // Shafts fan away from the source on a fixed fan, so they keep their
       // relationship to the light as it crosses the sky instead of sliding
       // independently of it.
-      const fan = (i - (count - 1) / 2) * 0.19 + fbm1D(i * 3.7, 6611, 3) * 0.07;
-      const spread = this._w * (0.07 + fbm1D(i * 2.1, 8821, 3) * 0.08);
-      const skew = fan * reach * 1.3;
-      const topHalf = spread * 0.2;
-      const botHalf = spread * (1 + reach / this._h) * (focused ? 1.5 : 1);
+      const fan = (i - (count - 1) / 2) * 0.2 + fbm1D(i * 3.7, 6611, 3) * 0.08;
+      // Down and outward from the source.
+      const theta = Math.PI / 2 + fan;
+      // Longer and narrower for `focus`, so the one lit thing reads as a single
+      // deliberate shaft rather than as a glow.
+      const stretch = reach * (focused ? 2.6 : 1.9) * (0.8 + fbm1D(i * 2.1, 8821, 3) * 0.5);
+      const halfWidth = reach * (focused ? 0.1 : 0.19) * (0.75 + fbm1D(i * 1.3, 9931, 3) * 0.5);
+      const peak = strength * (focused ? 0.16 : 0.1);
 
-      for (let s = 0; s < slices; s++) {
-        const t0 = s / slices;
-        const t1 = (s + 1) / slices;
-        const y0 = src.y + reach * t0;
-        const y1 = src.y + reach * t1;
-        const cx0 = src.x + skew * t0;
-        const cx1 = src.x + skew * t1;
-        const h0 = topHalf + (botHalf - topHalf) * t0;
-        const h1 = topHalf + (botHalf - topHalf) * t1;
+      g.save();
+      g.translate(src.x, src.y);
+      g.rotate(theta);
+      g.scale(stretch, halfWidth);
 
-        // Rise fast off the source, then fall away. Zero at both ends so no seam
-        // shows where the slices meet.
-        const fall = Math.sin(Math.PI * Math.pow(t0, 0.62)) * (focused ? 1 : 0.85);
-        const a = strength * (focused ? 0.13 : 0.075) * fall;
-        if (a < 0.004) continue;
-
-        const mid = (cx0 + cx1) / 2;
-        const half = (h0 + h1) / 2;
-        const across = g.createLinearGradient(mid - half, 0, mid + half, 0);
-        across.addColorStop(0, css(tint, 0));
-        across.addColorStop(0.5, css(tint, a));
-        across.addColorStop(1, css(tint, 0));
-
-        g.fillStyle = across;
-        g.beginPath();
-        g.moveTo(cx0 - h0, y0);
-        g.lineTo(cx0 + h0, y0);
-        g.lineTo(cx1 + h1, y1);
-        g.lineTo(cx1 - h1, y1);
-        g.closePath();
-        g.fill();
-      }
+      const grd = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+      grd.addColorStop(0, css(tint, peak));
+      grd.addColorStop(0.22, css(tint, peak * 0.66));
+      grd.addColorStop(0.58, css(tint, peak * 0.24));
+      grd.addColorStop(1, css(tint, 0));
+      g.fillStyle = grd;
+      g.beginPath();
+      // Arc rather than rect, so the gradient's circular falloff is what shapes
+      // it and no straight edge is ever drawn.
+      g.arc(0, 0, 1, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
     }
 
     g.restore();

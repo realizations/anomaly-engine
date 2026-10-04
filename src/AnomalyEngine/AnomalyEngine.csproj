@@ -45,35 +45,45 @@
     </Resource>
   </ItemGroup>
 
+  <!--
+    Renderer sources are listed as inputs to the C# project for documentation and
+    for tools that want to know the dependency. They are deliberately *not* wired
+    into an incremental check; see the comment on BuildRenderer.
+  -->
+  <ItemGroup>
+    <EngineRendererSource Include="..\Engine\src\**\*" />
+    <EngineRendererConfig Include="..\Engine\package.json;..\Engine\package-lock.json;..\Engine\tsconfig.json;..\Engine\vite.config.ts" />
+  </ItemGroup>
+
+  <!--
+    Builds the renderer bundle. Always, not incrementally.
+
+    An earlier version of this hooked the target to Build with Inputs/Outputs on a
+    stamp file, so that a change to a .cs file would not pay for a vite build. That
+    is the right idea and it is wrong here, because MSBuild decides staleness from
+    file timestamps only: restoring a file from a backup or a branch keeps its old
+    mtime, the target is skipped, and the build deploys a bundle that does not
+    match the source. The same silent staleness is what the missing Inputs caused
+    in the first place, and it cost a long and completely wrong investigation
+    during which three edits were each "verified" against a bundle none of them
+    had reached.
+
+    Five seconds of vite on a renderer change is a cheap price for a build that
+    cannot quietly be lying. tools/verify.mjs checks the deployed bundle against
+    the source for the same reason.
+  -->
   <Target Name="BuildRenderer" BeforeTargets="Build">
-    <Exec Command="npm run build" WorkingDirectory="..\Engine" Condition="Exists('..\Engine\package.json')" />
+    <Error Condition="!Exists('..\Engine\package.json')"
+           Text="Renderer sources were found but src\Engine\package.json is missing. Run 'npm install' in src\Engine." />
+    <Exec Command="npm run build" WorkingDirectory="..\Engine" />
   </Target>
 
   <!--
-    The renderer glob must be evaluated when this target RUNS, not when the project
-    is loaded. A project-level ItemGroup is evaluated before BuildRenderer has
-    produced src\Engine\renderer, so on a clean clone it matched nothing and the
-    build "succeeded" while deploying no renderer at all.
-
-    The deployed directory is removed first. Copy is additive, so without this
-    anything deleted from the renderer source stayed in the app output forever:
-    pruning four typefaces left 1.5MB of dead fonts shipping, and any removed
-    bundle would have kept being served. An output directory that is meant to
-    mirror its source has to be rebuilt, not amended.
-  -->
-  <!--
-    Deploy the built renderer next to the application.
-
-    Hooked to Build, and separately to Publish. `dotnet publish` writes to a
-    different directory from $(OutDir) and does not always run the Build target's
-    AfterTargets chain in a way that reaches a copy aimed at OutDir, so a target
-    that only fired on Build produced a publish with no renderer in it at all:
-    the app launched, found no index.html, and would have shown a blank desktop
-    with no error. The renderer is the entire product, so its absence from a
-    release is the worst thing that can go quietly wrong here.
-
-    $(TargetDir) is used rather than $(OutDir) because it is the directory MSBuild
-    is actually publishing into, on both paths.
+    The deployment must not be skipped just because the bundle did not need
+    rebuilding. Its whole job is to mirror src\Engine\renderer into the output, and
+    the output can be stale or missing while the bundle is current: after a
+    clean, after switching configuration, or after something else deleted it. So it
+    runs on the stale path too, and keeps the loud error below.
   -->
   <Target Name="CopyRendererFiles" AfterTargets="Build" DependsOnTargets="BuildRenderer">
     <ItemGroup>

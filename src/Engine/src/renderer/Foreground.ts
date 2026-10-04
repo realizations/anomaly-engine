@@ -166,7 +166,14 @@ const rnd = mulberry32(ctx.seed ^ 0x2b71);
   // rather than as a fringe along its top. That was the difference between "a grass
   // bank" and "a dark band with a fuzzy top".
   const rootY = h * (top + 0.26);
-  const swayAmp = amplitude('environment', ctx.intensity, h * 0.016);
+  // The sway is a fraction of each blade's own length, not an absolute distance.
+  //
+  // It used to be `swayAmp * len * 5`, where swayAmp was already in pixels and
+  // len was in pixels. That is a product of two lengths: for the longest blades it
+  // came out around 11,000 pixels of sideways displacement, which drew a fan of
+  // long straight lines right across the frame and read as scratches on the lens.
+  // It was invisible on short blades, which is why it survived.
+  const sway = amplitude('environment', ctx.intensity, 0.34);
   const swayRate = rate('environment', ctx.intensity, 0.085);
   // Dense enough to read as ground cover. A blade is only a few pixels wide, so a
   // sparse scatter samples as bare ground at 1:1 no matter how long it is.
@@ -198,7 +205,7 @@ const rnd = mulberry32(ctx.seed ^ 0x2b71);
       w: Math.max(1.4, h * 0.0038 * (0.45 + t)),
       lean:
         (fbm1D(i * 1.9 + 4.2, ctx.seed + 77, 3) - 0.35) * len * 0.42 +
-        Math.sin(ctx.t * swayRate + i * 0.9) * swayAmp * len * 5,
+        Math.sin(ctx.t * swayRate + i * 0.9) * len * sway,
       row,
     });
   }
@@ -251,7 +258,9 @@ function drawHeather(ctx: ForegroundContext, top: number, col: RGB, density: num
   // Root the tufts along a line below the crest, and let them stand a little
   // proud of it, so the crest reads as vegetation rather than as an edge.
   const rootY = h * (top + 0.2);
-  const swayAmp = amplitude('environment', ctx.intensity, h * 0.009);
+  // Same rule as the grass: sway is a fraction of the tuft's own length. See
+  // drawGrass for why multiplying two lengths here was a real defect.
+  const sway = amplitude('environment', ctx.intensity, 0.3);
   const swayRate = rate('environment', ctx.intensity, 0.12);
 
   const count = Math.round(520 * density);
@@ -263,7 +272,7 @@ function drawHeather(ctx: ForegroundContext, top: number, col: RGB, density: num
     const width = Math.max(0.8, h * 0.0016 * (0.6 + t));
     // Tufts fan rather than stand: a small spread of tips from one root.
     const spread = (rnd() - 0.5) * len * 0.9;
-    const lean = spread + Math.sin(ctx.t * swayRate + i * 1.3) * swayAmp * len * 3;
+    const lean = spread + Math.sin(ctx.t * swayRate + i * 1.3) * len * sway;
 
     const grd = g.createLinearGradient(x, y, x + lean, y - len);
     grd.addColorStop(0, css(mass, 1));
