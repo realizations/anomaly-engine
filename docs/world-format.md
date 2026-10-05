@@ -102,9 +102,33 @@ road on a salt flat is the fastest way to make a world look wrong.
 | `alpine` | Wind-carved snow drifts, blue-grey shadow pooling, exposed rock |
 | `high-desert` | Polygonal desiccation cracks, sparse scrub |
 | `coast` | Wet sand mirroring the sky, an irregular waterline, foam lines, shingle and marram grass |
+| `liminal-interior` | None — see below |
 
 Biome only changes the ground. Everything else is driven by the palette and
 terrain numbers, which is why a new biome is a small change.
+
+`liminal-interior` is the exception that proves the rule. It has no ground, no
+sky and no structures, because it is not a landscape: `WorldRenderer` dispatches
+that biome to `LiminalInterior`, a separate scene constructor that draws a room.
+A world with that biome should carry a `liminal` profile and may omit `structures`
+entirely — the field is optional, and the only built-in world that does so is
+`the-long-corridor`.
+
+### The liminal profile
+
+Every field is optional and falls back to an engine default. The ranges are what
+`validateWorld()` enforces.
+
+| Field | Range | What it does |
+|---|---|---|
+| `vanishingX` | `0.1..0.9` | Where the corridor converges. Dead centre reads as a diagram; off-centre is unsettling. |
+| `bays` | `2..40` | Corridor depth as a count of bays. More bays means more repetition. |
+| `tile` | `12..160` | Floor tile size in pixels. Institutional sizes feel wrong. |
+| `ceiling` | `0..1` | 0 = open above, 1 = fully enclosed. Liminal spaces are usually closed. |
+| `lightLevel` | `0..1` | Fluorescent tube brightness. |
+| `lightTint` | RGB | Hue of the light. Slightly green or slightly warm reads as lighting that is not quite right. |
+| `uniformity` | `0..1` | How strongly the walls repeat. 0 = varied, 1 = identical panels. |
+| `doors` | `0..1` | Openings down one side. |
 
 ## Structure kinds
 
@@ -128,13 +152,31 @@ three places: the loader's constructor (a malformed built-in world is a
 programming error and throws), `register()` for external worlds, and the unit
 tests.
 
-Rules that are errors: missing required fields, non-kebab-case ids, unknown
-biome or structure kinds, non-finite or wrongly shaped terrain arrays, and
-`groundY` outside `(0, 1)`.
+Rules that are **errors**, so the world is rejected:
 
-Rules that are warnings: no structures, and lore with no deniability. Both are
-allowed, because a world with no landmarks is a legitimate choice and a world
-that explains nothing away defeats the premise.
+- a missing required string, object or array field
+- an `id` that is not lowercase kebab-case, or has a leading or trailing hyphen
+- an unknown `biome`, or an unknown `structure.kind`
+- a `terrain` value that is not a finite number, a terrain array that is not three
+  finite numbers, or a `groundY` outside `(0, 1)`
+- `palette.saturation` outside `0..2`
+- a structure `x` outside `-0.2..1.2` — the overshoot is deliberate, so a structure
+  can sit half off the edge of the frame
+- for a `liminal-interior` world, a `liminal` profile outside its documented
+  ranges: `bays` outside `2..40`, `tile` outside `12..160`, `vanishingX` outside
+  `0.1..0.9`, or any other liminal field outside `0..1`
+
+Rules that are **warnings**, so the world loads anyway:
+
+- no structures — a world with no landmarks is a legitimate choice
+- lore with no deniability — allowed, but it removes the reason an anomaly exists
+- a `liminal-interior` world with no `liminal` profile, which falls back to engine
+  defaults
+- a `liminal` profile on a world that is not `liminal-interior`, which is ignored
+
+One rule in the list below is a convention rather than a check: unique seeds cannot
+be enforced by a validator that only sees one world at a time. It is asserted across
+the built-in set by the unit tests instead.
 
 ## Design rules
 
@@ -142,7 +184,9 @@ that explains nothing away defeats the premise.
    change a palette number or a structure kind. If neither can express it, that
    is a renderer feature request, not a world change.
 2. **Seeds are unique.** Two worlds sharing a seed share their landforms exactly,
-   which makes them look like the same place recoloured.
+   which makes them look like the same place recoloured. Enforced across the
+   built-in set by the unit tests, not by `validateWorld()` — a validator sees one
+   world at a time and cannot know what else exists.
 3. **Every anomaly needs a denial.** The whole premise is that nothing is
    provable. A world without deniability lines removes the reason the anomaly
    exists.

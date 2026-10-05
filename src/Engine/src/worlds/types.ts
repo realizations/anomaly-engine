@@ -137,7 +137,10 @@ export interface LiminalProfile {
 
 export interface WorldStructure {
   kind: StructureKind;
-  /** Horizontal position, 0..1 across the viewport. */
+  /** Horizontal position across the viewport. The validator accepts -0.2..1.2,
+   *  not just 0..1, so a structure can sit half off the edge of the frame — which
+   *  is how a treeline or a fence runs off the side of a shot rather than stopping
+   *  at an arbitrary margin. */
   x: number;
   /** Optional vertical offset, 0..1. Defaults to sitting on the ground line. */
   y?: number;
