@@ -14,6 +14,16 @@ export interface DiscoveredSecret {
   notes: string;
 }
 
+/**
+ * The notes a player can find, each tied to what would give it away.
+ *
+ * `relatedAnomalies` holds shipped anomaly ids and is checked against them, because
+ * two of these named things that have never existed: `constellation-shift` is not
+ * an anomaly, and `time-0333` is a clock event and a moment rather than one. Both
+ * read as though a link were there, which is worse than an empty list -- a secret
+ * that appears to connect to an anomaly nobody can observe is a dead end the player
+ * is invited to find.
+ */
 export const BUILTIN_SECRETS: SecretDefinition[] = [
   {
     id: 'observatory-signal',
@@ -45,7 +55,9 @@ export const BUILTIN_SECRETS: SecretDefinition[] = [
     description: 'A space that exists between the trees and the stars.',
     hints: ['Coordinates hidden in the constellation.', 'Look where the stars align.'],
     clues: ['42.3', '-122.7', 'alignment'],
-    relatedAnomalies: ['constellation-shift'],
+    // The second moon is the only shipped anomaly that puts something unexpected in
+    // the sky, which is what this note is about.
+    relatedAnomalies: ['second-moon'],
   },
   {
     id: 'time-loop',
@@ -53,7 +65,9 @@ export const BUILTIN_SECRETS: SecretDefinition[] = [
     description: 'The town remembers what has not happened yet.',
     hints: ['3:33 is not the only time.', 'The clock runs backward.'],
     clues: ['0333', 'backward', 'loop'],
-    relatedAnomalies: ['time-0333'],
+    // Deliberately empty. 3:33 is a clock event and a moment, not an anomaly, so
+    // there is no anomaly to link to. The moment carries the connection.
+    relatedAnomalies: [],
   },
 ];
 

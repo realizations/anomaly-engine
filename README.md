@@ -347,7 +347,7 @@ src/
       anomalies/         Anomaly registry with rarity and cooldowns
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured)
-    tests/               187 unit tests
+    tests/               220 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -543,9 +543,11 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 187 unit tests across the event bus, scheduler, entities, particles,
-day/night grading, noise, world format, persistence, journal, secrets, the anomaly registry
-and its world-fit rules, the liminal world profile, the return summary and the world digest.
+`npm test` runs 220 unit tests across the event bus, scheduler, entities, particles,
+day/night grading, noise, world format, persistence, journal, secrets, moments, the
+locale set, the anomaly registry and its world-fit rules, the liminal world profile,
+the return summary, the world digest, and an audit that every identifier the data
+files name actually ships.
 `npx eslint src/ tests/` is clean.
 
 The suite loads the renderer from `file://` rather than `http://localhost`, because serving
