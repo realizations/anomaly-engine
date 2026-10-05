@@ -31,6 +31,19 @@ const EVENT_DEFS: RandomEventDef[] = [
   { type: 'random.red_moon', rarity: 'legendary', payload: {}, cooldown: 604800, duration: 300 },
 ];
 
+/**
+ * Every event type the random source can emit.
+ *
+ * Exported because something else has to stay in step with this list. The moments
+ * in MomentSystem name an event type as the thing a user is watching for, and four
+ * of them were naming identifiers that had never existed -- `anomaly.red_moon`
+ * rather than `random.red_moon`, and an `anomaly.radio_signal` that is not an
+ * event at all. Nothing consumed those strings, so nothing broke and nothing
+ * complained; they were simply wrong, and a reader of the journal had no way to
+ * tell. The test that catches it needs this list.
+ */
+export const RANDOM_EVENT_TYPES: readonly string[] = EVENT_DEFS.map((d) => d.type);
+
 export class RandomSource {
   private _bus: EventBus;
   private _timer: number | null = null;

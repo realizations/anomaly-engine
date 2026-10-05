@@ -82,7 +82,8 @@ The engine lives in the system tray. Right-click the tray icon for options:
 
 ## Settings
 
-The settings window has sections for:
+The settings window has nine sections: Home, Worlds, Appearance, Performance,
+Events, Field Notes, Displays, Integrations and About.
 
 ### Home
 
@@ -97,6 +98,13 @@ The settings window has sections for:
 - Activate, preview, delete worlds
 - Import new worlds from `.world` files
 - Open the worlds folder
+
+### Appearance
+
+- **Art style**: Painterly, Flat Vector or Riso Print
+- **Motion level**: How much of the scene moves
+- **Follow the Windows reduce-motion setting**: Take the OS preference rather than
+  setting it here
 
 ### Performance
 
@@ -120,11 +128,21 @@ The settings window has sections for:
 - **RSS**: Feed URLs and update intervals
 - **Remote events**: Endpoint URL for community events
 
-### Secrets
+### Field Notes
 
-- Discovered anomalies count
-- Journal entries
-- Progress bar
+What is recorded, and why. The journal of observations, the open questions each
+one carries, and progress toward the notes that are still unrecorded.
+
+This is a settings page only in the sense that it is a place to read what the
+engine has written down. Nothing here is configurable, deliberately: discovering
+a secret is not a preference, and a progress bar with a checkbox beside it would
+imply there was a setting to change.
+
+### Displays
+
+The attached screens, each of which can be given its own world. The engine
+composes every display separately, so a mixed aspect-ratio setup gets correct
+framing on each rather than one crop of a wide panorama.
 
 ### About
 
@@ -134,14 +152,25 @@ The settings window has sections for:
 
 ## Hotkeys
 
+The wallpaper never holds keyboard focus, so these are registered with Windows
+rather than handled inside the page.
+
 | Hotkey | Action |
 |--------|--------|
-| `Ctrl+Alt+W` | Take a screenshot |
-| `Ctrl+Alt+P` | Pause wallpaper |
-| `Ctrl+Alt+R` | Resume wallpaper |
-| `Ctrl+Alt+T` | Trigger event |
+| `Ctrl+Alt+W` | Next world |
+| `Ctrl+Alt+S` | Cycle art style |
+| `Ctrl+Alt+P` | Pause / resume |
+| `Ctrl+Alt+F` | Toggle field notes |
 | `Ctrl+Alt+D` | Toggle debug overlay |
-| `Ctrl+Alt+C` | Toggle creator mode |
+
+That is the complete list. There is no separate resume hotkey — `Ctrl+Alt+P`
+toggles — and screenshot, trigger-event and creator mode are tray and CLI actions.
+A wallpaper that claims `Ctrl+Alt+R`, `Ctrl+Alt+T` and `Ctrl+Alt+C` would bind three
+combinations that people press by accident, which is a nuisance on a shared
+machine. An earlier revision of this document listed exactly those three.
+
+A hotkey already owned by another application is logged and skipped rather than
+preventing the engine from starting.
 
 ## Interactions
 

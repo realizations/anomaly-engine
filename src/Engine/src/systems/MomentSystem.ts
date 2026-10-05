@@ -13,6 +13,16 @@ export interface DiscoveredMoment {
   notes: string;
 }
 
+/**
+ * The moments a player can notice.
+ *
+ * `anomalyId` names the event to watch for, and it has to name a real one: it is
+ * the only thing tying a hint like "Frequency 73.4" to the thing that produces it.
+ * Four of these were invented strings -- `anomaly.red_moon`, `anomaly.meteor`,
+ * `anomaly.forest_watcher`, `anomaly.radio_signal` -- none of which the engine has
+ * ever emitted. A test now pins every value here to a type the engine can actually
+ * fire.
+ */
 export const BUILTIN_MOMENTS: MomentDefinition[] = [
   {
     id: 'first-rain',
@@ -25,21 +35,21 @@ export const BUILTIN_MOMENTS: MomentDefinition[] = [
     id: 'red-moon',
     name: 'Red Moon',
     description: 'The moon turns red for reasons unknown.',
-    anomalyId: 'anomaly.red_moon',
+    anomalyId: 'random.red_moon',
     hints: ['It does not happen every night.', 'Rarity is not a suggestion.'],
   },
   {
     id: 'watcher-in-the-pines',
     name: 'Watcher in the Pines',
     description: 'Something moves between the trees.',
-    anomalyId: 'anomaly.forest_watcher',
+    anomalyId: 'random.forest_creature',
     hints: ['Look at the tree line.', 'It only appears when it wants to.'],
   },
   {
     id: 'radio-signal',
     name: 'Radio Signal',
     description: 'A signal that should not exist.',
-    anomalyId: 'anomaly.radio_signal',
+    anomalyId: 'random.radio_static',
     hints: ['The radio tower is more than it seems.', 'Frequency 73.4.'],
   },
   {
@@ -53,7 +63,7 @@ export const BUILTIN_MOMENTS: MomentDefinition[] = [
     id: 'falling-star',
     name: 'Falling Star',
     description: 'A star falls over the town.',
-    anomalyId: 'anomaly.meteor',
+    anomalyId: 'random.meteor',
     hints: ['Look up.', 'It will not wait.'],
   },
 ];

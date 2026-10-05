@@ -3,6 +3,8 @@ import { AnomalySystem, type AnomalyDefinition } from '../src/anomalies/AnomalyR
 import { JournalSystem, type JournalEntry } from '../src/systems/JournalSystem.js';
 import { SecretSystem } from '../src/systems/SecretSystem.js';
 import { BUILTIN_SECRETS } from '../src/systems/SecretSystem.js';
+import { MomentSystem, BUILTIN_MOMENTS } from '../src/systems/MomentSystem.js';
+import { RANDOM_EVENT_TYPES } from '../src/events/RandomSource.js';
 
 const def = (over: Partial<AnomalyDefinition> = {}): AnomalyDefinition => ({
   id: 'test',
@@ -281,5 +283,57 @@ describe('SecretSystem', () => {
     s.discover(BUILTIN_SECRETS[0].id);
     s.restore([]);
     expect(s.getDiscovered()).toHaveLength(0);
+  });
+});
+
+
+describe('MomentSystem', () => {
+  // Every moment names the event a player is watching for. If that string is not a
+  // type the engine can actually emit, the moment is a hint about nothing: "Frequency
+  // 73.4" points at `random.radio_static`, and only that name gets there. Four of
+  // these were invented -- `anomaly.red_moon`, `anomaly.meteor`,
+  // `anomaly.forest_watcher`, `anomaly.radio_signal` -- and nothing noticed, because
+  // nothing reads the field.
+  //
+  // The list of real types is asserted by construction rather than searched for in the
+  // source, so a type that is removed from the engine fails here too.
+  const EMITTABLE = new Set<string>([
+    ...RANDOM_EVENT_TYPES,
+    'time.hourly',
+    'time.midnight',
+    'time.0333',
+    'weather.rain',
+  ]);
+
+  it('every moment names an event the engine can emit', () => {
+    const unknown = BUILTIN_MOMENTS
+      .map((m) => ({ id: m.id, anomalyId: m.anomalyId }))
+      .filter((m) => !EMITTABLE.has(m.anomalyId));
+    expect(unknown).toEqual([]);
+  });
+
+  it('moment ids are unique, since discovery is keyed by id', () => {
+    const ids = BUILTIN_MOMENTS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('a moment cannot be discovered twice', () => {
+    const s = new MomentSystem();
+    const first = BUILTIN_MOMENTS[0];
+    expect(s.discover(first.id)).toBe(true);
+    expect(s.discover(first.id)).toBe(false);
+    expect(s.getDiscovered()).toHaveLength(1);
+  });
+
+  it('an unknown moment id is refused rather than recorded', () => {
+    const s = new MomentSystem();
+    expect(s.discover('no-such-moment')).toBe(false);
+    expect(s.getDiscovered()).toHaveLength(0);
+  });
+
+  it('every moment offers at least one hint, since a hint is the point', () => {
+    for (const m of BUILTIN_MOMENTS) {
+      expect(m.hints.length).toBeGreaterThan(0);
+    }
   });
 });
