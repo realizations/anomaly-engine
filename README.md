@@ -529,6 +529,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/motion-oscillators.mjs` | Proves the central motion model is present and its oscillators are actually routed |
 | `tools/flicker.mjs` | Measures the frame-to-frame *change* in luminance at several motion levels, so a scene that is merely moving is not mistaken for one that strobes |
 | `tools/settings-shot.mjs` | Renders all nine WPF settings pages to PNG without displaying the window, so layout can be reviewed |
+| `tools/settings-shot.mjs --selftest` | Proves that harness rejects a missing, blank or duplicated page — a window that never switched sections used to pass it |
 | `tools/verify-settings-blocking.mjs` | Proves the settings window does no blocking work on the UI thread |
 | `tools/settings-heartbeat.mjs` | Proves the settings poll leaves the UI thread responsive |
 | `tools/verify-publish.mjs` | Publishes a release and asserts it contains the renderer, digest, icon, fonts and runtime |

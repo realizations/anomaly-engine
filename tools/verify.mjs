@@ -48,6 +48,7 @@ steps.push(await run('renderer performance on the real GPU', ['perf-gpu.mjs']));
 steps.push(await run('motion model present, oscillators routed', ['motion-oscillators.mjs']));
 steps.push(await run('flicker is bounded', ['flicker.mjs']));
 steps.push(await run('settings window renders every page', ['settings-shot.mjs']));
+steps.push(await run('settings page audit rejects a mis-wired window', ['settings-shot.mjs', '--selftest']));
 steps.push(await run('no UI-thread blocking in settings', ['verify-settings-blocking.mjs']));
 steps.push(await run('settings poll leaves the UI thread responsive', ['settings-heartbeat.mjs']));
 steps.push(await run('published build is complete', ['verify-publish.mjs']));
