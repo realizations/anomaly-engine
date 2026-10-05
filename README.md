@@ -106,6 +106,7 @@ so than ship a feature table that overstates the project.
 | **Anomaly layer** | Six anomalies with rarity, cooldowns and durations, fired through the event bus and written to the journal. |
 | **Field notes** | The ARG surface. World premise, observations and progress, from the tray or `Ctrl+Alt+F`. Every anomaly is paired with a plausible denial. |
 | **Durable state** | World, style, reduced motion, journal and secrets persist to a JSON document in `%APPDATA%` via the native host. A corrupt save cannot stop the engine starting. |
+| **Multi-monitor** | Every display is composed separately, so a mixed aspect-ratio setup gets correct framing on each rather than one crop of a wide panorama. Follows hot-plug, and each display can be given its own world. |
 | **Dynamic quality** | The scene renders to an offscreen buffer and blits up. Render scale adapts to hold a frame budget. |
 | **Live art-style switching** | Three renderer treatments from the tray or `Ctrl+Alt+S`, with an active-style checkmark. |
 | **Global hotkeys** | `Ctrl+Alt+W/S/P/F/D` — cycle world, cycle style, pause, field notes, debug. Registered with Windows, because the wallpaper never holds focus. |
@@ -120,7 +121,6 @@ so than ship a feature table that overstates the project.
 | Feature | What's missing |
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits. |
-| **Multi-monitor** | Every display is composed separately, so a mixed aspect-ratio setup gets correct framing on each rather than one crop of a wide panorama. Follows hot-plug. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 
@@ -191,6 +191,7 @@ Right-click the tray icon for options:
 - **Debug Overlay** — FPS, frame time, memory and render scale over the scene
 - **Creator Mode** — Set time and weather, trigger events, capture
 - **About** — Version and credits
+- **Exit** — Close the engine
 
 ### Global hotkeys
 
@@ -207,30 +208,28 @@ handled inside the page.
 
 > A hotkey already owned by another application is logged and skipped rather than
 > preventing the engine from starting.
-- **Exit** — Close the engine
+
+There is no separate resume hotkey: `Ctrl+Alt+P` toggles. Capture, triggering an event and
+creator mode are tray and CLI actions rather than hotkeys, because a wallpaper that grabs
+`Ctrl+Alt` for actions that happen by accident is a nuisance on a shared machine.
 
 ### Settings
 
-The settings window has sections for:
+The settings window has nine sections:
 
 - **Home** — Current world, status, quick controls
 - **Worlds** — Install, activate, preview, delete worlds
+- **Appearance** — Art style and the settings that change how the frame is built
 - **Performance** — FPS limit, quality preset, pause conditions
 - **Events** — Enable/disable event sources, rarity settings
+- **Field notes** — Journal, world lore, discovered secrets and progress
+- **Displays** — Per-display worlds, and which display each one is using
 - **Integrations** — Weather, GitHub, RSS, remote event feed
-- **Secrets** — Discovered anomalies, journal, progress
 - **About** — Version, credits, license
 
-### Hotkeys
-
-| Hotkey | Action |
-|--------|--------|
-| `Ctrl+Alt+W` | Take a screenshot |
-| `Ctrl+Alt+P` | Pause wallpaper |
-| `Ctrl+Alt+R` | Resume wallpaper |
-| `Ctrl+Alt+T` | Trigger event |
-| `Ctrl+Alt+D` | Toggle debug overlay |
-| `Ctrl+Alt+C` | Toggle creator mode |
+Secrets and journal progress live in **Field notes** rather than in a settings page of their
+own: nothing about discovering a secret is a preference, and giving it a page would imply
+there was something to configure.
 
 ### Interactions
 
@@ -347,7 +346,7 @@ src/
       anomalies/         Anomaly registry with rarity and cooldowns
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured)
-    tests/               140 unit tests
+    tests/               187 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -505,8 +504,8 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs the licence gate and its self-test, then a 20-check end-to-end suite **against the
-deployed build loaded over `file://`** — the exact condition the native host uses. Serving
+Runs eighteen steps in order. Two of them prove a gate still bites, the rest exercise the
+deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
 Chromium refuses to execute ES modules, so the engine silently rendered nothing.
@@ -514,16 +513,24 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | Tool | Purpose |
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
-| `tools/e2e.mjs` | 53 end-to-end checks on the deployed `file://` build |
+| `tools/e2e.mjs` | 57 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/per-display-worlds.mjs` | Proves each display can show its own world, by checking the two screens render differently |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
 | `tools/license-gate.mjs` | Asset licence policy enforcement |
 | `tools/license-gate.mjs --selftest` | Proves the gate rejects 19 bad-licence cases |
+| `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
+| `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
+| `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image |
+| `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
 | `tools/perf-gpu.mjs` | Measures the engine's real per-frame cost on the GPU, and proves the adaptive scaler responds to load |
 | `tools/riso-halftone.mjs` | Proves riso actually prints a dot screen, by measuring adjacent-pixel luminance |
+| `tools/motion-oscillators.mjs` | Proves the central motion model is present and its oscillators are actually routed |
+| `tools/flicker.mjs` | Measures the frame-to-frame *change* in luminance at several motion levels, so a scene that is merely moving is not mistaken for one that strobes |
 | `tools/settings-shot.mjs` | Renders all nine WPF settings pages to PNG without displaying the window, so layout can be reviewed |
+| `tools/verify-settings-blocking.mjs` | Proves the settings window does no blocking work on the UI thread |
+| `tools/settings-heartbeat.mjs` | Proves the settings poll leaves the UI thread responsive |
 | `tools/verify-publish.mjs` | Publishes a release and asserts it contains the renderer, digest, icon, fonts and runtime |
 | `tools/verify-fonts.mjs` | Parses each font's real family, style and version |
 | `tools/verify-fonts-use.mjs` | Proves each family loads and actually applies, not just ships |
