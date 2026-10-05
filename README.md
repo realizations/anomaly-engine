@@ -534,7 +534,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/settings-heartbeat.mjs` | Proves the settings poll leaves the UI thread responsive |
 | `tools/verify-publish.mjs` | Publishes a release and asserts it contains the renderer, digest, icon, fonts and runtime |
 | `tools/verify-fonts.mjs` | Parses each font's real family, style and version |
-| `tools/verify-fonts-use.mjs` | Proves each family loads and actually applies, not just ships |
+| `tools/verify-fonts-use.mjs` | Proves each family loads *and* that the application still asks for it — in a CSS rule, an inline style, or a canvas `ctx.font` — rather than just shipping |
 | `tools/showcase.mjs` | Renders the 69-frame gallery to `build/showcase/`, and fails if a shipped anomaly has no frame |
 | `tools/contact-sheet.mjs` | Tiles many renders into one sheet, for reviewing a pattern rather than a single frame |
 | `tools/make-branding.mjs` | Draws the icon set, ICO, favicon and social preview from code |
