@@ -147,20 +147,42 @@ the terminal's size.
 
 ## Protections that remain
 
-- **Adaptive render scale.** Drops toward 0.65 when the frame budget is missed
-  and recovers when it is not. This is what actually holds the frame rate on slow
+- **Adaptive render scale.** When the rolling average frame time exceeds the budget
+  by more than 5%, the scale is corrected proportionally — `sqrt(scale × wanted)`
+  where `wanted` is `sqrt(budget / avg)` — floored at **0.34** and capped at 1.
+  Climbing back is deliberately slower (1.06 per window against a proportional drop)
+  so the scale cannot oscillate. This is what actually holds the frame rate on slow
   hardware, and the table above shows it engaging under CPU rasterisation.
 - **Frame cap.** A desktop background does not need to repaint at 144Hz. The
   cap is user-adjustable and off by default so the choice stays explicit.
 - **Reduced motion.** Honoured independently of frame rate, because a surface
-  expected to sit running for hours is a motion-sensitivity question as well as
-  a power question.
+  expected to sit running for hours is a motion-sensitivity question as well as a
+  power question.
+
+The controller lives in `WorldRenderer._adaptQuality`, with the floor as the single
+clamp on line 573. There is no fixed step size and no preset ladder to remember.
+
+## Re-measuring on your machine
+
+Every figure here was taken on one machine — a Radeon RX 5500M at 1920x1080 — and
+the absolute numbers will not transfer. Cost *per pixel* and the GPU/CPU ratio are
+the portable parts; the frame times are not.
+
+```bash
+node tools/perf-gpu.mjs      # real per-frame cost on the GPU, and the adaptive path
+node tools/perf.mjs          # CPU rasteriser: a floor, not a forecast
+```
+
+Both print the renderer they used. `perf-gpu.mjs` reports `frameMs` and explicitly
+labels `fps` as pacing-bound, so read the former.
 
 ## Not yet done
 
 - The **liminal interior** is fill-heavy by nature: floor, walls, ceiling, doors
   and lights are all full-height quads. It has not been profiled separately.
-- **No frame rate has been measured on real GPU-composited hardware.** Every
-  figure in this document is CPU-rasterised and should be treated as a floor. A
-  pass on a real machine is the missing measurement, and it should be recorded
-  here when it exists.
+- **No published build has been profiled on GPU-composited hardware end to end.**
+  The GPU figures above come from `perf-gpu.mjs`, which drives the deployed bundle
+  in a browser; what is missing is a measurement of the shipped WebView2 host
+  compositing behind the desktop, on real hardware, across a day/night cycle. That
+  is the number that matters to a user and it should be recorded here when it
+  exists.

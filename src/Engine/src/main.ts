@@ -476,9 +476,12 @@ class Engine {
       this._fireAnomaly('lights-out', 10, 1);
     });
 
-    this._bus.subscribe('weather.storm_started', () => {
-      this._renderer.triggerLightning();
-    });
+    // Lightning is driven by the renderer from the weather state it already has,
+    // rather than from here. This used to subscribe to `weather.storm_started`,
+    // which nothing has ever emitted, so `triggerLightning` had no caller at all and
+    // storms rendered without a single flash despite the bolt renderer sitting
+    // right there. The renderer owns it now, which also puts the strike rate under
+    // the same motion-intensity control as everything else that moves.
 
     this._bus.subscribe('*', (event) => {
       this._bridge.sendLog(`event:${event.type}`, event.payload);

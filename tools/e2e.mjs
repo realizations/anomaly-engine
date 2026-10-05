@@ -173,8 +173,63 @@ await page.waitForTimeout(1500);
 const storm = await shot('weather-storm');
 check('weather changes render', storm !== golden, `${storm} vs ${golden}`);
 await page.screenshot({ path: join(OUT, 'weather-storm.png') });
+
+// --- a storm must actually produce lightning ---
+//
+// This was silently broken. `main.ts` subscribed to `weather.storm_started`,
+// nothing has ever emitted that event, `triggerLightning` therefore had no caller,
+// and the storm rendered through a complete bolt renderer -- branches, seeded path,
+// decay -- that could never fire. Nothing failed, because nothing threw: the
+// subscription was simply dead, which is the same bug class as the missing
+// random.lights_out event this suite already exists to guard against.
+//
+// Measured as pixels rather than by reading the renderer's private `_bolt`, so that
+// a refactor cannot make the check pass by renaming a field. A strike raises the
+// peak luminance of the upper frame by around 50.
+//
+// Both directions are asserted. A check that only proves storms flash would still
+// pass if lightning fired in clear weather.
+const peakLuma = () => page.evaluate(() => {
+  const c = document.getElementById('wallpaper-canvas');
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const h = Math.round(c.height * 0.55);
+  const d = g.getImageData(0, 0, c.width, h).data;
+  let max = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    if (l > max) max = l;
+  }
+  return Math.round(max);
+});
+
+const peakOver = async (seconds) => {
+  let peak = 0;
+  const samples = Math.round(seconds / 0.4);
+  for (let i = 0; i < samples; i++) {
+    peak = Math.max(peak, await peakLuma());
+    await page.waitForTimeout(400);
+  }
+  return peak;
+};
+
+// Clear first, to establish what the frame looks like without a strike, then storm.
+// One comparison covers both directions: it needs the storm to flash *and* the clear
+// sky not to, so a check that passed because lightning fires everywhere would fail.
 await page.evaluate(() => window.__engine.setSimulatedWeather('clear'));
-await page.waitForTimeout(1200);
+await page.waitForTimeout(1500);
+const clearPeak = await peakOver(8);
+
+await page.evaluate(() => window.__engine.setSimulatedWeather('storm'));
+await page.waitForTimeout(1500);
+const stormPeak = await peakOver(16);
+check(
+  'a storm produces lightning and clear weather does not',
+  stormPeak > clearPeak + 25,
+  `storm peak luma ${stormPeak} vs clear ${clearPeak} (a strike adds about 50)`
+);
+
+await page.evaluate(() => window.__engine.setSimulatedWeather('clear'));
+await page.waitForTimeout(1000);
 
 // --- anomaly triggers must not throw ---
 const anomalies = ['meteor', 'second-moon', 'red-moon', 'forest-watcher', 'observatory-signal'];
