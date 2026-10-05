@@ -1094,6 +1094,16 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // The clock itself is never scaled. Motion intensity is applied per category by
     // _amp and _rate, so reducing it damps the parts that are tiring without
     // making everything look frozen.
+    //
+    // This line was simply missing, and `_t` is read in fifteen places: grass and
+    // tree sway, the beacon's breath and blink, fog drift, motes, precipitation,
+    // camera drift and the observer's occasional look. With the clock pinned at
+    // zero, `Math.sin(0)` is zero and `(_t % 2) < 1.1` is permanently true, so the
+    // scene was not animating at all -- the beacon never blinked off, the grass
+    // never moved, and the camera never drifted. It looked like a still image
+    // with weather drawn on it, and nothing anywhere reported a problem, because
+    // every value it produced was a perfectly valid number.
+    this._t += dt;
 
     const out = this._outCtx!;
     out.setTransform(1, 0, 0, 1, 0, 0);
