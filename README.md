@@ -503,7 +503,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs eighteen steps in order. Two of them prove a gate still bites, the rest exercise the
+Runs nineteen steps in order. Three of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -512,7 +512,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | Tool | Purpose |
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
-| `tools/e2e.mjs` | 59 end-to-end checks on the deployed `file://` build |
+| `tools/e2e.mjs` | 60 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/per-display-worlds.mjs` | Proves each display can show its own world, by checking the two screens render differently |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
