@@ -513,7 +513,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | Tool | Purpose |
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
-| `tools/e2e.mjs` | 57 end-to-end checks on the deployed `file://` build |
+| `tools/e2e.mjs` | 59 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/per-display-worlds.mjs` | Proves each display can show its own world, by checking the two screens render differently |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |

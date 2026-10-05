@@ -48,9 +48,47 @@ const shot = async (name) => {
   return createHash('sha256').update(buf).digest('hex').slice(0, 12);
 };
 
+const STYLES = ['painterly', 'flat', 'riso'];
+
+/**
+ * A coarse luminance signature of the canvas: a 32x18 grid of mean luma per cell.
+ *
+ * Used wherever the question is "are these two frames actually different pictures",
+ * as opposed to "are these two files different bytes". The second question is the
+ * wrong one in an animated renderer and answers itself.
+ */
+const luminanceSignature = (pg) => pg.evaluate(() => {
+  const canvas = document.getElementById('wallpaper-canvas');
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  const px = g.getImageData(0, 0, canvas.width, canvas.height).data;
+  const GX = 32;
+  const GY = 18;
+  const sig = [];
+  for (let cy = 0; cy < GY; cy++) {
+    for (let cx = 0; cx < GX; cx++) {
+      let sum = 0;
+      let n = 0;
+      const x0 = Math.floor((cx * canvas.width) / GX);
+      const x1 = Math.floor(((cx + 1) * canvas.width) / GX);
+      const y0 = Math.floor((cy * canvas.height) / GY);
+      const y1 = Math.floor(((cy + 1) * canvas.height) / GY);
+      for (let y = y0; y < y1; y += 4) {
+        for (let x = x0; x < x1; x += 4) {
+          const i = (y * canvas.width + x) * 4;
+          sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+          n++;
+        }
+      }
+      sig.push(sum / n);
+    }
+  }
+  return sig;
+});
+
 // --- style switching, exactly as the tray dispatches it ---
 const styleHashes = {};
-for (const style of ['painterly', 'flat', 'riso']) {
+const styleSignatures = {};
+for (const style of STYLES) {
   await page.evaluate((s) => {
     window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: s } }));
   }, style);
@@ -59,14 +97,42 @@ for (const style of ['painterly', 'flat', 'riso']) {
   const reported = await page.evaluate(() => window.__engine.getStyle());
   check(`tray dispatch applies "${style}"`, reported === style, `reported "${reported}"`);
 
-  const h = await shot(style);
-  styleHashes[style] = h;
+  styleHashes[style] = await shot(style);
+  styleSignatures[style] = await luminanceSignature(page);
   const buf = await page.screenshot({ path: join(OUT, `style-${style}.png`) });
   void buf;
 }
-check('all three styles render distinct pixels',
-  new Set(Object.values(styleHashes)).size === 3,
-  JSON.stringify(styleHashes));
+
+// Distinctness is decided on a coarse luminance signature, not on the hashes.
+//
+// Hashes cannot answer this question. Every frame has grass, cloud, rain and
+// stars moving, so three renders of the *same* style a second and a half apart
+// already hash differently, and `new Set(hashes).size === 3` is satisfied by an
+// engine whose style switch does nothing at all. The hashes stay in the detail
+// string, because they make two archived runs comparable by eye.
+//
+// The threshold is set above riso's frame-to-frame jitter rather than the
+// painterly one, because riso re-quantises its tonal range every frame: its own
+// noise floor is about 6.7 against roughly 0.3 for painterly and flat. The
+// smallest real difference between two styles measures about 29, so 12 sits
+// between the two with room on each side.
+const STYLE_DIVERGENCE = 12;
+const divergences = [];
+for (let i = 0; i < STYLES.length; i++) {
+  for (let j = i + 1; j < STYLES.length; j++) {
+    const a = styleSignatures[STYLES[i]];
+    const b = styleSignatures[STYLES[j]];
+    const d = a.reduce((sum, v, k) => sum + Math.abs(v - b[k]), 0) / a.length;
+    divergences.push(`${STYLES[i]}/${STYLES[j]} ${d.toFixed(1)}`);
+    check(
+      `"${STYLES[i]}" and "${STYLES[j]}" render visibly differently`,
+      d >= STYLE_DIVERGENCE,
+      `luminance divergence ${d.toFixed(2)} (threshold ${STYLE_DIVERGENCE}, riso jitter ~6.7)`
+    );
+  }
+}
+console.log(`      style divergence: ${divergences.join('  ')}`);
+console.log(`      style fingerprints: ${STYLES.map((s) => `${s} ${styleHashes[s]}`).join('  ')}`);
 
 // --- style survives a round trip back to default ---
 await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: 'painterly' } })));

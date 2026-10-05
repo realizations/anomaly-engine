@@ -85,13 +85,13 @@ const regionMean = (fx, fy, fw, fh) => page.evaluate(({ fx, fy, fw, fh }) => {
   const h = Math.max(1, Math.round(cv.height * fh));
   const d = g.getImageData(x, y, w, h).data;
   let r = 0, gg = 0, b = 0, n = 0;
-  // Skip the outermost few pixels: the terminal is drawn in the bottom-left of
-  // the primary viewport and would otherwise dominate the primary's average.
   for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; }
   return { r: r / n, g: gg / n, b: b / n };
 }, { fx, fy, fw, fh });
 
-// Sample the upper band of each half, above the horizon and clear of the terminal.
+// Sample the upper band of each half: above the horizon, and clear of the terminal,
+// which is drawn in the bottom-left of the primary viewport and would otherwise
+// dominate the primary's average.
 const left = await regionMean(0.1, 0.2, 0.3, 0.25);
 const right = await regionMean(0.6, 0.2, 0.3, 0.25);
 const dist = Math.hypot(left.r - right.r, left.g - right.g, left.b - right.b);
