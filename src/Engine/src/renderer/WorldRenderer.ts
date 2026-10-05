@@ -2327,9 +2327,20 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   private _drawObservatory(grade: SkyGrade): void {
     const g = this._ctx;
     const ambient = grade.ambient;
-    const body = mixRgb(mixRgb({ r: 92, g: 94, b: 102 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.6), grade.haze, 0.24);
+    // Mixed toward the haze less than it was, and then darkened.
+    //
+    // At golden hour the haze is a bright warm colour, so mixing 0.24 toward it
+    // made the dome the brightest thing in the frame below the sky -- it pulled
+    // the eye to the one object the composition did not nominate as its subject,
+    // and it did so at every hour, because the effect scaled with the sky rather
+    // than with the building. A landmark should be a silhouette with a lit edge,
+    // which is how the generic structures are already treated; this one now is too.
+    const body = shade(
+      mixRgb(mixRgb({ r: 78, g: 80, b: 88 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.6), grade.haze, 0.12),
+      -0.1
+    );
     const dark = shade(body, -0.36);
-    const domeLit = shade(body, 0.14);
+    const domeLit = shade(body, 0.09);
 
     const x = this._w * 0.565 + this._mouse.px * 6;
     const baseY = this._h * (this._horizonFrac() + 0.03);
