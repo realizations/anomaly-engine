@@ -121,6 +121,7 @@ so than ship a feature table that overstates the project.
 | Feature | What's missing |
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits. |
+| **Localisation** | Spanish, German and Japanese translations ship and are reachable through `getI18n()`, but no surface calls `t()`, so a user never actually sees a translated string. The keys are complete and tested against each other; nothing consumes them. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 

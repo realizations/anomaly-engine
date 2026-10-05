@@ -19,10 +19,9 @@ const DEFAULT_LOCALE: Locale = {
     'settings.appearance': 'Appearance',
     'settings.performance': 'Performance',
     'settings.events': 'Events',
-    'settings.audio': 'Audio',
-    'settings.monitors': 'Monitors',
+    'settings.monitors': 'Displays',
+    'settings.notes': 'Field Notes',
     'settings.integrations': 'Integrations',
-    'settings.secrets': 'Secrets',
     'settings.about': 'About',
     'performance.fps': 'FPS',
     'performance.quality': 'Quality',
@@ -54,22 +53,34 @@ const DEFAULT_LOCALE: Locale = {
   },
 };
 
-const locales: Map<string, Locale> = new Map([
-  ['en', DEFAULT_LOCALE],
-  ['es', ES_LOCALE],
-  ['de', DE_LOCALE],
-  ['ja', JA_LOCALE],
-]);
-
 import { ES_LOCALE } from './locales/es.js';
 import { DE_LOCALE } from './locales/de.js';
 import { JA_LOCALE } from './locales/ja.js';
 
+/**
+ * The built-in locales, as a factory rather than a shared map.
+ *
+ * This was a module-level `Map`, which meant every I18n instance shared one set of
+ * locales and `registerLocale` was global: a locale added to one instance turned up
+ * in every other, with no way to remove it. The engine only ever builds one I18n, so
+ * it never showed. It did show immediately in a test, where a locale registered to
+ * exercise the fallback path appeared in the next test's list of available locales.
+ */
+function builtInLocales(): Map<string, Locale> {
+  return new Map<string, Locale>([
+    ['en', DEFAULT_LOCALE],
+    ['es', ES_LOCALE],
+    ['de', DE_LOCALE],
+    ['ja', JA_LOCALE],
+  ]);
+}
+
 export class I18n {
+  private _locales: Map<string, Locale> = builtInLocales();
   private _currentLocale: Locale = DEFAULT_LOCALE;
 
   setLocale(code: string): boolean {
-    const locale = locales.get(code);
+    const locale = this._locales.get(code);
     if (!locale) return false;
     this._currentLocale = locale;
     return true;
@@ -84,11 +95,11 @@ export class I18n {
   }
 
   registerLocale(locale: Locale): void {
-    locales.set(locale.code, locale);
+    this._locales.set(locale.code, locale);
   }
 
   getAvailableLocales(): Locale[] {
-    return Array.from(locales.values());
+    return Array.from(this._locales.values());
   }
 
   dispose(): void {
