@@ -142,6 +142,24 @@ const RISO_PAPER: RGB = { r: 244, g: 238, b: 222 };
 /** Dumps the pre-separation riso buffer to `__risoSource` for offline review. */
 const DEBUG_RISO_DUMP = false;
 
+/**
+ * How far a lightning strike may brighten in one frame, and how many frames its
+ * attack takes.
+ *
+ * A wallpaper is looked through, not watched, and a step of tens of luma is a
+ * flicker however rare it is. Bounding the step per frame rather than the total
+ * means a machine rendering at 10fps gets a longer, gentler flash rather than a
+ * harsher one.
+ *
+ * The attack is counted in frames, not milliseconds, and that is the whole trick.
+ * A time-based ramp whose duration is shorter than a slow frame leaves the tail of
+ * the easing curve to land in one step -- measured at 30 luma in a single frame,
+ * most of the flash. Counting frames makes the shape of the attack independent of
+ * the frame rate: ten frames of rise whether that is 167ms or a second.
+ */
+const BOLT_STEP_MAX = 0.055;
+const BOLT_ATTACK_FRAMES = 18;
+
 export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
   private _crt: CrtTerminal | null = null;
@@ -220,6 +238,13 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   /** Milliseconds until the next strike, when the sky is a storm. Zero means
    *  "due now". Reset whenever the condition is not a storm. */
   private _strikeIn: number = 0;
+  /** Remaining flashes in the current burst. A burst is two or three strikes close
+   *  together, which is what distant lightning does and which reads far better
+   *  than one hard flash on a long period. */
+  private _strikeBurst: number = 0;
+  /** Frames left in the current strike's attack ramp. Counted in frames, not
+   *  milliseconds, so the flash's shape does not change with the frame rate. */
+  private _boltRise: number = 0;
   /** Geometry for the current strike, built once and held for its duration so
    *  the shape does not re-randomise between frames. */
   private _boltPath: number[] = [];
@@ -948,31 +973,101 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * lightning implementation behind it that could never fire. Measured: eight
    * seconds of storm weather produced exactly one event, `time.hourly`.
    *
-   * The interval widens as the storm intensifies, and there is a floor on it
-   * because a flash every frame is strobing rather than weather. Reduced motion is
-   * respected by damping the strike rate rather than removing lightning, since a
-   * silent storm would read as a bug.
+   * ## Why the interval and the envelope are what they are
+   *
+   * The first version of this struck every three to five seconds with an instant
+   * attack, and measured, it was the worst flicker source in the renderer by two
+   * orders of magnitude:
+   *
+   *   clear    largest single-frame luminance step   0.28
+   *   storm    largest single-frame luminance step  92.68   p99 89.66
+   *   storm    frames stepping more than 3 luma     157 of 1199
+   *
+   * A step of ninety out of two hundred and fifty-five, thirteen percent of the
+   * time, is a strobe with weather attached. Real lightning does flash hard, but a
+   * wallpaper is not a storm: it sits behind a desktop for hours, and the eye is
+   * looking straight through the whole thing. `tools/flicker.mjs` had not caught it
+   * because it only ever measures a clear night with an anomaly running.
+   *
+   * So the strike is rarer and irregular rather than periodic, and the attack
+   * ramps instead of stepping. Real lightning arrives in bursts, so a strike
+   * sometimes gets a second and third flash close behind it.
    */
   private _maybeStrikeLightning(dt: number): void {
     if (this._weather.condition !== 'storm') {
       this._strikeIn = 0;
+      this._strikeBurst = 0;
+      this._boltRise = 0;
+      this._bolt = 0;
       return;
     }
+
+    // The attack owns `_bolt` for its whole duration, and returns early so that
+    // _drawBolt's per-frame decay cannot touch it.
+    //
+    // It has to return early. An earlier version ramped with
+    // `_bolt = min(_bolt, eased)`, which looks like a safe way to never move
+    // backwards -- but the eased value on the first frame is a thousandth, and
+    // _drawBolt subtracts 0.03 per frame, so the discharge was dead before it had
+    // been visible for one frame. No lightning at all, which is the opposite of
+    // the over-flicker this was fixing.
+    if (this._boltRise > 0) {
+      this._boltRise--;
+      // A straight ramp to full over a fixed number of frames. An eased curve
+      // sounds better and measures worse: an ease-in barely rises for the first
+      // few frames, so against a per-frame cap it never reaches full brightness at
+      // all -- the strike peaked at 0.44 and was worth six luma. Lightning reads
+      // as an attack and a decay, not an attack shaped like a fade, so the ramp is
+      // linear and the shape comes from what follows.
+      this._bolt = Math.min(1, Math.max(this._bolt, 0) + BOLT_STEP_MAX);
+      return;
+    }
+
     if (this._strikeIn > 0) {
       this._strikeIn -= dt;
       return;
     }
+
     this.triggerLightning();
-    // Intensity shortens the gap. The divisor is floored so that a scene with
-    // motion turned off still gets weather rather than a strobe, and so this can
-    // never divide by zero.
+
+    // Rare and irregular. The floor is what stops a storm reading as a metronome,
+    // and the wide spread is what stops it reading as a loop at all.
     const intensity = Math.max(0.35, this._motionIntensity);
-    const base = 5200 - Math.min(1, this._weather.intensity) * 2600;
-    this._strikeIn = base / intensity + Math.random() * 2600;
+    const storminess = Math.min(1, this._weather.intensity);
+    const base = 14000 - storminess * 4000;
+    this._strikeIn = base / intensity + Math.random() * base * 1.4;
+
+    // A burst, sometimes. Two or three flashes close together is what distant
+    // lightning actually does, and it is far less fatiguing than one bright flash
+    // on a long period, because the eye adapts to the cluster.
+    if (this._strikeBurst <= 0 && Math.random() < 0.35) {
+      this._strikeBurst = 2 + Math.floor(Math.random() * 2);
+      this._strikeIn = 90 + Math.random() * 260;
+    } else if (this._strikeBurst > 0) {
+      this._strikeBurst--;
+    }
   }
 
+  /**
+   * Strikes. Public because creator mode and the host can force one.
+   *
+   * The attack is ramped over `_boltRiseMax` rather than applied at full strength,
+   * so the first frame of a discharge is dim rather than the whole flash. See
+   * `_maybeStrikeLightning` for the measurement that motivated it.
+   */
   triggerLightning(): void {
-    this._bolt = 1;
+    // Deliberately does not reset `_bolt` to zero.
+    //
+    // A burst is two or three strikes close together, and the second one arrives
+    // while the first is still bright. Zeroing here cut the discharge from about
+    // 0.9 straight back to nothing and then ramped it up again, which measured as a
+    // twenty-six luma step in a single frame -- the same defect as the original
+    // instant attack, reached a different way.
+    //
+    // Leaving it alone is also what makes a burst read as a burst: the attack adds
+    // to whatever is already lit, so consecutive strokes brighten the sky rather
+    // than blinking it.
+    this._boltRise = BOLT_ATTACK_FRAMES;
     this._boltSeed = Math.random() * 1000;
     // A new strike is a new shape, not a variation on the last one.
     this._boltPath = [];
@@ -3502,7 +3597,9 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    */
   private _drawBolt(): void {
     if (this._bolt <= 0) return;
-    this._bolt -= 0.03;
+    // The decay only starts once the attack has finished. Both were fighting over
+    // `_bolt` before, which is what held a strike at 0.44 instead of 1.
+    if (this._boltRise <= 0) this._bolt -= 0.03;
     const a = Math.max(0, this._bolt);
     if (a <= 0) return;
     const g = this._ctx;
@@ -3521,12 +3618,13 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
 
     // Sheet illumination. Wide and soft, because a bolt lights the whole sky
     // rather than a stripe of it -- but bounded to the sky rather than the whole
-    // frame. A full-screen additive fill is a full-screen composite every frame the
-    // flash is alive, and the ground below the horizon is not what a discharge
-    // lights. This is the same reasoning as the vignette and the grain: bake what
-    // does not change, and pay for the rest only where it is visible.
+    // frame, and deliberately faint. This is a full-screen additive composite, and
+    // at full strength it moved peak frame luminance by about fifty on its own; a
+    // wallpaper seen through for hours cannot afford a flash that strong. The
+    // discharge reads from the stroke, which is thin and localised, and the sheet
+    // only suggests the light bouncing off the cloud base.
     const skyBottom = Math.round(this._h * this._horizonFrac());
-    g.fillStyle = `rgba(196,212,255,${a * a * 0.16})`;
+    g.fillStyle = `rgba(196,212,255,${a * a * 0.055})`;
     g.fillRect(0, 0, this._w, skyBottom);
 
     // Two strokes per segment: a wide dim halo and a narrow hot core, which is
