@@ -525,7 +525,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
 | `tools/perf-gpu.mjs` | Measures the engine's real per-frame cost on the GPU, and proves the adaptive scaler responds to load |
-| `tools/riso-halftone.mjs` | Proves riso actually prints a dot screen, by measuring adjacent-pixel luminance |
+| `tools/riso-halftone.mjs` | Proves riso actually prints a dot screen by measuring adjacent-pixel luminance — and that painterly and flat do not, so the bars mean something |
 | `tools/motion-oscillators.mjs` | Proves the central motion model is present and its oscillators are actually routed |
 | `tools/flicker.mjs` | Measures the frame-to-frame *change* in luminance at several motion levels, so a scene that is merely moving is not mistaken for one that strobes |
 | `tools/settings-shot.mjs` | Renders all nine WPF settings pages to PNG without displaying the window, so layout can be reviewed |
