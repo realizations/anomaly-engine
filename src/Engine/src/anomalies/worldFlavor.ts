@@ -68,8 +68,14 @@ function generic(anomalyId: string): AnomalyFlavor {
  * Per-world flavour, keyed by world id. Each entry supplies the flavour for the
  * anomalies most relevant to that place, so the journal reads like a record of
  * *this* location rather than a global effect log.
+ *
+ * Exported so its keys can be checked. A world id that does not exist, or an
+ * anomaly id that does not, produces no error and no visible symptom: the lookup
+ * misses and the generic flavour is used instead, which reads as though the entry
+ * were never written. Both are one typo away and neither is worth discovering by
+ * noticing that a place sounds generic.
  */
-const WORLD_FLAVOR: Record<string, Record<string, AnomalyFlavor>> = {
+export const WORLD_FLAVOR: Record<string, Record<string, AnomalyFlavor>> = {
   'the-town-that-wasnt-there': {
     'forest-watcher': {
       name: 'Something in the Fence Line',

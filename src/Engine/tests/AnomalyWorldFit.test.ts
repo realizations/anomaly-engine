@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AnomalySystem } from '../src/anomalies/AnomalyRegistry.js';
-import { flavorFor } from '../src/anomalies/worldFlavor.js';
+import { flavorFor, WORLD_FLAVOR } from '../src/anomalies/worldFlavor.js';
 import { BUILT_IN_WORLDS } from '../src/worlds/registry.js';
+import { BUILT_IN_ANOMALIES } from '../src/anomalies/builtin.js';
 import type { WorldDefinition } from '../src/worlds/types.js';
 
 /** Mirrors the definitions registered by the engine. */
@@ -111,5 +112,52 @@ describe('Anomaly world flavour', () => {
     const f = flavorFor(world('saltwick'), 'not-a-real-anomaly');
     expect(f.name).toBe('not-a-real-anomaly');
     expect(f.deniability.length).toBeGreaterThan(0);
+  });
+
+  // A flavour keyed on something that does not exist is invisible. The lookup
+  // misses, the generic text is used, and the entry reads as though it had never
+  // been written -- so both key spaces are checked against what actually ships.
+  it('keys every per-world flavour on a world that ships', () => {
+    const shipped = new Set(BUILT_IN_WORLDS.map((w) => w.id));
+    const unknown = Object.keys(WORLD_FLAVOR).filter((id) => !shipped.has(id));
+    expect(unknown).toEqual([]);
+  });
+
+  it('keys every per-world flavour on an anomaly that ships', () => {
+    const shipped = new Set(BUILT_IN_ANOMALIES.map((d) => d.id));
+    const unknown = Object.entries(WORLD_FLAVOR).flatMap(([worldId, entries]) =>
+      Object.keys(entries).filter((anomalyId) => !shipped.has(anomalyId)).map((a) => `${worldId}/${a}`)
+    );
+    expect(unknown).toEqual([]);
+  });
+
+  it('gives every shipped anomaly a generic flavour, so no sighting reads as filler', () => {
+    // The generic text is what a world with no specific entry falls back to. An
+    // anomaly missing from it gets the placeholder -- "Something is not right" --
+    // in the journal, which is the one place that must not sound like a stub.
+    for (const w of BUILT_IN_WORLDS) {
+      for (const def of BUILT_IN_ANOMALIES) {
+        const f = flavorFor(w, def.id);
+        expect(f.deniability.length).toBeGreaterThan(0);
+        expect(f.note.length).toBeGreaterThan(0);
+        expect(f.name.length).toBeGreaterThan(0);
+        expect(f.name).not.toBe('Something is not right.');
+      }
+    }
+  });
+
+  it('never keys the same world and anomaly twice', () => {
+    // A duplicate key would silently keep the last one written, so the entry a
+    // contributor thought they had added would be the one that disappears.
+    const seen = new Set<string>();
+    const dupes: string[] = [];
+    for (const [worldId, entries] of Object.entries(WORLD_FLAVOR)) {
+      for (const anomalyId of Object.keys(entries)) {
+        const key = `${worldId}/${anomalyId}`;
+        if (seen.has(key)) dupes.push(key);
+        seen.add(key);
+      }
+    }
+    expect(dupes).toEqual([]);
   });
 });
