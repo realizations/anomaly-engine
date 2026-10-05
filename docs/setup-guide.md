@@ -153,74 +153,61 @@ This guide walks you through everything step by step. No prior experience needed
 
 ---
 
-## Part 3: Create Original Art & Audio Assets
+## Part 3: Change How the World Looks
 
-### Step 1: Plan Your Assets
+### There is no asset pipeline
 
-Decide what you want to create:
+This project draws everything procedurally. There is no sprite folder, no texture
+atlas, no scene file and no importer, because there is nothing to import: a tree is
+a function of the world seed, and a ridge is noise. Adding a PNG does nothing,
+because nothing looks for one.
 
-| Asset Type | Description | Format |
-|------------|-------------|--------|
-| Sprites | Trees, buildings, creatures | PNG with transparency |
-| Textures | Ground, sky, surfaces | PNG or WebP |
-| Audio | Ambient sounds, effects | WAV or OGG |
-| Animations | Creature movements | WebM or sprite sheets |
+That is a deliberate position rather than an unfinished feature, and it is enforced:
+`tools/license-gate.mjs` reads `assets/manifest.json` and fails the build on any
+undeclared asset or any licence the project rejects. The only assets that ship are
+three SIL OFL typefaces.
 
-### Step 2: Create Sprites
+An earlier version of this section recommended Piskel, Aseprite, GIMP, DALL-E and
+Midjourney, and described a `worlds/<id>/assets/sprites/` folder referenced from
+HTML with `<img>` and `<audio>` tags. None of that exists, and the generator
+recommendations conflict with the licensing policy above: an image model does not
+grant you the right to redistribute its output.
 
-**Option A: Use free tools**
-- **Piskel** (https://www.piskelapp.com/) — Free online sprite editor
-- **Aseprite** (https://www.aseprite.com/) — Paid, professional pixel art
-- **GIMP** (https://www.gimp.org/) — Free image editor
+### What you can actually change
 
-**Option B: Use AI tools**
-- **DALL-E** or **Midjourney** — Generate concept art
-- **Remove.bg** — Remove backgrounds
+Four kinds of thing, all of them data:
 
-**Sprite guidelines:**
-- Use PNG with transparent background
-- Keep sizes small (64x64 to 256x256 pixels)
-- Use consistent art style
-- Name files descriptively: `tree-pine-01.png`, `cabin-window.png`
+| To change | Edit |
+|---|---|
+| A place | `src/Engine/src/worlds/registry.ts` — biome, palette, terrain numbers, structures |
+| Something strange | `src/Engine/src/anomalies/builtin.ts` |
+| Something to notice | `src/Engine/src/systems/MomentSystem.ts` and `SecretSystem.ts` |
+| The look of an existing scene | `src/Engine/src/render/palette.ts` keyframes |
 
-### Step 3: Create Audio
+Adding a world is the highest-leverage change available and needs no art at all:
+a world is about forty lines of numbers, and six ship today. The format, the biome
+rules and the validation are in [`world-format.md`](world-format.md); events and
+anomalies are in [`creating-events.md`](creating-events.md).
 
-**Option A: Record your own**
-- Use a microphone
-- Record ambient sounds (rain, wind, birds)
-- Edit with **Audacity** (https://www.audacityteam.org/) — Free
+Every identifier you add is checked against what ships. `tests/ShippedIds.test.ts`
+asserts that every id in the data files resolves, because a wrong one produces a
+lookup that misses and a fallback that looks fine — which is how four wrong
+anomaly names went unnoticed until this session.
 
-**Option B: Use free sound libraries**
-- **Freesound** (https://freesound.org/) — Free sound effects
-- **Zapsplat** (https://www.zapsplat.com/) — Free sound effects
-- **Mixkit** (https://mixkit.co/) — Free music and sounds
+### Audio
 
-**Audio guidelines:**
-- Use WAV or OGG format
-- Keep file sizes small (under 1MB per sound)
-- Loop ambient sounds seamlessly
-- Name files descriptively: `rain-light.ogg`, `wind-forest.ogg`
+There is no audio pipeline and no audio ships. `MediaReactivitySystem` exists and
+is constructed, but it samples nothing, so it has no input to react to. Desktop
+audio capture is listed as a deliberate non-goal for now rather than an oversight.
 
-### Step 4: Add Assets to the World
+### Typefaces
 
-1. **Copy assets to the world folder**
-   ```
-   worlds/the-town-that-wasnt-there/assets/
-     sprites/
-     audio/
-     textures/
-   ```
-
-2. **Reference assets in your scene**
-   ```html
-   <img src="assets/sprites/tree-pine-01.png" class="tree">
-   <audio src="assets/audio/rain-light.ogg" loop></audio>
-   ```
-
-3. **Test the assets**
-   - Run the engine
-   - Verify assets load correctly
-   - Check for errors in the console
+The three bundled families are the one place art enters the project, because
+typography is the one thing procedural generation cannot fake convincingly. They
+are recorded in `assets/manifest.json` with their licence, and two checks make the
+claim falsifiable: `verify-fonts.mjs` parses each file's real name table, and
+`verify-fonts-use.mjs` proves each family loads *and* that the application still
+asks for it.
 
 ---
 
@@ -255,23 +242,40 @@ Decide what you want to create:
    - Note the memory usage
    - Note the CPU usage
 
-### Step 3: Test Different Quality Presets
+### Step 3: Test Different Render Scales
+
+There are no named quality presets. The engine has one dial — a render scale,
+which the scene renders at and then blits up — plus an automatic mode that moves it
+to hold a frame budget. An earlier version of this step told you to switch between
+Low, Medium, High and Ultra, none of which exist.
 
 1. **Open settings** (right-click tray icon → Open Settings)
-2. **Change quality preset** to "Low"
-3. **Record metrics** for 5 minutes
-4. **Repeat** for Medium, High, Ultra
+2. **Performance → Render Quality**, or from the engine directly:
+   ```js
+   window.__engine.setRenderScale(0.5);   // half resolution
+   window.__engine.setRenderScale(null);  // back to automatic
+   ```
+3. **Record metrics** for 5 minutes at each of `0.5`, `0.75` and `1`
+4. **Watch the automatic mode** instead, which is the one users actually run:
+   ```bash
+   node tools/perf-gpu.mjs
+   ```
+   It renders on the real GPU, reports the median frame cost, and pins the scale
+   back under load to prove the adaptive path responds.
 
 ### Step 4: Document Results
 
 Create a table like this:
 
-| Quality | FPS | Memory (MB) | CPU (%) | GPU (%) |
-|---------|-----|-------------|---------|---------|
-| Low | 60 | 15 | 2 | 5 |
-| Medium | 60 | 25 | 5 | 10 |
-| High | 60 | 45 | 10 | 20 |
-| Ultra | 45 | 80 | 20 | 40 |
+| Render scale | Frame ms | FPS | Memory (MB) | CPU (%) | GPU (%) |
+|---|---|---|---|---|---|
+| 1.0 | | | | | |
+| 0.75 | | | | | |
+| 0.5 | | | | | |
+
+Frame time is the number that matters, not FPS: a wallpaper at 30 fps that costs
+6 ms per frame is fine, and one at 60 fps that costs 18 ms is stuttering. Frame
+budgets are 16.7 ms at 60 Hz and 8.3 ms at 120 Hz.
 
 ### Step 5: Share Results
 
