@@ -71,9 +71,9 @@ The world changes throughout the day:
 
 - **Be patient.** Rare events are rare.
 - **Watch closely.** Some events last only seconds.
-- **Interact.** Hover and click things.
 - **Check the journal.** It remembers what you've seen.
-- **Try the Konami code.** You know the one.
+- **Use the tray and the hotkeys.** Hovering and clicking the world does nothing yet;
+  `Ctrl+Alt+W/S/P/F/D` are the controls that work.
 
 ## Need Help?
 

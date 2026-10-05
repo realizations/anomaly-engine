@@ -77,6 +77,17 @@ export class EasterEggSystem {
     this._setupKonamiListener();
   }
 
+  /**
+   * Listens for the Konami sequence on `window`.
+   *
+   * This cannot fire in the shipped host. The wallpaper is reparented behind the
+   * desktop icons and never holds keyboard focus, which `main.ts` notes where it
+   * wires the tray-driven events for exactly this reason. `trigger('konami')` is
+   * the working entry point; nothing calls it yet.
+   *
+   * The route that would work is the global hotkey service the host already runs,
+   * since it demonstrably observes key combinations the page never sees.
+   */
   private _setupKonamiListener(): void {
     window.addEventListener('keydown', (e) => {
       if (e.key === KONAMI_CODE[this._konamiProgress]) {

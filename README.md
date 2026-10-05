@@ -122,6 +122,7 @@ so than ship a feature table that overstates the project.
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits. |
 | **Localisation** | Spanish, German and Japanese translations ship and are reachable through `getI18n()`, but no surface calls `t()`, so a user never actually sees a translated string. The keys are complete and tested against each other; nothing consumes them. |
+| **World interaction** | Hover, click and triple-click are implemented in `InteractionSystem` and connected to the mouse, but no interactive zone is ever registered, so nothing responds. `EasterEggSystem` is the same, and the Konami code additionally listens for keydown on a window the host never focuses. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 
@@ -234,13 +235,10 @@ there was something to configure.
 
 ### Interactions
 
-The world has interactive elements:
-
-- **Hover** over the forest — leaves rustle
-- **Click** the observatory — signal begins
-- **Triple-click** the forest — watcher appears
-- **Hover** the moon at midnight — it pulses
-- **Konami code** — all lights turn on
+Not implemented yet. `InteractionSystem` and `EasterEggSystem` are real and wired to
+the mouse, but no zone is ever registered and the Konami code listens for keydown on
+a window that never holds keyboard focus. See
+[`docs/how-to-use.md`](docs/how-to-use.md#interactions).
 
 ### Anomalies
 

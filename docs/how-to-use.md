@@ -174,38 +174,29 @@ preventing the engine from starting.
 
 ## Interactions
 
-The world has interactive elements:
+**None of these are implemented.** An earlier version of this section listed hover
+and click behaviour for the forest, observatory, cabin, radio tower and moon. The
+machinery exists and is wired to the mouse — `InteractionSystem` tracks hover, click
+and multi-click, and understands named zones with callbacks — but nothing ever
+registers a zone, so there is nothing for it to hit-test against. `EasterEggSystem`
+is the same: constructed, with four eggs defined, and never asked to trigger.
 
-### Hover
+The Konami code additionally cannot work as written. It listens for `keydown` on
+`window`, and the wallpaper never holds keyboard focus, which `main.ts` says
+explicitly a few lines above where it wires the tray events. In the shipped host
+that listener cannot fire.
 
-- **Forest**: Leaves rustle slightly
-- **Observatory**: The dome glows faintly
-- **Cabin**: Windows brighten
-- **Radio tower**: The beacon blinks faster
-- **Moon**: It pulses once
+Registering the zones is the whole of the work; the handler side is done. Until it
+is, this section stays empty rather than aspirational.
 
-### Click
+### The Konami code
 
-- **Observatory**: A signal begins
-- **Cabin**: A knock is heard
-- **Radio tower**: A transmission starts
-- **Forest**: The watcher may appear
-- **Moon**: An eclipse begins
+The sequence is defined in `EasterEggSystem.ts` as
+`ArrowUp ArrowUp ArrowDown ArrowDown ArrowLeft ArrowRight ArrowLeft ArrowRight b a`.
 
-### Triple-Click
-
-- **Forest**: The watcher appears
-- **Observatory**: The door opens slightly
-
-### Konami Code
-
-Press the following sequence:
-
-```
-↑ ↑ ↓ ↓ ← → ← → B A
-```
-
-All lights in the town turn on for 10 seconds.
+It needs a route to reach the engine, since keyboard input does not arrive. The
+global hotkeys the host already registers are the obvious candidate — the host
+proves it can observe a key combination that the page never sees.
 
 ## Anomalies
 
