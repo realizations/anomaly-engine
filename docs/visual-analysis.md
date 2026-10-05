@@ -42,16 +42,34 @@ canvas captures and the frame tools:
 
 ## What was abstracted
 
-Each "direction" is applied as a post-process on the composed scene, because
-the composition itself is something small research iterations can experiment
-with. See `docs/visual-mockups/README.md` for the three variants and the
-contact sheet.
+Each direction now has two halves, and the expensive one is not a post-process:
+
+* `ScenePlan.ts` carries the composition — framing, the value ladder, aerial
+  perspective, what stands close to the camera, where light lands. It is applied
+  while the scene is drawn.
+* `VisualDirection.ts` carries only the finish: a small unifying grade so the three
+  still look like one product.
+
+This replaced an earlier arrangement where all three directions were full-screen
+passes over the finished scene. That produced three images that were recognisably
+the same picture in three tints, and it could not fix either of the two things that
+actually made the wallpaper look flat: every plane ended in the same value range,
+and nothing was drawn between the camera and the near treeline. Neither of those is
+a post-process problem.
+
+The finish is deliberately restrained for the same reason. A direction whose
+identity lives in a filter collapses into the next one, which is what happened.
+
+See `docs/visual-mockups/README.md` for the three variants and the contact sheet.
 
 ## What was left alone
 
-The world definitions, the event/anomaly model, the palette keyframes, and the
-iControl module are intentionally untouched. The flat look and the isometric
-style are deliberate authorial styles, not bugs. The canvas-2D renderer
-ceiling is real: there is no path to better lighting than the current keyframe
-approach without changing the medium (GPU shader passes), which is out of scope
-for this pass.
+The world definitions, the event and anomaly model, and the palette keyframes are
+intentionally untouched. The flat and riso styles are deliberate authorial styles,
+not bugs — riso quantises luminance rather than each RGB channel, because
+per-channel posterisation destroys hue and a dark blue snaps to magenta.
+
+The canvas-2D renderer ceiling is real: there is no path to better lighting than the
+current keyframe approach without changing the medium (GPU shader passes), which is
+out of scope. The measured cost is well inside budget regardless — 6.4 ms median
+against a 16.7 ms frame on hardware rasterisation.
