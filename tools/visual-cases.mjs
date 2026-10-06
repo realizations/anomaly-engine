@@ -139,6 +139,22 @@ for (const c of CASES) {
   // is not captured on its fade-in.
   await page.waitForTimeout(2000);
 
+  // Then wait out any lightning.
+  //
+  // A strike lasts about two and a half seconds and lifts mean luminance by a few
+  // percent, and the gate compares that mean against a recorded baseline. So a
+  // storm case sampled mid-flash drifts from one run to the next, which is not a
+  // regression in the scene but a coin toss in the harness -- it failed three cases
+  // on one run and passed all twenty on the next. The baseline is meant to
+  // describe the scene, not whether a weather event was in frame.
+  await page
+    .waitForFunction(() => window.__engine._renderer._bolt === 0, { timeout: 15000 })
+    .catch(() => {
+      // A strike that will not go out should not hang the gate; the sample below is
+      // still a valid frame, just a brighter one.
+    });
+  await page.waitForTimeout(300);
+
   const stats = await page.evaluate(() => {
     const src = document.getElementById('wallpaper-canvas');
     const g = src.getContext('2d', { willReadFrequently: true });

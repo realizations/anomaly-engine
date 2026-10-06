@@ -3673,11 +3673,15 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.fillStyle = `rgba(196,212,255,${a * a * 0.055})`;
     g.fillRect(0, 0, this._w, skyBottom);
 
-    // Two strokes per segment: a wide dim halo and a narrow hot core, which is
-    // what makes a discharge read as bright rather than as a drawn line.
+// Three passes: a soft wide halo to suggest the light bleeding into the rain, the
+    // channel itself, and a hairline core. The halo was 1.1% of the frame height --
+    // ten pixels -- which at any normal size read as a painted ribbon rather than as
+    // something bright seen through rain. It is now a third of that, and the core is
+    // genuinely a hairline.
     for (const pass of [
-      { width: Math.max(4, this._h * 0.011), colour: 'rgba(150,172,255,', alpha: 0.3 },
-      { width: Math.max(1.2, this._h * 0.0022), colour: 'rgba(238,244,255,', alpha: 1 },
+      { width: Math.max(3, this._h * 0.0038), colour: 'rgba(132,158,240,', alpha: 0.3, branch: 0.45 },
+      { width: Math.max(1.6, this._h * 0.0016), colour: 'rgba(206,222,255,', alpha: 0.85, branch: 0.6 },
+      { width: Math.max(0.9, this._h * 0.0007), colour: 'rgba(246,250,255,', alpha: 1, branch: 0.5 },
     ]) {
       g.lineWidth = pass.width;
       g.lineCap = 'round';
@@ -3695,7 +3699,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       // Branches peel off the main channel and stop short.
       for (let b = 0; b < this._boltBranches.length; b++) {
         const br = this._boltBranches[b];
-        g.lineWidth = pass.width * 0.5;
+// Branches are stroked at a fraction of the channel's width for each pass. Drawn
+        // at full width they are indistinguishable from the main line, and the
+        // hierarchy that makes it read as a discharge with offshoots is gone.
+        g.lineWidth = pass.width * pass.branch;
         g.strokeStyle = `${pass.colour}${a * env * pass.alpha * 0.7})`;
         g.beginPath();
         for (let i = 0; i < br.length; i += 2) {
@@ -3731,30 +3738,46 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     this._boltPath = [];
     this._boltBranches = [];
 
-    let x = this._w * (0.18 + rnd() * 0.64);
+    // Off-centre more often than not. A bolt down the middle of the frame is a
+    // graphic; one that happens to be there is weather.
+    let x = this._w * (0.12 + rnd() * 0.76);
     let y = -this._h * 0.02;
-    const floor = this._h * (0.52 + rnd() * 0.18);
+    // Ends at the horizon rather than below it. A channel that continues into the
+    // foreground silhouettes reads as a crack in the screen.
+    const floor = this._h * this._horizonFrac() * (0.86 + rnd() * 0.12);
     this._boltPath.push(x, y);
 
-    // Walk down in uneven steps, drifting sideways. The drift is biased back
-    // toward the centre so a bolt does not leave the frame.
+    // Many small deviations rather than a few large ones.
+    //
+    // The first version stepped down 1.8% to 6.8% of the frame at a time with a 3.5%
+    // sideways drift, which produced five or six long straight diagonals. That is
+    // the shape of a scribble. A discharge is channelised: it comes down in a
+    // narrow corridor and jitters inside it, so the steps here are small and the
+    // wander is pulled back to the original column after every one.
     const targetX = x;
+    let wander = 0;
     while (y < floor) {
-      y += this._h * (0.018 + rnd() * 0.05);
-      const pull = (targetX - x) * 0.06;
-      x += (rnd() - 0.5) * this._w * 0.07 + pull;
+      y += this._h * (0.006 + rnd() * 0.016);
+      wander += (rnd() - 0.5) * this._w * 0.016;
+      // Pull toward the original column, plus a slow lean so it is not a straight
+      // vertical line either.
+      const pull = (targetX - x) * 0.16;
+      x += wander * 0.34 + pull;
+      wander *= 0.72;
       this._boltPath.push(x, y);
 
-      // Occasionally a branch peels off and dies quickly.
-      if (rnd() > 0.72 && this._boltBranches.length < 4 && y < floor * 0.8) {
+      // A branch peels off and dies quickly. Branches are short, angled downward
+      // and outward, and are stroked thinner than the channel -- the thickness
+      // difference is most of what makes the main line read as the main line.
+      if (rnd() > 0.84 && this._boltBranches.length < 5 && y < floor * 0.82) {
         const branch: number[] = [x, y];
         let bx = x;
         let by = y;
         const dir = rnd() > 0.5 ? 1 : -1;
-        const steps = 2 + Math.floor(rnd() * 3);
+        const steps = 3 + Math.floor(rnd() * 4);
         for (let s = 0; s < steps; s++) {
-          by += this._h * (0.02 + rnd() * 0.035);
-          bx += dir * this._w * (0.012 + rnd() * 0.03);
+          by += this._h * (0.008 + rnd() * 0.016);
+          bx += dir * this._w * (0.006 + rnd() * 0.016);
           branch.push(bx, by);
         }
         this._boltBranches.push(branch);
