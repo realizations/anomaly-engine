@@ -79,17 +79,19 @@ const listened = namesMatching(/addEventListener\(\s*(?:'([^']+)'|WINDOW_EVENTS\
 /**
  * Dispatched but deliberately not consumed, with the reason.
  *
- * `anomaly:triple-click` is fired by InteractionSystem on the third click of a
- * zone, and the egg table has an entry keyed `triple-click:observatory` waiting
- * for exactly that. It cannot fire, because nothing ever calls `registerZone`, so
- * `_checkClick` iterates an empty map. The upstream feature is missing rather than
- * broken -- the clickable observatory region needs a screen rect, which is a
- * product decision about where a wallpaper should accept clicks.
+ * Currently empty. It was not: `anomaly:triple-click` sat here for the length of one
+ * release because InteractionSystem fires it on the third click of a zone while nothing
+ * ever called `registerZone`, so `_checkClick` walked an empty map and the event was
+ * dispatched into the void. Zone registration landed with M2, so the egg keyed
+ * `triple-click:observatory` is reachable for the first time and the exemption went with
+ * it.
  *
- * It is listed rather than deleted so the gap is visible and so that wiring it up
- * means removing a line here, not discovering the problem again.
+ * Entries belong here only while their upstream feature is genuinely missing rather than
+ * broken, and the check below insists each one is still dispatched and still unheard --
+ * an exemption that outlives its reason reads as a permanent pass and stops anyone
+ * looking. Adding one means writing the reason in this comment.
  */
-const KNOWN_GAPS = new Set(['anomaly:triple-click']);
+const KNOWN_GAPS = new Set<string>([]);
 
 const DECLARED = new Set<string>(Object.values(WINDOW_EVENTS));
 
@@ -126,6 +128,14 @@ describe('window event wiring', () => {
     expect(listened.has('anomaly:pause')).toBe(true);
     expect(listened.has('anomaly:set-weather')).toBe(true);
     expect(listened.has('anomaly:screenshot')).toBe(true);
+  });
+
+  it('listens for the triple-click it dispatches', () => {
+    // The specific gap this file recorded. `registerZone` now runs, so the event has a
+    // listener -- and if that wiring is ever removed the orphan check above will start
+    // failing again rather than silently reverting to a feature nobody can reach.
+    expect(listened.has('anomaly:triple-click')).toBe(true);
+    expect([...KNOWN_GAPS]).not.toContain('anomaly:triple-click');
   });
 });
 

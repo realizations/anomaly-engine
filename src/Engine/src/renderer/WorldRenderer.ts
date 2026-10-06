@@ -1,4 +1,4 @@
-import { RGB, mixRgb, css, shade, scaleValue, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
+﻿import { RGB, mixRgb, css, shade, scaleValue, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
 import type { WorldDefinition, WorldStructure, StructureKind } from '../worlds/types.js';
 import {
@@ -20,6 +20,13 @@ import { renderForeground } from './Foreground.js';
 import { renderClouds } from './CloudField.js';
 import { PLANE, PLANE_COUNT, planFor, type ScenePlan } from './ScenePlan.js';
 import { resolveStructureRect, structureAsset } from './assetRegistry.js';
+import {
+  beatEnvelope,
+  isBeatActive,
+  type ActiveStoryBeat,
+  type StoryBeat,
+  type StoryBeatKind,
+} from './storyBeat.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -72,15 +79,12 @@ const ROAD_DEFAULT: RGB = { r: 122, g: 106, b: 86 };
 export type RenderStyle = 'painterly' | 'flat' | 'riso';
 
 /**
- * One landmark's on-screen region, normalised to the viewport.
+ * A region of the screen, normalised to the viewport.
  *
  * Top-left plus size rather than centre plus half-extent, because that is what
  * `InteractionSystem` hit-tests against.
  */
-export interface LandmarkRect {
-  /** Stable identifier for one instance, e.g. `cairn@0.26`. */
-  id: string;
-  kind: StructureKind;
+export interface ScreenRect {
   /** Left edge, as a fraction of viewport width. */
   x: number;
   /** Top edge, as a fraction of viewport height. */
@@ -89,6 +93,35 @@ export interface LandmarkRect {
   width: number;
   /** Height, as a fraction of viewport height. */
   height: number;
+}
+
+/**
+ * One landmark's on-screen region, normalised to the viewport.
+ */
+export interface LandmarkRect extends ScreenRect {
+  /** Stable identifier for one instance, e.g. `cairn@0.26`. */
+  id: string;
+  kind: StructureKind;
+}
+
+/**
+ * Everything in the scene a player can point at, resolved against the clock.
+ *
+ * Landmarks come from the asset registry; the moon comes from the same `moonPosition`
+ * the renderer draws it from, so the hover region cannot drift away from the disc; and
+ * the forest band is the gap between the horizon and the near foreground, which is
+ * where the treeline is drawn.
+ *
+ * One call rather than three, because the caller is building interaction zones and
+ * should not have to know that the moon is a sky object and the forest is a band
+ * between two other things.
+ */
+export interface InteractionSurfaces {
+  landmarks: LandmarkRect[];
+  /** Null when the moon is below the horizon or the sky is too bright to show it. */
+  moon: ScreenRect | null;
+  /** The midground band the treeline occupies. */
+  forest: ScreenRect;
 }
 
 /**
@@ -307,6 +340,52 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     return (letters || 'site').toUpperCase().slice(0, 5).padEnd(3, 'x');
   }
 
+  // ---- Story beats ------------------------------------------------------------
+  //
+  // One beat at a time, deliberately. Two overlapping discoveries -- say a moon pulse
+  // and the door opening on the same frame -- would need a compositor to decide which
+  // wins, and nothing in the story needs that yet. A second beat simply replaces the
+  // first; the replaced beat's effect is still mid-envelope, so it will be visible for
+  // the remainder of its fade. That is a reasonable reading of two things happening at
+  // once, and it costs one field instead of a list and a merge rule.
+
+  private _beat: ActiveStoryBeat | null = null;
+
+  /**
+   * Perform a story beat.
+   *
+   * The engine decides *when* something is discovered; the renderer is the only thing
+   * that knows what it looks like. Every egg effect used to be a string that nothing
+   * read, so this is the mechanism those strings were waiting for.
+   */
+  applyStoryBeat(beat: StoryBeat): void {
+    this._beat = { beat, startedAt: performance.now() };
+  }
+
+  /** The beat currently being performed, or null. Read by tests and by the gate. */
+  getActiveStoryBeat(): ActiveStoryBeat | null {
+    return this._beat && beatEnvelope(this._beat.startedAt, this._beat.beat.durationMs, performance.now()) > 0
+      ? this._beat
+      : null;
+  }
+
+  /**
+   * How strongly the named beat is applying right now, 0..1.
+   *
+   * Returns 0 for a beat that is not the current one, so every draw site can ask the
+   * same question without first checking which beat it is.
+   */
+  private _beatAmount(kind: StoryBeatKind): number {
+    const b = this._beat;
+    if (!b || b.beat.kind !== kind) return 0;
+    return beatEnvelope(b.startedAt, b.beat.durationMs, performance.now());
+  }
+
+  /** Drops an expired beat, so the scene stops paying for it. */
+  private _expireBeat(): void {
+    if (this._beat && !isBeatActive(this._beat, performance.now())) this._beat = null;
+  }
+
 /**
  * Fallback used when the host has not reported a monitor layout.
  *
@@ -338,13 +417,24 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const mm = String(Math.floor((hour % 1) * 60)).padStart(2, '0');
     const anomaly = this._anomalies.find((a) => a.active);
 
+    // A beat that lies about the time, or speaks in its own words, replaces the
+    // readout for as long as it lasts. Both are computed here rather than in
+    // CrtTerminal so the terminal stays a display and never becomes a source of
+    // narrative state.
+    const beat = this._beat?.beat;
+    const lie = this._beatAmount('clock-lie');
+    const shownHour = hour + (lie > 0 && beat?.kind === 'clock-lie' ? (lie * beat.lieMinutes) / 60 : 0);
+    const sh = String(Math.floor(shownHour)).padStart(2, '0');
+    const sm = String(Math.floor((shownHour % 1) * 60)).padStart(2, '0');
+    const message = this._beatAmount('terminal-message') > 0 && beat?.kind === 'terminal-message' ? beat.lines : null;
+
     this._crt.render(
       this._ctx, this._w, this._h, grade,
       {
         worldName: this._world.name,
         worldCode: this._siteCode(),
         biome: this._world.biome,
-        clock: `${hh}:${mm}`,
+        clock: lie > 0 ? `${sh}:${sm}` : `${hh}:${mm}`,
         weather: this._weather.condition.toUpperCase(),
         observations: this._telemetry.observations,
         secrets: this._telemetry.secrets,
@@ -352,6 +442,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         anomalyName: anomaly?.type,
         uptime: (performance.now() - this._startedAt) / 1000,
         returnSummary: this._returnSummary ?? undefined,
+        beatMessage: message ?? undefined,
       },
       dt
     );
@@ -831,6 +922,52 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     return out;
   }
 
+  /**
+   * Every region of the current scene a player can point at.
+   *
+   * The moon's region is derived from the same `moonPosition` the disc is drawn from,
+   * at a radius a little larger than the drawn disc, and it is null unless the moon is
+   * actually up and visible. Returning a region for a moon below the horizon would let
+   * a player hover an empty piece of sky and get the moon's egg.
+   */
+  getInteractionSurfaces(date: Date): InteractionSurfaces {
+    const landmarks = this.getLandmarkRects();
+    const forest: ScreenRect = { x: 0, y: this._horizonFrac(), width: 1, height: 0 };
+
+    if (this._world.biome === 'liminal-interior') {
+      return { landmarks, moon: null, forest: { ...forest, height: 0 } };
+    }
+
+    const grade = gradeForHour(date.getHours() + date.getMinutes() / 60);
+    const p = moonPosition(date.getHours() + date.getMinutes() / 60, this._w, this._h);
+    const moonUp = grade.moonAlpha > 0.02 && p.visible;
+    // 25 is the drawn radius in `_drawMoon`; 1.7x is loose enough to be a comfortable
+    // target on a desktop and tight enough that it does not cover half the sky.
+    const mr = 25 * 1.7;
+    const moon: ScreenRect | null = moonUp
+      ? {
+          x: (p.x - mr) / this._w,
+          y: (p.y - mr) / this._h,
+          width: (mr * 2) / this._w,
+          height: (mr * 2) / this._h,
+        }
+      : null;
+
+    // The treeline band: from the horizon down to the top of the near foreground,
+    // which is where the mid forest is actually drawn.
+    const plan = this._plan();
+    return {
+      landmarks,
+      moon,
+      forest: {
+        x: 0,
+        y: this._horizonFrac(),
+        width: 1,
+        height: Math.max(0, plan.foregroundTop - this._horizonFrac()),
+      },
+    };
+  }
+
   private _ridges(): [RGB, RGB, RGB] {
     return this._world.palette?.ridges ?? [TERRAIN_FAR, TERRAIN_MID, TERRAIN_NEAR];
   }
@@ -1180,6 +1317,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // larger monitor layout would leave stale pixels behind.
     out.fillStyle = '#05060f';
     out.fillRect(0, 0, this._canvas.width, this._canvas.height);
+
+    // Retire an expired beat before anything reads it, so the scene stops paying for
+    // an effect nobody can see.
+    this._expireBeat();
 
     const viewports = this._viewports.length > 0 ? this._viewports : [this._fallbackViewport()];
     let slowest = 0;
@@ -1548,14 +1689,19 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const r = 25;
     const alpha = grade.moonAlpha;
 
+    // A `moon-pulse` beat brightens the moon once. It scales the existing halo and
+    // disc rather than adding a second glow, so the pulse reads as the same moon
+    // getting brighter rather than as an unrelated light appearing next to it.
+    const pulse = this._beatAmount('moon-pulse');
+
     g.save();
     g.globalCompositeOperation = 'lighter';
     // The halo starts at the moon's edge rather than inside it. Starting it at
     // 0.6r put the gradient's brightest stop in a ring *outside* the disc, which
     // showed as a hard bright circle floating around the moon in every night
-    // render — a ring of light that has no source.
+    // render â€” a ring of light that has no source.
     const halo = g.createRadialGradient(p.x, p.y, r * 0.98, p.x, p.y, r * 11);
-    const haloA = (0.2 + red * 0.3) * alpha;
+    const haloA = (0.2 + red * 0.3) * alpha + pulse * 0.34;
     halo.addColorStop(0, css(body, haloA));
     halo.addColorStop(0.06, css(body, haloA * 0.6));
     halo.addColorStop(0.35, css(body, haloA * 0.2));
@@ -1621,7 +1767,12 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       }
       dc.restore();
 
+      // The disc brightens with the pulse, so the moon itself responds rather than
+      // only its halo. Composited through the enclosing `lighter` mode, which is why
+      // this can be a plain alpha scale with no separate glow pass.
+      if (pulse > 0) g.globalAlpha = 1 + pulse * 0.8;
       g.drawImage(disc, p.x - cx, p.y - cy);
+      g.globalAlpha = 1;
     }
 
     const second = this._anom('second-moon');
@@ -2009,7 +2160,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // was hiding the entire narrative: the cabin, the observatory and the tower
     // are the reason the world has a name, and a dense band of pines drew over all
     // three of them. The gap is also what makes them read as *built* rather than as
-    // scenery — people clear ground to put a building on.
+    // scenery â€” people clear ground to put a building on.
     this._structureClearings.length = 0;
 
     for (const s of this._world.structures ?? []) {
@@ -2037,6 +2188,12 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const light = s.lightColor ?? { r: 255, g: 200, b: 130 };
     const groundY = this._h * this._horizonFrac();
 
+    // A `lights-on` beat overrides the night-time logic for every structure at once.
+    // The structures themselves never read a clock -- they read `ambient` -- so this is
+    // the one place that can make a whole settlement light up together, and it is why
+    // the egg's description had no mechanism until now.
+    const forcedLights = this._beatAmount('lights-on');
+
     // Structures read as silhouettes, not as lit objects. Letting ambient lift
     // them toward their base tone made a mid-grey lighthouse disappear against a
     // bright golden sky, so the ambient term is damped and a darkness floor is
@@ -2053,7 +2210,16 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const dark = shade(body, -0.34);
 
     const glow = (x: number, y: number, r: number, c: { r: number; g: number; b: number }, a: number) => {
-      if (!lit || ambient > 0.42) return;
+      // `forcedLights` opens the same gate the beat uses elsewhere: it makes the glow
+      // appear regardless of whether the world declared the structure lit, and
+      // regardless of how bright it is out. Bypassing only the `lit` flag would have
+      // made the effect work in two of the six built-in worlds; leaving the daylight
+      // gate in place would have made it invisible at noon, which is half of every day.
+      if (forcedLights > 0) {
+        // fall through to the glow
+      } else if (!lit || ambient > 0.42) {
+        return;
+      }
       g.save();
       g.globalCompositeOperation = 'lighter';
       const grd = g.createRadialGradient(x, y, 0, x, y, r);
@@ -2434,7 +2600,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.fillStyle = walls;
     g.fillRect(x - w / 2, baseY - h, w, h);
 
-    // Log courses. Very low contrast — at this size they are a texture, and at
+    // Log courses. Very low contrast â€” at this size they are a texture, and at
     // higher contrast they read as stripes painted on a box.
     g.fillStyle = css(wallDark, 0.4);
     for (let i = 1; i < 4; i++) {
@@ -2492,7 +2658,12 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.fillStyle = css(shade(wallBase, -0.2));
     g.fillRect(chX, ridgeY + h * 0.1, w * 0.09, h * 0.5);
 
-    const lit = ambient < 0.42;
+    // Windows are lit by time of day, not by the world's `lit` flag, because a cabin
+    // with a light in it should read as inhabited at dusk whether or not the world
+    // file remembered to say so. A `lights-on` beat overrides it for the same reason:
+    // the egg promises the whole town at once.
+    const forcedLights = this._beatAmount('lights-on');
+    const lit = ambient < 0.42 ? true : forcedLights > 0;
     const winAlpha = lit ? 0.96 : 0.12;
     if (lit) {
       g.save();
@@ -2682,6 +2853,40 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       }
       g.restore();
     }
+
+    // The door, standing ajar.
+    //
+    // Drawn after the lamp because a lit doorway is the point: the egg says the door
+    // opens, and a door that opens onto an unlit interior reads as a rectangle of the
+    // wrong colour rather than as an opening. A wedge of interior dark widening from
+    // the hinge is enough to read as a gap at this size -- a full door swing would be
+    // indistinguishable from the wall moving.
+    const doorOpen = this._beatAmount('observatory-door');
+    if (doorOpen > 0) {
+      const dx = x - w * 0.06;
+      const dw = w * 0.12;
+      const dh = h * 0.3;
+      const dy = baseY - dh;
+      // The gap widens with the envelope, so it breathes open rather than appearing.
+      g.save();
+      g.fillStyle = css(shade(body, -0.62), 0.92);
+      g.beginPath();
+      g.moveTo(dx, baseY);
+      g.lineTo(dx + dw * doorOpen, dy + dh * 0.12 * doorOpen);
+      g.lineTo(dx + dw * doorOpen, dy);
+      g.lineTo(dx, dy);
+      g.closePath();
+      g.fill();
+      // A thin lit edge on the jamb, which is what tells the eye it is a door and not
+      // a stain on the wall.
+      g.strokeStyle = css(shade(body, 0.3), 0.5 * doorOpen);
+      g.lineWidth = Math.max(1, this._h * 0.0011);
+      g.beginPath();
+      g.moveTo(dx + dw * doorOpen, dy);
+      g.lineTo(dx + dw * doorOpen, dy + dh * 0.12 * doorOpen);
+      g.stroke();
+      g.restore();
+    }
   }
 
   private _drawRadioTower(grade: SkyGrade): void {
@@ -2802,7 +3007,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   /**
    * The band of ground between the treeline and the foreground.
    *
-   * This used to be an unbroken gradient with a road across it — about a fifth of
+   * This used to be an unbroken gradient with a road across it â€” about a fifth of
    * the frame with nothing in it, which is what made the scene read as a diorama:
    * a treeline, a floor, and a foreground strip, with the middle missing.
    *
@@ -3611,7 +3816,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * The `depth` direction used to draw two hard-edged parallelograms on a `screen`
    * composite, at a fixed diagonal, unrelated to where the sun or moon actually
    * was. In the mockups those read as two panes of tinted glass laid over the
-   * scene — the most obviously wrong thing in the frame, and the reason "light
+   * scene â€” the most obviously wrong thing in the frame, and the reason "light
    * shafts" ended up on the list of things this renderer was bad at.
    *
    * The problem is not softness, it is that a shaft has to come from somewhere.
@@ -3630,7 +3835,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * A radial gradient scaled along the shaft's axis gives both falloffs in a
    * single fill and has no internal edges at all: the circle becomes a long soft
    * beam, bright where it leaves the light and gone before it reaches the ground.
-   * It is also an order of magnitude cheaper — one fill per shaft rather than
+   * It is also an order of magnitude cheaper â€” one fill per shaft rather than
    * twelve.
    */
   private _drawLightVolumes(grade: SkyGrade, hour: number): void {
@@ -4011,7 +4216,13 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   }
 
   private _drawAnomalyOverlays(): void {
-    const watcher = this._anom('forest-watcher');
+    // A `watcher` beat and the `forest-watcher` anomaly draw the same figure through
+    // the same code path. They are different things -- the anomaly is rare, cooled
+    // down and world-scoped; the beat is a player having looked at the trees for
+    // thirty seconds -- but there is no reason for them to look different, and two
+    // implementations of "something blinks back" would drift apart immediately.
+    const beatWatcher = this._beatAmount('watcher');
+    const watcher = Math.max(this._anom('forest-watcher'), beatWatcher);
     if (watcher > 0) {
       const g = this._ctx;
       const x = this._w * (0.2 + Math.sin(this._sec * this._rate('environment', 0.4)) * 0.05) + this._mouse.px * 12;

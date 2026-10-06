@@ -39,6 +39,11 @@ import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
 import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
 import { WINDOW_EVENTS } from './core/windowEvents.js';
+import { describeZones } from './systems/landmarkZones.js';
+import { EGG_EFFECTS } from './systems/eggEffects.js';
+import { advanceStreak, INITIAL_STREAK, type StreakState } from './systems/staringStreak.js';
+import { dateKey as dateKeyOf } from './events/ClockSource.js';
+import type { StoryBeat } from './renderer/storyBeat.js';
 
 /**
  * One display as the native host reports it.
@@ -183,10 +188,17 @@ class Engine {
     // After the world is settled, so the summary is written for the place the
     // user actually came back to.
     this._reportAbsence();
+    // And the zones, for the same reason: they are derived from the active world's
+    // geometry, so they cannot be built before there is a world to read.
+    this._rebuildZones();
     this._worlds.onChange((id) => {
       const w = id ? this._worlds.get(id) : null;
       if (!w) return;
       this._renderer.setWorld(w);
+      // Zones are scene geometry, so they have to be rebuilt whenever the scene
+      // changes. A world with no landmarks -- the interior -- yields no zones, and
+      // that is a normal state rather than an error.
+      this._rebuildZones();
       this._state.set('world.id', w.id);
       this._state.set('world.name', w.name);
       this._bus.emit({
@@ -455,6 +467,7 @@ class Engine {
 
     this._bus.subscribe('time.0333', () => {
       this._fireAnomaly('observatory-signal', 26, 1);
+      this._noteStaringNight();
     });
 
     this._bus.subscribe('random.second_moon', () => {
@@ -680,6 +693,16 @@ class Engine {
     });
     window.addEventListener(WINDOW_EVENTS.screenshot, () => {
       void this._screenshot.saveToFile();
+    });
+    window.addEventListener(WINDOW_EVENTS.tripleClick, (e) => {
+      const zoneId = (e as CustomEvent<{ zoneId?: string }>).detail?.zoneId;
+      if (typeof zoneId !== 'string' || !zoneId) return;
+      // The zone carries its own trigger, so the mapping from "what was clicked" to
+      // "what that means" stays in one table rather than in a switch here.
+      const desc = describeZones(this._renderer.getInteractionSurfaces(this._effectiveDate())).find(
+        (z) => z.id === zoneId
+      );
+      if (desc?.trigger) this._tryDiscover(desc.trigger);
     });
 
     this._bridge.onMessage((msg) => {
@@ -1106,6 +1129,44 @@ class Engine {
     this._renderer.triggerLightning();
   }
 
+  /**
+   * Fires a discovery by its trigger string, as the zones and the clock do.
+   *
+   * Public because it is the only honest way to review a beat: the verification tools
+   * need to trigger one on demand, and reaching past the facade into a private static
+   * does not survive minification and would bypass the discovery bookkeeping along the
+   * way -- so a beat that looked correct in a screenshot could have been applied without
+   * ever being recorded as found.
+   *
+   * Returns whether it fired. `false` means the egg was already found, or no egg has
+   * that trigger.
+   */
+  discoverEgg(trigger: string): boolean {
+    return this._tryDiscover(trigger);
+  }
+
+  /**
+   * Applies a beat directly, with no discovery bookkeeping.
+   *
+   * The escape hatch for reviewing an effect that is *already* discovered, which is
+   * most of them: a real player finds each one once, so a tool that only used
+   * `discoverEgg` could never photograph the second one. It deliberately does not
+   * journal, log or mark anything found.
+   */
+  previewStoryBeat(beat: StoryBeat): void {
+    this._renderer.applyStoryBeat(beat);
+  }
+
+  /** Progress through the discoveries, for the settings window and the gate. */
+  getDiscoveryProgress(): { discovered: number; total: number } {
+    return this._easterEggs.getProgress();
+  }
+
+  /** The interactive zones currently registered, for the gate and for debugging. */
+  getZoneIds(): string[] {
+    return this._interaction.getZones().map((z) => z.id);
+  }
+
   /** Number of displays the renderer is currently composing for. */
   getViewportCount(): number {
     return this._renderer.getViewportCount();
@@ -1148,6 +1209,97 @@ class Engine {
     this._journal.restore(s.journal);
     this._secrets.restore(s.secrets);
     this._renderer.setTerminalTelemetry(this._journal.getEntries().length, this._secrets.getDiscovered().length);
+  }
+
+  // ---- Interaction zones and discoveries ---------------------------------------
+  //
+  // `InteractionSystem` and `EasterEggSystem` were both constructed, both exposed
+  // through getters, and neither had a single caller. Every egg was permanently
+  // undiscoverable, every `effect` string was prose nothing read, and the zone map was
+  // empty. Everything below exists to give those two systems a path into the scene.
+  // The egg-to-beat table lives in `systems/eggEffects.ts`, where a test can see it.
+
+  /**
+   * Rebuild the interactive zones for the current scene.
+   *
+   * Called on every world change. Zones are derived geometry, so a world swap invalidates
+   * them; the alternative -- registering them once -- would leave the observatory's zone
+   * pointing at a building that is no longer in the frame.
+   */
+  private _rebuildZones(): void {
+    for (const z of this._interaction.getZones()) this._interaction.unregisterZone(z.id);
+    const surfaces = this._renderer.getInteractionSurfaces(this._effectiveDate());
+    for (const desc of describeZones(surfaces)) {
+      this._interaction.registerZone({
+        id: desc.id,
+        name: desc.name,
+        x: desc.rect.x,
+        y: desc.rect.y,
+        width: desc.rect.width,
+        height: desc.rect.height,
+        cursor: desc.cursor,
+        hint: desc.hint,
+        dwellMs: desc.dwellMs,
+        onClick: () => this._bridge.sendLog(`zones:click:${desc.id}`, { zone: desc.id }),
+        onDwell: () => {
+          // A dwell is only a discovery if the egg actually wants this zone, and the
+          // trigger has to match on zone id -- `forest-stare` is `idle:forest:30s`,
+          // which is specific to the treeline.
+          if (desc.id === 'forest' && desc.trigger) this._tryDiscover(desc.trigger);
+        },
+      });
+    }
+  }
+
+  /**
+   * Attempt to fire an egg by trigger string.
+   *
+   * Returns whether it fired, so callers that care -- and tests -- can tell a missed
+   * trigger from a delivered one. `EasterEggSystem.trigger` already returns that, but
+   * the effect has to be applied only on the transition, or the beat would restart on
+   * every dwell tick and on every hover.
+   */
+  private _tryDiscover(trigger: string): boolean {
+    if (!this._easterEggs.trigger(trigger)) return false;
+    const egg = this._easterEggs.getAll().find((e) => e.trigger === trigger);
+    const beat = egg ? EGG_EFFECTS[egg.id] : undefined;
+    if (beat) {
+      this._renderer.applyStoryBeat(beat);
+      this._bridge.sendLog(`egg:discovered:${egg?.id ?? trigger}`, { egg: egg?.id ?? trigger });
+      this._recordAnomaly(
+        egg?.id ?? trigger,
+        egg?.name ?? trigger,
+        'rare'
+      );
+    }
+    return true;
+  }
+
+  /**
+   * Three consecutive nights at 03:33.
+   *
+   * The rules live in `systems/staringStreak.ts` so they can be tested; this is only the
+   * wiring from the clock's payload to the egg.
+   */
+  private _noteStaringNight(dateKey?: string): void {
+    const next = advanceStreak(this._streak, dateKey ?? dateKeyOf(new Date()));
+    this._streak = next.state;
+    if (next.fired) this._tryDiscover('3:33 x3');
+  }
+
+  private _streak: StreakState = INITIAL_STREAK;
+
+  /**
+   * The date the scene should be read at, honouring a simulated hour.
+   *
+   * Needed because a zone built against the real clock would put the moon's hover
+   * region in the wrong place whenever the hour had been simulated, which is exactly
+   * when someone would be looking at the sky.
+   */
+  private _effectiveDate(): Date {
+    if (this._simDate) return this._simDate;
+    const d = new Date();
+    return d;
   }
 
   /**

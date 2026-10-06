@@ -297,6 +297,15 @@ await page.screenshot({ path: join(OUT, 'weather-storm.png') });
 //
 // Both directions are asserted. A check that only proves storms flash would still
 // pass if lightning fired in clear weather.
+//
+// The window is measured in wall clock, not in samples. A strike is scheduled 10 to
+// 40 seconds out (`14000 - storminess*4000` over the motion intensity, plus up to
+// 1.4 times that again), while the follow-up is only sometimes a sub-second burst,
+// so the check has to actually be open when it arrives. The old `peakOver(16)` took
+// a fixed 40 samples with a 400ms gap, which meant the window's length depended on
+// how long a canvas readback happened to take that run: 18 seconds on a fast one,
+// 30 on a slow one, and it failed whenever the next strike fell in the gap. Sample
+// counts cannot bound a time.
 const peakLuma = () => page.evaluate(() => {
   const c = document.getElementById('wallpaper-canvas');
   const g = c.getContext('2d', { willReadFrequently: true });
@@ -310,11 +319,12 @@ const peakLuma = () => page.evaluate(() => {
   return Math.round(max);
 });
 
-const peakOver = async (seconds) => {
+const peakUntil = async (deadlineMs, stopAt = 0) => {
   let peak = 0;
-  const samples = Math.round(seconds / 0.4);
-  for (let i = 0; i < samples; i++) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
     peak = Math.max(peak, await peakLuma());
+    if (stopAt && peak > stopAt) break;
     await page.waitForTimeout(400);
   }
   return peak;
@@ -325,11 +335,16 @@ const peakOver = async (seconds) => {
 // sky not to, so a check that passed because lightning fires everywhere would fail.
 await page.evaluate(() => window.__engine.setSimulatedWeather('clear'));
 await page.waitForTimeout(1500);
-const clearPeak = await peakOver(8);
+const clearPeak = await peakUntil(8_000);
 
+// Sampled from the moment the storm begins rather than after a settle. The scheduler
+// strikes on the storm's first frame -- `_strikeIn` is reset to zero by every
+// non-storm frame -- and waiting 1.5s for the clouds to darken stepped straight over
+// it, leaving only the 10-to-40s follow-up inside the window. Catching the onset flash
+// makes the usual run quick; the deadline behind it catches the scheduled one if the
+// readback lands between ramp frames.
 await page.evaluate(() => window.__engine.setSimulatedWeather('storm'));
-await page.waitForTimeout(1500);
-const stormPeak = await peakOver(16);
+const stormPeak = await peakUntil(50_000, clearPeak + 25);
 check(
   'a storm produces lightning and clear weather does not',
   stormPeak > clearPeak + 25,

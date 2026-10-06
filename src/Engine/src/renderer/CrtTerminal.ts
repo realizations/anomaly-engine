@@ -85,6 +85,15 @@ export interface TerminalState {
    * terminal returns to idling. Empty on a short gap.
    */
   returnSummary?: string[] | undefined;
+  /**
+   * Lines that replace the standing readout for as long as a story beat is applying.
+   *
+   * Unlike `returnSummary`, this is not a one-shot: it is re-supplied every frame
+   * while the beat runs and simply stops arriving when it ends, at which point the
+   * readout resumes. The terminal does not time it, because the beat owns the
+   * duration and a second clock here would only be able to disagree with it.
+   */
+  beatMessage?: string[] | undefined;
 }
 
 /** One line queued to be typed out. */
@@ -473,17 +482,35 @@ const lit = 0.25 + grade.ambient * 0.75;
     const hrs = Math.floor(mins / 60);
     const up = hrs > 0 ? `${hrs}h${String(mins % 60).padStart(2, '0')}` : `${mins}m`;
 
-    const next: string[] = [
-      `> ${state.worldCode.toUpperCase()} // LINKED`,
-      `  ${state.clock}  ${state.weather}${state.temperature ? `  ${state.temperature}` : ''}`,
-      `  SITE ${state.worldName.toUpperCase()}`,
-      `  LOG ${state.observations} OBS / ${state.secrets} RECOVERED`,
-      `  LINK ${up}  ::  NOMINAL`,
-    ];
+    // A story beat's lines *replace* the readout for as long as the beat runs.
+    //
+    // They were originally prepended to it, which does not work: the
+    // "re-type the most significant changed line" step below compares line indices
+    // against the previous readout, so prepending shifts every line by one, every
+    // index reads as changed, and it dutifully re-types the *last* one -- the uptime
+    // line -- while the message sits queued and never revealed. The terminal looked
+    // correct and said nothing.
+    //
+    // Replacing rather than prepending also means the message cannot be confused with a
+    // status field, which matters when the message is the whole point.
+    const next: string[] =
+      state.beatMessage && state.beatMessage.length > 0
+        ? [...state.beatMessage]
+        : [
+            `> ${state.worldCode.toUpperCase()} // LINKED`,
+            `  ${state.clock}  ${state.weather}${state.temperature ? `  ${state.temperature}` : ''}`,
+            `  SITE ${state.worldName.toUpperCase()}`,
+            `  LOG ${state.observations} OBS / ${state.secrets} RECOVERED`,
+            `  LINK ${up}  ::  NOMINAL`,
+          ];
 
-    if (state.anomalyActive) {
+    if (!state.beatMessage?.length && state.anomalyActive) {
       next.push(`> !! ${(state.anomalyName ?? 'UNKNOWN').toUpperCase()}`);
     }
+
+    // `next` now either *is* the beat's lines or is the standing readout. Nothing else
+    // is appended: a message and a status block on screen at once reads as a corrupted
+    // terminal rather than as an interruption.
 
     const first = this._lines.length === 0;
     const changed: number[] = [];

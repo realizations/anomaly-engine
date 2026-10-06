@@ -1,5 +1,18 @@
 import { EventBus } from '../core/EventBus.js';
 
+/**
+ * A calendar day as `YYYY-MM-DD` in local time.
+ *
+ * Exported because "three consecutive nights at 03:33" is a statement about days, not
+ * about milliseconds, and every consumer that needs to compare nights needs this
+ * exact same string rather than its own idea of how to format a date.
+ */
+export function dateKey(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 export class ClockSource {
   private _bus: EventBus;
   private _timer: number | null = null;
@@ -64,7 +77,15 @@ export class ClockSource {
         type: 'time.0333',
         timestamp: Date.now(),
         source: 'clock',
-        payload: {},
+        // The calendar date this reading was taken on.
+        //
+        // The `0333-stare` egg is "3:33 x3" -- three *consecutive nights* -- which is
+        // not expressible from a bare timestamp without the consumer re-deriving the
+        // date in its own local zone and hoping it agrees with the clock's. Carrying
+        // the day in the payload makes the streak arithmetic exact and testable, and
+        // it also distinguishes a second reading in the same minute from a second
+        // night, which a timestamp alone cannot.
+        payload: { dateKey: dateKey(now) },
         priority: 'high',
         rarity: 'very_rare',
         cooldown: 86400,
