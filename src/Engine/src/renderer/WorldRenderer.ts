@@ -222,7 +222,7 @@ export class WorldRenderer {
 
   private _dither: HTMLCanvasElement | null = null;  private _stars: Array<{ x: number; y: number; mag: number; tw: number; hue: number }> = [];
 private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
-  private _snow: Array<{ x: number; y: number; r: number; ph: number; sp: number }> = [];
+  private _snow: Array<{ x: number; y: number; r: number; ph: number; sp: number; z: number }> = [];
   private _motes: Array<{ x: number; y: number; ph: number; sp: number }> = [];
   private _smoke: Array<{ t: number; sp: number }> = [];
   private _poles: Array<{ x: number; h: number }> = [];
@@ -465,8 +465,22 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     for (let i = 0; i < 260; i++) {
       this._rain.push({ x: rnd(), y: rnd(), len: 0.02 + rnd() * 0.05, sp: 1.1 + rnd() * 1.1 });
     }
+    // Each flake gets a depth, and size, speed, opacity and streak length all
+    // follow from it. Without one, every flake is the same size and the same
+    // brightness, which is what made this read as a field of stars rather than
+    // as weather -- 220 evenly-weighted specks have no near and no far.
     for (let i = 0; i < 220; i++) {
-      this._snow.push({ x: rnd(), y: rnd(), r: 0.7 + rnd() * 2.1, ph: rnd() * 6.28, sp: 0.1 + rnd() * 0.35 });
+      // Squared so most flakes sit far away and only a few come close, which is
+      // how depth actually distributes.
+      const z = rnd() * rnd();
+      this._snow.push({
+        x: rnd(),
+        y: rnd(),
+        r: 0.6 + z * 1.5,
+        ph: rnd() * 6.28,
+        sp: 0.1 + rnd() * 0.35,
+        z,
+      });
     }
     for (let i = 0; i < 26; i++) {
       this._motes.push({ x: rnd(), y: 0.54 + rnd() * 0.3, ph: rnd() * 6.28, sp: 0.3 + rnd() * 0.8 });
@@ -1225,10 +1239,17 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       this._drawSun(grade, hour);
       this._drawMoon(grade, hour, date);
       this._drawClouds(grade, hour);
+      // Snow does not fall from a clear sky. This goes over the sun, the moon and
+      // the cloud deck together, because an overcast sky diffuses all three, and
+      // putting it before them would leave a hard disc hanging in the overcast.
+      this._drawSnowSky(grade);
       this._drawRidges(grade);
       this._drawHazeBands(grade);
       this._drawForestFar();
       this._drawGround(grade);
+      // Snow settles on the ground before anything is built on it, so the
+      // structures and trees stand in it rather than on top of a green field.
+      this._drawSnowCover(grade);
       this._drawStructures(grade);
       this._drawForestMid();
       this._drawFog(grade);
@@ -1238,6 +1259,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       // projection rather than as air in the valley.
       this._drawLightVolumes(grade, hour);
       this._drawForeground(grade);
+      // The foreground is drawn after the ground cover, so it paints dark grass over
+      // the snowfield and the frame ends up with a snowfield above a strip of summer
+      // grass. This dusts the nearest plane to match.
+      this._drawForegroundSnow(grade);
     }
 
     this._drawMotes(grade);
@@ -3178,6 +3203,150 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     }
   }
 
+  /**
+   * Overcast veil for a sky that is currently snowing.
+   *
+   * Without this, snow fell from a cloudless blue sky with the sun blazing through,
+   * which no one has ever seen. It is drawn over the sun, moon and clouds rather
+   * than under them, because overcast diffuses all three at once -- a veil placed
+   * underneath leaves a hard bright disc hanging in the middle of the overcast, which
+   * reads as a compositing mistake rather than as weather.
+   */
+  private _drawSnowSky(grade: SkyGrade): void {
+    if (this._weather.condition !== 'snow') return;
+    const g = this._ctx;
+    const bottom = this._h * this._horizonFrac();
+    // Snow light is bright but flat, and it carries the ambient colour of whatever
+    // is happening in the sky rather than being pure white.
+    const pale = mixRgb({ r: 234, g: 239, b: 248 }, grade.haze, 0.45);
+    const amt = 0.26 + this._weather.intensity * 0.2;
+    const grd = g.createLinearGradient(0, 0, 0, bottom);
+    grd.addColorStop(0, css(pale, amt));
+    grd.addColorStop(0.55, css(pale, amt * 0.82));
+    grd.addColorStop(1, css(pale, amt * 0.5));
+    g.fillStyle = grd;
+    g.fillRect(0, 0, this._w, bottom);
+  }
+
+  /**
+   * Snow lying on the ground.
+   *
+   * Falling flakes alone are not enough: the frame still read as a green summer
+   * meadow with white specks over it. Accumulation is the part that says the ground
+   * is frozen, so this lays cover down over the terrain plane.
+   *
+   * Alpine worlds already draw a snowfield and get skipped -- that path has spent a
+   * lot of care on drifts, hollows and exposed rock, and a flat veil over the top
+   * would flatten exactly the thing that was built there.
+   */
+  private _drawSnowCover(grade: SkyGrade): void {
+    if (this._weather.condition !== 'snow') return;
+    if (this._world.biome === 'alpine') return;
+    const g = this._ctx;
+    const y0 = this._h * this._horizonFrac();
+    const cover = 0.44 + this._weather.intensity * 0.34;
+    // Snow at night is blue-grey, not white. Taking the ambient colour keeps the
+    // cover in the same light as the sky it is lying under.
+    const white = mixRgb({ r: 242, g: 245, b: 252 }, grade.haze, 0.5);
+
+    // Base veil, ramping in over the first few percent and thinning toward the
+    // viewer. It has to start at zero rather than at full strength: the terrain
+    // meets the ridges along a full-width line, and a step from nothing to a bright
+    // veil along that line is a horizontal banding seam -- which is exactly what the
+    // seam detector is for, and it caught it at +30 luma.
+    const base = g.createLinearGradient(0, y0, 0, this._h);
+    base.addColorStop(0, css(white, 0));
+    base.addColorStop(0.045, css(white, cover * 0.82));
+    base.addColorStop(0.45, css(white, cover * 0.86));
+    base.addColorStop(1, css(white, cover * 0.62));
+    g.fillStyle = base;
+    g.fillRect(0, y0, this._w, this._h - y0);
+
+    // Drifts. Each band is an undulating path with its own noise-seeded edge, for
+    // the same reason the alpine snowfield uses them: stacked fillRects have
+    // perfectly straight edges, and straight evenly spaced edges on a bright
+    // surface is a barcode, not a drift.
+    for (let i = 0; i < 5; i++) {
+      const t = i / 5;
+      const yy = y0 + this._h * (0.02 + t * 0.2);
+      const hgt = this._h * (0.012 + t * 0.016);
+      const freq = 0.007 + t * 0.011;
+      const seed = 4409 + i * 613;
+      const grd = g.createLinearGradient(0, yy - hgt, 0, yy + hgt);
+      grd.addColorStop(0, css(white, 0));
+      grd.addColorStop(0.5, css(white, 0.3));
+      grd.addColorStop(1, css(white, 0));
+      g.fillStyle = grd;
+      g.beginPath();
+      g.moveTo(0, this._h);
+      for (let px = 0; px <= this._w; px += 6) {
+        g.lineTo(px, yy - hgt + (fbm1D(px * freq, seed, 4) - 0.5) * hgt * 3);
+      }
+      for (let px = this._w; px >= 0; px -= 6) {
+        g.lineTo(px, yy + hgt + (fbm1D(px * freq, seed + 17, 4) - 0.5) * hgt * 3);
+      }
+      g.lineTo(0, this._h);
+      g.closePath();
+      g.fill();
+    }
+
+    // Blue-grey in the hollows. Without shadow the cover is a flat white area, which
+    // reads as unpainted rather than as snow.
+    for (let i = 0; i < 4; i++) {
+      const yy = y0 + this._h * (0.05 + i * 0.055);
+      const grd = g.createLinearGradient(0, yy, 0, yy + this._h * 0.035);
+      grd.addColorStop(0, css({ r: 104, g: 116, b: 142 }, 0.18));
+      grd.addColorStop(1, css({ r: 104, g: 116, b: 142 }, 0));
+      g.fillStyle = grd;
+      g.fillRect(0, yy, this._w, this._h * 0.035);
+    }
+  }
+
+  /**
+   * Snow on the nearest plane.
+   *
+   * Lighter than the ground cover on purpose. The foreground is the darkest value in
+   * the frame, so the same alpha that reads as a light dusting on open ground would
+   * read as a white band here, and the band is what gives the composition its depth.
+   */
+  private _drawForegroundSnow(grade: SkyGrade): void {
+    if (this._weather.condition !== 'snow') return;
+    if (this._world.biome === 'alpine') return;
+    const plan = this._plan();
+    const g = this._ctx;
+    const top = this._h * plan.foregroundTop;
+    const white = mixRgb({ r: 236, g: 240, b: 250 }, grade.haze, 0.5);
+    const amt = 0.1 + this._weather.intensity * 0.14;
+
+    const grd = g.createLinearGradient(0, top, 0, this._h);
+    grd.addColorStop(0, css(white, 0));
+    grd.addColorStop(0.5, css(white, amt * 0.7));
+    grd.addColorStop(1, css(white, amt));
+    g.fillStyle = grd;
+    g.fillRect(0, top, this._w, this._h - top);
+
+    // Caps of snow sitting on the blades, with noise-seeded edges for the same
+    // reason the ground drifts have them.
+    for (let i = 0; i < 3; i++) {
+      const yy = top + this._h * (0.12 + i * 0.16);
+      const hgt = this._h * 0.02;
+      const grd2 = g.createLinearGradient(0, yy - hgt, 0, yy + hgt);
+      grd2.addColorStop(0, css(white, 0));
+      grd2.addColorStop(0.5, css(white, amt * 0.85));
+      grd2.addColorStop(1, css(white, 0));
+      g.fillStyle = grd2;
+      g.beginPath();
+      g.moveTo(0, this._h);
+      for (let px = 0; px <= this._w; px += 6) {
+        g.lineTo(px, yy + (fbm1D(px * 0.011, 7717 + i * 331, 4) - 0.5) * hgt * 2.4);
+      }
+      g.lineTo(this._w, this._h);
+      g.lineTo(0, this._h);
+      g.closePath();
+      g.fill();
+    }
+  }
+
   /** Wind-carved snow: drifts, not blades. */
   private _drawSnowfield(grade: SkyGrade, base: RGB): void {
     const g = this._ctx;
@@ -3499,9 +3668,9 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         w: this._w,
         h: this._h,
         // Seconds, which is what ForegroundContext.t documents. It was being handed
-    // `_t`, which is milliseconds, so the grass sway there was running at whatever
-    // rate its constant implied per millisecond rather than per second.
-    t: this._sec,
+        // `_t`, which is milliseconds, so the grass sway there was running at whatever
+        // rate its constant implied per millisecond rather than per second.
+        t: this._sec,
         seed: this._seed,
         grade,
         intensity: this._motionIntensity,
@@ -3568,20 +3737,42 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       }
       g.stroke();
     } else if (cond === 'snow') {
+      // A flake is drawn as a short vertical streak rather than as a disc.
+      //
+      // A disc at this size is one or two pixels across, and a one-pixel disc on a
+      // bright sky is a star: hard-edged, uniformly bright, and not obviously
+      // moving. A streak is soft at both ends because of the round cap, it is
+      // visibly travelling, and its length can carry the flake's speed, so the
+      // same primitive covers both the near blur and the far speck.
+      const g = this._ctx;
       g.save();
+      g.lineCap = 'round';
+      g.strokeStyle = 'rgba(246,248,255,1)';
+      // Snow does not fall straight down, and it does not all fall at one speed.
+      const drift = this._weather.windSpeed * 0.5;
       for (const s of this._snow) {
-        s.y += (s.sp * dt) / 1000;
+        const z = s.z;
+        s.y += (s.sp * (0.5 + z * 1.5) * dt) / 1000;
+        s.x += (drift * (0.4 + z * 0.8) * dt) / 1000 * 0.02;
         if (s.y > 1.05) {
           s.y = -0.03;
           s.x = Math.random();
         }
-        const px = s.x * this._w + Math.sin(this._sec * this._rate('particles', 0.7) + s.ph) * this.h0(0.01);
+        if (s.x > 1.05) s.x = -0.05;
+        else if (s.x < -0.05) s.x = 1.05;
+
+        const sway = Math.sin(this._sec * this._rate('particles', 0.7) + s.ph) * this.h0(0.004 + z * 0.008);
+        const px = s.x * this._w + sway;
         const py = s.y * this._h;
         const r = s.r * (this._h / 1080);
-        g.fillStyle = 'rgba(246,248,255,0.62)';
+        // Near flakes are wider, more opaque and longer, so they read as passing
+        // close to the camera; far ones collapse to a faint speck.
+        g.globalAlpha = (0.16 + z * 0.62) * this._weather.intensity;
+        g.lineWidth = r * (1 + z * 0.9);
         g.beginPath();
-        g.arc(px, py, r, 0, Math.PI * 2);
-        g.fill();
+        g.moveTo(px, py);
+        g.lineTo(px - sway * 0.3, py + r * (1.4 + z * 5.5));
+        g.stroke();
       }
       g.restore();
     }
