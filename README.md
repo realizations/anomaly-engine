@@ -345,7 +345,7 @@ src/
       anomalies/         Anomaly registry with rarity and cooldowns
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured)
-    tests/               224 unit tests
+    tests/               233 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -512,7 +512,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | Tool | Purpose |
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
-| `tools/e2e.mjs` | 60 end-to-end checks on the deployed `file://` build |
+| `tools/e2e.mjs` | 63 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/per-display-worlds.mjs` | Proves each display can show its own world, by checking the two screens render differently |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
@@ -541,12 +541,12 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 224 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 233 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
-locale set, the anomaly registry and its world-fit rules, the liminal world profile,
-the return summary, the world digest, an audit that every identifier the data files
-name actually ships, and one that every emitted event is either acted on or
-explicitly atmospheric.
+motion model, the locale set, the anomaly registry and its world-fit rules, the
+liminal world profile, the return summary, the world digest, an audit that every
+identifier the data files name actually ships, and one that every emitted event is
+either acted on or explicitly atmospheric.
 `npx eslint src/ tests/` is clean.
 
 The suite loads the renderer from `file://` rather than `http://localhost`, because serving

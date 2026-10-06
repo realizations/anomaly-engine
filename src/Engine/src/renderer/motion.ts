@@ -132,7 +132,16 @@ export function rate(category: MotionCategory, intensity: MotionIntensity, baseR
 }
 
 export function clamp01(v: number): number {
-  if (!Number.isFinite(v)) return DEFAULT_MOTION_INTENSITY;
+  // NaN means the caller has no idea what it wanted, so the default is the only
+  // sensible answer.
+  //
+  // Infinities do not: an intensity of Infinity means more than the maximum, and
+  // clamping it to the maximum is what "clamp" means. This used to return the
+  // default for both, so an intensity that should have been maximal -- a division
+  // that overflowed, say -- silently became calm instead. On a control whose whole
+  // purpose is that somebody found the motion uncomfortable, quietly turning their
+  // setting down is the wrong way to fail.
+  if (Number.isNaN(v)) return DEFAULT_MOTION_INTENSITY;
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 

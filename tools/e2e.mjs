@@ -158,6 +158,107 @@ await page.evaluate(() => window.dispatchEvent(new CustomEvent('anomaly:resume')
 await page.waitForTimeout(1500);
 check('resume restores animation', (await shot('resumed')) !== duringPause2);
 
+// --- the scene must animate by itself ---
+//
+// Everything above this line compares one state against another: night to golden,
+// clear to storm, style to style. All of those pass on a completely static
+// renderer, because a still image is perfectly capable of being different from
+// another still image.
+//
+// That is the gap a frozen clock hid in for as long as it existed. `WorldRenderer`
+// read its `_t` in fifteen places -- grass sway, the beacon's blink, fog drift,
+// motes, camera -- and never advanced it. Every frame was identical, every value
+// was a valid number, and 224 unit tests, 20 visual cases and 19 verify steps all
+// passed. `flicker.mjs` called the scene calm, which a still image also is.
+//
+// So: sample the same state twice with nothing changed in between, and require the
+// frame to have moved. Measured as mean absolute luminance change rather than a
+// hash, because a hash would also be satisfied by the renderer's own grain.
+const meanLuma = () => page.evaluate(() => {
+  const c = document.getElementById('wallpaper-canvas');
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const d = g.getImageData(0, 0, c.width, Math.round(c.height * 0.8)).data;
+  let s = 0;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 16) {
+    s += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    n++;
+  }
+  return s / n;
+});
+
+await page.evaluate(() => {
+  window.__engine.setSimulatedHour(16.9);
+  window.__engine.setSimulatedWeather('clear');
+});
+await page.waitForTimeout(1500);
+
+const lumaSeries = [];
+for (let i = 0; i < 24; i++) {
+  await page.waitForTimeout(120);
+  lumaSeries.push(await meanLuma());
+}
+const lumaDeltas = [];
+for (let i = 1; i < lumaSeries.length; i++) lumaDeltas.push(Math.abs(lumaSeries[i] - lumaSeries[i - 1]));
+const meanChange = lumaDeltas.reduce((a, b) => a + b, 0) / lumaDeltas.length;
+check(
+  'the scene animates on its own, with nothing changed',
+  meanChange > 0.02,
+  `mean frame-to-frame luminance change ${meanChange.toFixed(4)} over 3s of clear afternoon`
+);
+
+// White box on purpose.
+//
+// The check above catches a renderer that is entirely frozen. It does *not* catch
+// this particular bug, and that was measured rather than assumed: with
+// `WorldRenderer._t` pinned at zero, whole-frame luminance change was 0.0761 and
+// this check passed. The frame keeps moving because several other systems animate
+// independently -- UncannyLayer has its own clock, the terminal and the grain have
+// their own -- so "the picture changes" is satisfied without the renderer's clock
+// running at all.
+//
+// Sampling the beacon region instead, which is what a frozen clock most obviously
+// breaks, did not discriminate either: range 15.06 luma frozen against 14.94 live.
+// Something else in that box animates.
+//
+// So the clock is read directly. It is a private field, and that is the cost of
+// being able to say anything true here -- a black-box version of this assertion
+// was written first and does not work.
+const clockA = await page.evaluate(() => window.__engine._renderer._t);
+await page.waitForTimeout(1200);
+const clockB = await page.evaluate(() => window.__engine._renderer._t);
+check(
+  "the renderer's own clock advances",
+  clockB > clockA,
+  `_t ${clockA.toFixed(0)} -> ${clockB.toFixed(0)} over 1.2s`
+);
+
+// Reduced motion must damp the scene without stopping the clock. Only the second
+// half is asserted here: whole-frame luminance change is dominated by whichever
+// element moves most in the frame, which varies with composition, so comparing it
+// across intensities measures that element rather than the dial. Measured at zero,
+// the frame still changes -- a frozen clock does not.
+//
+// The dial's actual response curve is asserted deterministically in
+// tests/Motion.test.ts, where it belongs: amplitude and rate are pure functions of
+// the intensity, and the ordering between categories is the design.
+await page.evaluate(() => window.__engine.setMotionIntensity(0));
+await page.waitForTimeout(1200);
+const stillSeries = [];
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(120);
+  stillSeries.push(await meanLuma());
+}
+const stillDeltas = [];
+for (let i = 1; i < stillSeries.length; i++) stillDeltas.push(Math.abs(stillSeries[i] - stillSeries[i - 1]));
+const stillChange = stillDeltas.reduce((a, b) => a + b, 0) / stillDeltas.length;
+check(
+  'reduced motion damps the scene without stopping the clock',
+  stillChange > 0.001,
+  `at motion 0 the frame still changes by ${stillChange.toFixed(4)} per frame`
+);
+await page.evaluate(() => window.__engine.setMotionIntensity(0.35));
+
 // --- time of day must change the image ---
 await page.evaluate(() => window.__engine.setSimulatedHour(2));
 await page.waitForTimeout(1200);
