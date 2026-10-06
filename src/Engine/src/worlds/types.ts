@@ -198,7 +198,15 @@ export interface WorldValidation {
 const BIOMES: BiomeId[] = [
   'temperate-forest', 'alpine', 'coast', 'high-desert', 'salt-marsh', 'liminal-interior',
 ];
-const STRUCTURES: StructureKind[] = [
+/**
+ * Every structure kind, exported so the asset registry can be checked for
+ * completeness against the real list.
+ *
+ * This was module-private, which meant the only way to assert the registry covered
+ * every kind was to paste the list into the test -- and a pasted list is a copy that
+ * goes stale silently the moment someone adds a fifteenth kind.
+ */
+export const STRUCTURE_KINDS: StructureKind[] = [
   'cabin', 'radio-tower', 'observatory', 'lighthouse', 'ruin', 'well',
   'dishes', 'cairn', 'pylon-run', 'fence-line', 'rock-field', 'reed-bank',
   'snowbank', 'butte',
@@ -249,7 +257,7 @@ export function validateWorld(input: unknown): WorldValidation {
     if (typeof s !== 'number' || s < 0 || s > 2) errors.push('palette.saturation must be between 0 and 2');
   }
   for (const s of w.structures ?? []) {
-    if (!STRUCTURES.includes(s.kind)) {
+    if (!STRUCTURE_KINDS.includes(s.kind)) {
       errors.push(`unknown structure kind "${s.kind}"`);
     }
     if (typeof s.x !== 'number' || s.x < -0.2 || s.x > 1.2) {

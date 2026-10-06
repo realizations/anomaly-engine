@@ -1,6 +1,6 @@
 import { RGB, mixRgb, css, shade, scaleValue, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
-import type { WorldDefinition, WorldStructure } from '../worlds/types.js';
+import type { WorldDefinition, WorldStructure, StructureKind } from '../worlds/types.js';
 import {
   amplitude,
   BEACON,
@@ -19,6 +19,7 @@ import { UncannyLayer } from './UncannyLayer.js';
 import { renderForeground } from './Foreground.js';
 import { renderClouds } from './CloudField.js';
 import { PLANE, PLANE_COUNT, planFor, type ScenePlan } from './ScenePlan.js';
+import { resolveStructureRect, structureAsset } from './assetRegistry.js';
 
 export interface WeatherState {
   condition: 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
@@ -54,49 +55,41 @@ const GROUND_DEFAULT: RGB = { r: 30, g: 40, b: 32 };
 const ROAD_DEFAULT: RGB = { r: 122, g: 106, b: 86 };
 
 /**
- * Default anchor for each structure kind, as a fraction of the viewport. The
- * dispatcher translates a structure's baked-in geometry so its anchor lands on
- * the world's declared position, which keeps the original silhouettes intact.
+ * Anchors, tones, footprints and the anchor coordinate system all moved to
+ * `assetRegistry.ts`.
+ *
+ * They used to live here as two parallel tables plus a hardcoded pixel literal inside
+ * each `case` of `_drawStructure`. Nothing tied the three together, and nothing
+ * outside this file could ask where a landmark was -- which is why
+ * `InteractionSystem` had no way to build a clickable region and the
+ * `triple-click:observatory` egg could never fire.
+ *
+ * The draw code now reads `structureAsset(s.kind)` directly rather than looking
+ * through a local table, so there is exactly one description of a landmark and it is
+ * not a copy of one.
  */
-const STRUCTURE_ANCHORS: Record<string, { x: number; y: number }> = {
-  cabin: { x: 0.2, y: 0.748 },
-  observatory: { x: 0.565, y: 0.715 },
-  'radio-tower': { x: 0.775, y: 0.715 },
-  'pylon-run': { x: 0.0, y: 0.7 },
-  lighthouse: { x: 0.82, y: 0.7 },
-  well: { x: 0.36, y: 0.72 },
-  ruin: { x: 0.24, y: 0.75 },
-  dishes: { x: 0.78, y: 0.755 },
-  cairn: { x: 0.26, y: 0.79 },
-  butte: { x: 0.08, y: 0.74 },
-  'rock-field': { x: 0.45, y: 0.76 },
-  'snowbank': { x: 0.3, y: 0.76 },
-  'reed-bank': { x: 0.12, y: 0.69 },
-  'fence-line': { x: 0.5, y: 0.735 },
-};
-
-/** Base tones for the generic structures, before ambient and haze are applied. */
-const STRUCTURE_TONE: Record<string, RGB> = {
-  cabin: { r: 74, g: 52, b: 40 },
-  observatory: { r: 92, g: 94, b: 102 },
-  'radio-tower': { r: 118, g: 118, b: 122 },
-  'pylon-run': { r: 40, g: 38, b: 40 },
-  // A lighthouse reads as a dark silhouette with pale bands, not as a white
-  // object. A light tone vanished completely against a bright golden sky.
-  lighthouse: { r: 96, g: 92, b: 88 },
-  well: { r: 88, g: 76, b: 64 },
-  ruin: { r: 128, g: 112, b: 92 },
-  dishes: { r: 168, g: 166, b: 160 },
-  cairn: { r: 108, g: 104, b: 98 },
-  butte: { r: 132, g: 104, b: 80 },
-  'rock-field': { r: 92, g: 82, b: 70 },
-  snowbank: { r: 210, g: 216, b: 222 },
-  'reed-bank': { r: 96, g: 92, b: 66 },
-  'fence-line': { r: 74, g: 66, b: 56 },
-};
-
 
 export type RenderStyle = 'painterly' | 'flat' | 'riso';
+
+/**
+ * One landmark's on-screen region, normalised to the viewport.
+ *
+ * Top-left plus size rather than centre plus half-extent, because that is what
+ * `InteractionSystem` hit-tests against.
+ */
+export interface LandmarkRect {
+  /** Stable identifier for one instance, e.g. `cairn@0.26`. */
+  id: string;
+  kind: StructureKind;
+  /** Left edge, as a fraction of viewport width. */
+  x: number;
+  /** Top edge, as a fraction of viewport height. */
+  y: number;
+  /** Width, as a fraction of viewport width. */
+  width: number;
+  /** Height, as a fraction of viewport height. */
+  height: number;
+}
 
 /**
  * One display's rectangle on the virtual desktop.
@@ -795,6 +788,47 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
 
   getWorld(): WorldDefinition {
     return this._world;
+  }
+
+  /**
+   * Where the landmarks of the active world currently are on screen.
+   *
+   * This is the missing half of the asset registry: the registry says how big each
+   * landmark is, this says where it ended up. Everything is returned as a fraction
+   * of the viewport rather than in pixels, because the caller that needs it --
+   * `InteractionSystem`, building hover and click regions -- already works in
+   * normalised coordinates and would otherwise have to convert and get it subtly
+   * wrong under multi-monitor layouts.
+   *
+   * It reflects the current mouse parallax, so a region tracks the building as it
+   * shifts under the cursor. Callers that want a stable region should build it once
+   * rather than per mousemove.
+   *
+   * The interior world has no landscape and therefore no landmarks, and returns an
+   * empty list rather than throwing.
+   */
+  getLandmarkRects(): LandmarkRect[] {
+    const out: LandmarkRect[] = [];
+    if (this._world.biome === 'liminal-interior') return out;
+    const poleXs = this._poles.map((p) => p.x);
+    for (const s of this._world.structures ?? []) {
+      const asset = structureAsset(s.kind);
+      if (!asset) continue;
+      const rect = resolveStructureRect(
+        asset,
+        {
+          w: this._w,
+          h: this._h,
+          horizonFrac: this._horizonFrac(),
+          mousePx: this._mouse.px,
+          poleXs,
+        },
+        s.x,
+        s.scale ?? 1
+      );
+      out.push({ id: `${s.kind}@${s.x}`, kind: s.kind, ...rect });
+    }
+    return out;
   }
 
   private _ridges(): [RGB, RGB, RGB] {
@@ -1979,16 +2013,16 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     this._structureClearings.length = 0;
 
     for (const s of this._world.structures ?? []) {
-      const anchor = STRUCTURE_ANCHORS[s.kind];
-      if (!anchor) continue;
+      const asset = structureAsset(s.kind);
+      if (!asset) continue;
       const g = this._ctx;
-      const defX = anchor.x * this._w;
-      const defY = anchor.y * this._h;
+      const defX = asset.anchor.x * this._w;
+      const defY = asset.anchor.y * this._h;
       const sc = s.scale ?? 1;
       const cx = s.x * this._w;
       this._structureClearings.push({ x: cx, halfW: this._w * 0.028 * sc * this._plan().structureClearance });
       g.save();
-      g.translate(cx, (s.y ?? anchor.y) * this._h);
+      g.translate(cx, (s.y ?? asset.anchor.y) * this._h);
       g.scale(sc, sc);
       g.translate(-defX, -defY);
       this._drawStructure(s, grade);
@@ -2009,7 +2043,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // always applied. A landmark must stay legible at every hour.
     const body = mixRgb(
       mixRgb(
-        mixRgb(STRUCTURE_TONE[s.kind] ?? { r: 70, g: 66, b: 64 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.35),
+        mixRgb(structureAsset(s.kind)?.tone ?? { r: 70, g: 66, b: 64 }, { r: 0, g: 0, b: 0 }, (1 - ambient) * 0.35),
         { r: 0, g: 0, b: 0 },
         0.22
       ),
