@@ -12,8 +12,10 @@
  * Exits non-zero if any asset is missing a licence record or carries a
  * restrictive term, so it can gate CI and pre-release builds.
  */
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, extname, relative, dirname } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join, extname, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +48,19 @@ export const FORBIDDEN = [
   { re: /fair use|all rights reserved/i, why: 'no redistribution grant' },
 ];
 
-const ASSET_DIRS = ['assets'];
+// The directories binary assets are shipped from.
+//
+// `src/Engine/src/public` is in this list because it is the surface Vite copies into
+// the renderer the user actually runs, and it was not here: the five bundled typefaces
+// were copied into it by tools/make-branding.mjs and shipped, while the gate walked
+// `assets` only. Anything dropped into that directory would have passed the gate with
+// no licence record at all. That is a hole in a check whose only job is to be the
+// check.
+//
+// `src/Engine/renderer/` is deliberately absent. It is generated output and
+// gitignored, so a fresh clone does not have it, and a gate whose verdict depends on
+// whether someone ran a build first is a gate nobody trusts.
+export const ASSET_DIRS = ['assets', 'src/Engine/src/public'];
 const BINARY_EXT = new Set([
   '.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.ico', '.bmp', '.tga',
   '.mp3', '.ogg', '.wav', '.flac', '.m4a', '.aac',
@@ -93,6 +107,48 @@ export function validateRecord(rel, rec) {
   return problems;
 }
 
+const sha256File = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+
+/**
+ * Validates a record that is a byte-identical copy of another listed file.
+ *
+ * A copy carries no licence of its own. Two records describing the same bytes are two
+ * facts that can disagree, and the disagreement would be invisible: the gate would
+ * happily approve whichever one it happened to read. So the copy inherits the source
+ * record's licence wholesale and the gate's contribution is to prove the bytes still
+ * match -- which is the only thing about a copy that can drift independently.
+ */
+export function validateCopy(rel, rec, root, byPath) {
+  const named = typeof rec.copiedFrom === 'string' ? rec.copiedFrom.trim().replace(/\\/g, '/') : '';
+  if (!named) return [{ path: rel, why: 'copiedFrom must name the source path' }];
+
+  const key = named.toLowerCase();
+  if (key === rel.toLowerCase()) return [{ path: rel, why: 'copiedFrom points at itself' }];
+
+  const srcRec = byPath.get(key);
+  if (!srcRec) {
+    return [{ path: rel, why: `copied source "${named}" has no licence record of its own` }];
+  }
+
+  const srcProblems = validateRecord(named, srcRec);
+  if (srcProblems.length) {
+    return srcProblems.map((p) => ({ path: rel, why: `copied source "${named}": ${p.why}` }));
+  }
+
+  const from = join(root, named);
+  const to = join(root, rel);
+  if (!existsSync(from)) return [{ path: rel, why: `copied source "${named}" does not exist` }];
+  if (!existsSync(to)) return [{ path: rel, why: 'file does not exist' }];
+
+  if (sha256File(from) !== sha256File(to)) {
+    return [{
+      path: rel,
+      why: `has drifted from "${named}" -- it would still ship under the source's licence record, which describes different bytes`,
+    }];
+  }
+  return [];
+}
+
 /** Full pass: every shipped asset file has an approved, non-restrictive record. */
 export function validate(manifest, root) {
   const problems = [];
@@ -115,10 +171,13 @@ export function validate(manifest, root) {
       checked++;
       const rec = byPath.get(rel.toLowerCase());
       if (!rec) {
-        problems.push({ path: rel, why: 'no licence record in assets/manifest.json' });
+        problems.push({ path: rel, why: `no licence record in assets/manifest.json` });
         continue;
       }
-      problems.push(...validateRecord(rel, rec));
+      // A copy is validated against its source rather than on its own terms.
+      problems.push(
+        ...(rec.copiedFrom ? validateCopy(rel, rec, root, byPath) : validateRecord(rel, rec))
+      );
     }
   }
 
@@ -154,27 +213,93 @@ const SELFTEST = [
   { name: 'rejects OFL without sourceUrl', rec: { license: 'OFL-1.1' }, expect: 1 },
 ];
 
+/**
+ * Cases for the copy path.
+ *
+ * These build a throwaway fixture instead of using a table of records, because the
+ * property being proven is that two *files* with different bytes are caught. A record
+ * alone cannot express that, and "the copy matches its source" is the entire reason
+ * the copy is allowed to carry no licence of its own.
+ */
+function copySelftest() {
+  const root = mkdtempSync(join(tmpdir(), 'licence-gate-'));
+  const pub = 'src/Engine/src/public';
+  const cases = [];
+  try {
+    mkdirSync(join(root, 'assets', 'models'), { recursive: true });
+    mkdirSync(join(root, pub, 'fonts'), { recursive: true });
+    writeFileSync(join(root, 'assets', 'models', 'a.glb'), 'AAAA');
+    writeFileSync(join(root, 'assets', 'models', 'bad.glb'), 'x');
+    writeFileSync(join(root, pub, 'a.glb'), 'AAAA');
+    writeFileSync(join(root, pub, 'drifted.glb'), 'BBBB');
+    writeFileSync(join(root, pub, 'bad.glb'), 'x');
+
+    const byPath = new Map([
+      ['assets/models/a.glb', { license: 'CC0-1.0', sourceUrl: 'https://x.dev' }],
+      ['assets/models/bad.glb', { license: 'CC-BY-NC-4.0' }],
+      [`${pub}/a.glb`, { copiedFrom: 'assets/models/a.glb' }],
+      [`${pub}/drifted.glb`, { copiedFrom: 'assets/models/a.glb' }],
+      [`${pub}/bad.glb`, { copiedFrom: 'assets/models/bad.glb' }],
+      [`${pub}/ghost.glb`, { copiedFrom: 'assets/models/ghost.glb' }],
+      [`${pub}/self.glb`, { copiedFrom: `${pub}/self.glb` }],
+      [`${pub}/empty.glb`, {}],
+    ]);
+
+    const check = (name, rel, rec, expect) => cases.push({ name, rel, rec, expect });
+    check('accepts a byte-identical copy with no licence of its own', `${pub}/a.glb`, byPath.get(`${pub}/a.glb`), 0);
+    check('rejects a copy that has drifted from its source', `${pub}/drifted.glb`, byPath.get(`${pub}/drifted.glb`), 1);
+    check('rejects a copy whose source has no record', `${pub}/ghost.glb`, byPath.get(`${pub}/ghost.glb`), 1);
+    check('rejects a copy of a file whose source licence is forbidden', `${pub}/bad.glb`, byPath.get(`${pub}/bad.glb`), 1);
+    check('rejects copiedFrom pointing at itself', `${pub}/self.glb`, byPath.get(`${pub}/self.glb`), 1);
+    check('rejects copiedFrom that names nothing', `${pub}/empty.glb`, byPath.get(`${pub}/empty.glb`), 1);
+
+    let failed = 0;
+    for (const t of cases) {
+      const got = validateCopy(t.rel, t.rec, root, byPath).length;
+      const ok = got === t.expect;
+      if (!ok) failed++;
+      process.stdout.write(`${ok ? 'PASS' : 'FAIL'}  ${t.name}  (expected ${t.expect} problem(s), got ${got})\n`);
+    }
+    return { failed, total: cases.length };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 function selftest() {
   let failed = 0;
+  let total = 0;
   for (const t of SELFTEST) {
     const got = validateRecord('x.png', t.rec).length;
     const ok = got === t.expect;
     if (!ok) failed++;
+    total++;
     process.stdout.write(`${ok ? 'PASS' : 'FAIL'}  ${t.name}  (expected ${t.expect} problem(s), got ${got})\n`);
   }
-  process.stdout.write(`\n${SELFTEST.length - failed}/${SELFTEST.length} self-test cases passed\n`);
-  process.exit(failed ? 1 : 0);
+  const copy = copySelftest();
+  failed += copy.failed;
+  total += copy.total;
+  process.stdout.write(`\n${total - failed}/${total} self-test cases passed\n`);
+  return failed ? 1 : 0;
 }
 
-if (process.argv.includes('--selftest')) {
-  selftest();
-} else {
+/**
+ * The gate itself, as a function of its arguments.
+ *
+ * It used to run at module scope with `process.exit` in both branches, so importing
+ * `ALLOWED` or `validate` from a test ran the whole gate and then exited from under
+ * the runner. A module that acts on import is a module nothing can check, which is
+ * the same shape as a table defined inside a file that starts an engine on import.
+ */
+export function main(argv = process.argv) {
+  if (argv.includes('--selftest')) return selftest();
+
   if (!existsSync(MANIFEST)) {
     process.stdout.write(
       'FAIL  assets/manifest.json not found.\n' +
       '      Every third-party asset needs a licence record before it can ship.\n'
     );
-    process.exit(1);
+    return 1;
   }
 
   let manifest;
@@ -182,12 +307,12 @@ if (process.argv.includes('--selftest')) {
     manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
   } catch (e) {
     process.stdout.write(`FAIL  assets/manifest.json is not valid JSON: ${e.message}\n`);
-    process.exit(1);
+    return 1;
   }
 
   const { problems, checked } = validate(manifest, ROOT);
 
-  if (process.argv.includes('--json')) {
+  if (argv.includes('--json')) {
     process.stdout.write(JSON.stringify({ checked, problems }, null, 2) + '\n');
   } else {
     process.stdout.write(`Checked ${checked} shipped asset file(s) against ${manifest.assets.length} manifest record(s).\n`);
@@ -198,5 +323,10 @@ if (process.argv.includes('--selftest')) {
       for (const p of problems) process.stdout.write(`  FAIL  ${p.path}\n          ${p.why}\n`);
     }
   }
-  process.exit(problems.length ? 1 : 0);
+  return problems.length ? 1 : 0;
 }
+
+// Importing this module must not run it. `process.argv[1]` is the entry point, which
+// is vitest or whatever else is asking for `ALLOWED` when it is not this file.
+const invokedDirectly = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) process.exit(main());

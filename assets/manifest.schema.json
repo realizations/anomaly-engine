@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/realizations/anomaly-engine/assets/manifest.schema.json",
+  "title": "Anomaly Engine asset manifest",
+  "description": "The licence record for every asset this project ships. Structural validation only: whether a licence is *acceptable* is decided by tools/license-gate.mjs against ALLOWED/FORBIDDEN, because duplicating that allow-list here would create a second copy of a fact that can drift. The gate is also the only thing that checks the referenced files exist and that copied files still match their source.",
+  "type": "object",
+  "required": ["policy", "assets"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "policy": {
+      "description": "Why some licences are accepted and others are not. Read by humans; the machine-enforceable version of it is ALLOWED and FORBIDDEN in tools/license-gate.mjs.",
+      "type": "object",
+      "required": ["summary", "accepted", "rejected"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "preferred": { "type": "string" },
+        "accepted": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rejected": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "trademarks": { "type": "string" },
+        "previews": { "type": "string" }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "rejectedSources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rejectedSource" }
+    }
+  },
+  "$defs": {
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https://",
+      "description": "https only, so the licence can still be re-verified later. The gate enforces this too."
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\).+$",
+      "description": "Repository-relative, forward slashes, not absolute. The gate normalises to forward slashes and lower-cases before matching."
+    },
+    "asset": {
+      "description": "One shipped file, or one directory that is shipped as a whole.",
+      "type": "object",
+      "required": ["path", "license"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "allOf": [{ "$ref": "#/$defs/relativePath" }],
+          "description": "File or directory, relative to the repository root. A path listed here that does not exist fails the gate, which is why no 3D model is declared before one exists."
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "description": "An identifier from ALLOWED in tools/license-gate.mjs. Not an enum here on purpose: the allow-list has exactly one home."
+        },
+        "copiedFrom": {
+          "allOf": [{ "$ref": "#/$defs/relativePath" }],
+          "description": "Set when this file is a byte-identical copy of another manifest entry -- the Vite public directory's copy of a bundled font. The gate then inherits the source record's licence and verifies the bytes still match, instead of trusting a second description of the same bytes."
+        },
+        "author": { "type": "string" },
+        "sourceUrl": { "$ref": "#/$defs/httpsUrl" },
+        "licenseText": {
+          "allOf": [{ "$ref": "#/$defs/relativePath" }],
+          "description": "Bundled copy of the licence, so it ships with the asset as most licences require."
+        },
+        "version": { "type": "string" },
+        "modified": { "type": "boolean" },
+        "reservedFontName": {
+          "type": "string",
+          "description": "Required to be accurate for OFL: renaming a modified font is only mandatory when the licence declares a Reserved Font Name."
+        },
+        "attribution": {
+          "type": ["string", "null"],
+          "description": "Required by the gate for any CC-BY licence."
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "source": {
+      "description": "A third-party source that was evaluated and accepted, with the terms verified on a stated date.",
+      "type": "object",
+      "required": ["name", "url", "license", "commercial", "derivatives", "redistribution", "verifiedOn"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "$ref": "#/$defs/httpsUrl" },
+        "license": { "type": "string", "minLength": 1 },
+        "attribution": { "type": ["string", "null"] },
+        "commercial": { "type": "boolean" },
+        "derivatives": { "type": "boolean" },
+        "redistribution": { "type": "boolean" },
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "verifiedOn": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Licences change. This is the date the terms above were read, so a stale entry is visible rather than implied to be current."
+        },
+        "quote": {
+          "type": "string",
+          "description": "The licence text this verdict rests on, quoted so a later reader can see what was actually relied upon."
+        },
+        "gotchas": { "type": "string" }
+      }
+    },
+    "rejectedSource": {
+      "description": "A source that was evaluated and turned down, and the reason, so nobody re-litigates it.",
+      "type": "object",
+      "required": ["name", "url", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "$ref": "#/$defs/httpsUrl" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

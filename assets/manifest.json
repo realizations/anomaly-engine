@@ -123,10 +123,33 @@
     },
     {
       "path": "src/Engine/src/public/favicon.png",
-      "license": "PROPRIETARY-ORIGINAL",
-      "author": "Anomaly Engine contributors",
-      "sourceUrl": "https://github.com/realizations/anomaly-engine",
-      "notes": "32px mark, copied from the generated set at build time."
+      "copiedFrom": "assets/branding/icon-32.png",
+      "notes": "32px mark, copied from the generated set at build time by tools/make-branding.mjs. Licensed through its source rather than described a second time; the gate inherits that licence and proves the bytes still match."
+    },
+    {
+      "path": "src/Engine/src/public/fonts/IBMPlexMono-Regular.ttf",
+      "copiedFrom": "assets/fonts/IBMPlexMono-Regular.ttf",
+      "notes": "The copy Vite puts in the shipped renderer. Byte-identical to the licensed original, so it is licensed through it; a second record here would be a second description of the same bytes."
+    },
+    {
+      "path": "src/Engine/src/public/fonts/Inter-Regular.ttf",
+      "copiedFrom": "assets/fonts/Inter-Regular.ttf",
+      "notes": "The copy Vite puts in the shipped renderer. Byte-identical to the licensed original, so it is licensed through it; a second record here would be a second description of the same bytes."
+    },
+    {
+      "path": "src/Engine/src/public/fonts/Inter-SemiBold.ttf",
+      "copiedFrom": "assets/fonts/Inter-SemiBold.ttf",
+      "notes": "The copy Vite puts in the shipped renderer. Byte-identical to the licensed original, so it is licensed through it; a second record here would be a second description of the same bytes."
+    },
+    {
+      "path": "src/Engine/src/public/fonts/SpaceGrotesk-Bold.ttf",
+      "copiedFrom": "assets/fonts/SpaceGrotesk-Bold.ttf",
+      "notes": "The copy Vite puts in the shipped renderer. Byte-identical to the licensed original, so it is licensed through it; a second record here would be a second description of the same bytes."
+    },
+    {
+      "path": "src/Engine/src/public/fonts/SpaceGrotesk-Medium.ttf",
+      "copiedFrom": "assets/fonts/SpaceGrotesk-Medium.ttf",
+      "notes": "The copy Vite puts in the shipped renderer. Byte-identical to the licensed original, so it is licensed through it; a second record here would be a second description of the same bytes."
     },
     {
       "path": "assets/branding/anomaly.ico",
