@@ -1413,7 +1413,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     for (const s of this._stars) {
       const px = s.x * this._w + this._mouse.px * 5;
       const py = s.y * this._h + this._mouse.py * 3;
-      const tw = 1 - TWINKLE.amplitude + this._amp('twinkle', TWINKLE.amplitude) * (0.5 + 0.5 * Math.sin(this._t * this._rate('twinkle', TWINKLE.rate) + s.tw));
+      const tw = 1 - TWINKLE.amplitude + this._amp('twinkle', TWINKLE.amplitude) * (0.5 + 0.5 * Math.sin(this._sec * this._rate('twinkle', TWINKLE.rate) + s.tw));
       const alpha = a * (0.16 + s.mag * 0.84) * tw;
       if (alpha < 0.02) continue;
 
@@ -1743,7 +1743,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const tipY = baseY - h;
     const tierStep = h / tiers;
     const droop = tierStep * (0.3 + rnd() * 0.22);
-    const sway = Math.sin(this._t * this._rate('environment', 0.42) + seed) * h * 0.007 * (1 - this._motionIntensity * 0.35);
+    const sway = Math.sin(this._sec * this._rate('environment', 0.42) + seed) * h * 0.007 * (1 - this._motionIntensity * 0.35);
     const wind = 0.4 + this._weather.windSpeed;
 
     g.fillStyle = css(shade(col, -0.42));
@@ -2608,7 +2608,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         // A breath is a slow rise and fall in intensity at a fixed radius. One
         // cycle, about forty seconds, which is below conscious notice -- a lamp
         // with a filament, not an animation.
-        const breath = 0.5 + 0.5 * Math.sin(this._t * this._rate('glow', BEACON.breathRate));
+        const breath = 0.5 + 0.5 * Math.sin(this._sec * this._rate('glow', BEACON.breathRate));
         const bright = BEACON.minScale + (1 - BEACON.minScale) * breath;
         const radius = w * (1.6 + sig * 3) * (1 + (BEACON.radiusScale - 1) * breath);
 
@@ -2677,7 +2677,11 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.lineTo(x + this._h * 0.004, apexY - this._h * 0.006);
     g.stroke();
 
-    const blink = (this._t % 2) < 1.1;
+    // Two seconds on, 0.9 off. In seconds -- against `_t` in milliseconds this
+    // was a two-*millisecond* cycle, which is not a blink but noise, and a frozen
+    // clock pinned it permanently on, which is why it looked like a working light
+    // for as long as the scene was static.
+    const blink = (this._sec % 2) < 1.1;
     if (blink) {
       g.save();
       g.globalCompositeOperation = 'lighter';
@@ -3081,7 +3085,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       const blades = 2 + Math.floor(rnd() * 3);
       for (let b = 0; b < blades; b++) {
         const ox = px + (b - blades / 2) * hh * 0.32;
-        const sway = Math.sin(this._t * this._rate('environment', 0.85) + i * 1.7 + b) * hh * 0.34 * (0.35 + this._weather.windSpeed) * (1 - this._motionIntensity * 0.3);
+        const sway = Math.sin(this._sec * this._rate('environment', 0.85) + i * 1.7 + b) * hh * 0.34 * (0.35 + this._weather.windSpeed) * (1 - this._motionIntensity * 0.3);
         g.beginPath();
         g.moveTo(ox, py);
         g.quadraticCurveTo(ox + sway * 0.45, py - hh * 0.58, ox + sway, py - hh);
@@ -3494,7 +3498,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         g: this._ctx,
         w: this._w,
         h: this._h,
-        t: this._t,
+        // Seconds, which is what ForegroundContext.t documents. It was being handed
+    // `_t`, which is milliseconds, so the grass sway there was running at whatever
+    // rate its constant implied per millisecond rather than per second.
+    t: this._sec,
         seed: this._seed,
         grade,
         intensity: this._motionIntensity,
@@ -3568,7 +3575,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
           s.y = -0.03;
           s.x = Math.random();
         }
-        const px = s.x * this._w + Math.sin(this._t * this._rate('particles', 0.7) + s.ph) * this.h0(0.01);
+        const px = s.x * this._w + Math.sin(this._sec * this._rate('particles', 0.7) + s.ph) * this.h0(0.01);
         const py = s.y * this._h;
         const r = s.r * (this._h / 1080);
         g.fillStyle = 'rgba(246,248,255,0.62)';
@@ -3759,7 +3766,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const watcher = this._anom('forest-watcher');
     if (watcher > 0) {
       const g = this._ctx;
-      const x = this._w * (0.2 + Math.sin(this._t * this._rate('environment', 0.4)) * 0.05) + this._mouse.px * 12;
+      const x = this._w * (0.2 + Math.sin(this._sec * this._rate('environment', 0.4)) * 0.05) + this._mouse.px * 12;
       const y = this.h0(0.688);
       const h = this._h * 0.085;
       g.save();
@@ -3783,7 +3790,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       // anomaly lasted. A periodic bright event is exactly what makes a scene feel
       // like it is twitching. Slowing the cycle and raising the threshold turns it
       // into an occasional glance, which is what the thing should read as.
-      const look = Math.sin(this._t * this._rate('glow', 0.35)) > 0.82;
+      const look = Math.sin(this._sec * this._rate('glow', 0.35)) > 0.82;
       if (look) {
         g.save();
         g.globalCompositeOperation = 'lighter';
