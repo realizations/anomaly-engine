@@ -250,6 +250,25 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   private _boltPath: number[] = [];
   private _boltBranches: number[][] = [];
   private _t = 0;
+
+  /**
+   * The animation clock, in seconds.
+   *
+   * `_t` is milliseconds, because that is what the frame delta is and it keeps
+   * particle integration honest. Anything that *oscillates* needs seconds, and
+   * getting that wrong is silent: a rate written as `sin(_t * 0.12)` looks
+   * perfectly reasonable and runs at 19 Hz, aliasing against the frame rate into
+   * per-frame noise.
+   *
+   * This was masked for as long as the clock was frozen at zero, and un-masking it
+   * turned fog bands into a 19 Hz bob, motes into a 48 Hz shimmer and chimney
+   * smoke into a 200 Hz buzz. All of them were written as if `_t` were seconds.
+   * Going through one accessor is what stops the next one being written the same
+   * way.
+   */
+  private get _sec(): number {
+    return this._t / 1000;
+  }
   private _last = 0;
   private _mouse = { x: -1, y: -1, px: 0, py: 0 };
   private _grade: SkyGrade = gradeForHour(12);
@@ -2450,7 +2469,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       g.save();
       g.globalCompositeOperation = 'lighter';
       for (const s of this._smoke) {
-        const t = (this._t * s.sp + s.t) % 1;
+        // `t` is a 0..1 phase for one rise and fade of the plume, so it needs
+        // seconds: `sp` of about 0.2 gives a cycle every five seconds, which is
+        // about the speed smoke actually leaves a chimney at.
+        const t = (this._sec * s.sp + s.t) % 1;
         const sy = ridgeY + h * 0.06 - t * this._h * 0.14;
         const sx = chX + Math.sin(t * 4 + s.t * 9) * this.h0(0.012) * (0.4 + t);
         const sr = this._h * (0.004 + t * 0.017);
@@ -3356,12 +3378,15 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // Scaled by the plan, because the depth of the fog floor is a compositional
     // choice: an atmospheric direction wants it banked up into the midground, a
     // darker direction wants it held back so the frame keeps its negative space.
+    // Fog: four horizontal bands. Each bobs slowly and drifts sideways, and the two
+    // rates are deliberately incommensurate so the pattern never repeats visibly.
+    // 0.24 rad/s is a 26 second bob and 0.07 is a 90 second creep.
     const depth = this._plan().fogDepth;
     const g = this._ctx;
     for (let i = 0; i < 4; i++) {
-      const y = this._h * (0.6 + i * 0.075) + Math.sin(this._t * 0.12 + i) * this.h0(0.008);
+      const y = this._h * (0.6 + i * 0.075) + Math.sin(this._sec * 0.24 + i) * this.h0(0.008);
       const hgt = this._h * (0.06 + i * 0.03);
-      const drift = Math.sin(this._t * 0.07 + i * 2) * this.h0(0.03);
+      const drift = Math.sin(this._sec * 0.07 + i * 2) * this.h0(0.03);
       const grd = g.createLinearGradient(0, y - hgt, 0, y + hgt);
       grd.addColorStop(0, css(grade.haze, 0));
       grd.addColorStop(0.5, css(grade.haze, amt * (0.5 - i * 0.09) * depth));
@@ -3491,9 +3516,13 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.save();
     g.globalCompositeOperation = 'lighter';
     for (const m of this._motes) {
-      const px = m.x * this._w + Math.sin(this._t * m.sp + m.ph) * this.h0(0.024);
-      const py = m.y * this._h + Math.cos(this._t * m.sp * 0.8 + m.ph * 1.7) * this.h0(0.011);
-      const b = 0.5 + 0.5 * Math.sin(this._t * this._rate('particles', 2.1) + m.ph * 3);
+      // Drift is slow and the twinkle slower. In seconds: `m.sp` of 0.3 to 1.1 is
+      // a wander between 6 and 21 seconds, and the brightness term is another
+      // order slower again, because a mote that pulses visibly is a firefly the
+      // viewer is meant to notice, and these are meant to be almost subliminal.
+      const px = m.x * this._w + Math.sin(this._sec * m.sp + m.ph) * this.h0(0.024);
+      const py = m.y * this._h + Math.cos(this._sec * m.sp * 0.8 + m.ph * 1.7) * this.h0(0.011);
+      const b = 0.5 + 0.5 * Math.sin(this._sec * this._rate('particles', 0.35) + m.ph * 3);
       const a = Math.pow(b, 4.5) * 0.42 * (1 - grade.ambient);
       if (a < 0.015) continue;
       const r = this._h * 0.0011;

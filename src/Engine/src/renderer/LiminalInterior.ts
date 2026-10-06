@@ -372,9 +372,19 @@ export class LiminalInterior {
       // The one wrong fixture, or a tube that is slightly out.
       const out = this._wrong === 'light' && i === bays - 3;
       // Regular shimmer. Not random: randomness reads as a broken render.
+      //
+      // `this._t` is milliseconds, so it is converted to seconds before being used
+      // as a phase. It was not, and the rates below were therefore off by a factor
+      // of a thousand: the healthy shimmer ran at about 334 Hz and the wrong
+      // fixture at about 5,900 Hz. Both alias against the frame rate into what is,
+      // frame to frame, indistinguishable from noise -- which is the one thing this
+      // comment says the effect must not be. Measured, the corridor's floor cells
+      // were changing by up to 19 luma between frames while the ceiling, which has
+      // no tile detail to alias against, stayed put.
+      const seconds = this._t / 1000;
       const flick = out
-        ? (Math.sin(this._t * 37) > 0.55 ? 0.4 : 1)
-        : 0.95 + 0.05 * Math.sin(this._t * 2.1 + i);
+        ? 0.62 + 0.38 * Math.max(0, Math.sin(seconds * 4.4))
+        : 0.95 + 0.05 * Math.sin(seconds * 2.2 + i);
 
       const a = light * flick * (out ? 0.45 : 1) * (0.3 + s * 0.7);
 

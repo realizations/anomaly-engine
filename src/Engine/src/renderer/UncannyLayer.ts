@@ -54,6 +54,20 @@ export class UncannyLayer {
   private _seed: number;
   private _t = 0;
 
+  /**
+   * The animation clock, in seconds.
+   *
+   * `_t` is milliseconds, because that is what the frame delta is. Anything that
+   * oscillates needs seconds: written as `sin(_t * 0.6)` — which reads as a slow,
+   * considered pulse — it actually runs at 95 Hz and aliases against the frame
+   * rate into per-frame noise. This layer is the near-miss detail, the things that
+   * are almost a shape and then are not, and noise is the one thing it must never
+   * look like: a flicker reads as a broken renderer, not as something almost there.
+   */
+  private get _sec(): number {
+    return this._t / 1000;
+  }
+
   /** Count of identical elements along a row, e.g. windows in a block. */
   private _parityBase = 6;
   /** Which element is the odd one out, -1 while the count is correct. */
@@ -137,10 +151,16 @@ export class UncannyLayer {
     }
 
     // The light beat, with one interval stretched.
-    const cycle = this._t / this._beatPeriod;
+    //
+    // `_beatPeriod` is in seconds, so this has to convert. It was reading
+    // milliseconds over a seconds-valued period, which made the beat cycle roughly
+    // two hundred times a second instead of once every four to six -- fast enough
+    // that `_longInterval`, which is meant to be one beat in three being long,
+    // alternated every frame.
+    const cycle = this._sec / this._beatPeriod;
     const step = Math.floor(cycle);
     this._longInterval = step % 3 === this._longIntervalAt;
-    this._beat = (cycle % 1);
+    this._beat = cycle % 1;
   }
 
   /**
@@ -182,7 +202,7 @@ export class UncannyLayer {
       const x = w * (0.08 + t * 0.84);
       const y = groundY - h * 0.012 - (i % 2) * h * 0.004;
       const r = Math.max(1.2, h * 0.006);
-      const a = (lit ? 0.3 : 0.1) * detail * (0.7 + 0.3 * Math.sin(this._t * 0.6 + i));
+      const a = (lit ? 0.3 : 0.1) * detail * (0.7 + 0.3 * Math.sin(this._sec * 0.35 + i));
       if (a < 0.02) continue;
       const grd = g.createRadialGradient(x, y, 0, x, y, r * 4);
       grd.addColorStop(0, `rgba(255,232,190,${a})`);
@@ -214,7 +234,7 @@ export class UncannyLayer {
       if (drawn >= limit) break;
       // Very low alpha, and it breathes. A steady mark reads as graffiti; a
       // mark that varies in visibility reads as something you cannot quite see.
-      const a = gl.a * 0.34 * detail * (0.4 + 0.6 * Math.abs(Math.sin(this._t * 0.4 + gl.x * 9)));
+      const a = gl.a * 0.34 * detail * (0.4 + 0.6 * Math.abs(Math.sin(this._sec * 0.22 + gl.x * 9)));
       if (a < 0.008) continue;
       g.fillStyle = `rgba(210,214,206,${a})`;
       g.fillText(gl.ch, w * gl.x, h * gl.y);
@@ -240,7 +260,7 @@ export class UncannyLayer {
 
       const rnd = mulberry32(p.seed);
       const s = p.s * w;
-      const a = 0.13 * detail * (0.5 + 0.5 * Math.sin(this._t * 0.23 + p.seed));
+      const a = 0.13 * detail * (0.5 + 0.5 * Math.sin(this._sec * 0.14 + p.seed));
       if (a < 0.02) continue;
       g.save();
       g.globalAlpha = a;
