@@ -29,13 +29,34 @@ export class ScreenshotSystem {
   }
 
   async capture(): Promise<ScreenshotResult> {
+    // Copy the live wallpaper, not a blank canvas.
+    //
+    // This used to create a fresh canvas, fill it black and encode that, so every
+    // screenshot was a black rectangle of the right dimensions -- the call
+    // succeeded, the result was well formed, and the picture was of nothing. It was
+    // invisible until creator mode's Screenshot button got wired up, because until
+    // then nothing in the app called it.
+    const source = document.getElementById('wallpaper-canvas') as HTMLCanvasElement | null;
+    // Clamped to at least one pixel: a zero-sized canvas encodes to an empty data
+    // URL, so a fallback that is itself degenerate produces a worse result than the
+    // black frame it replaced.
+    const width = Math.max(1, source?.width ?? window.screen.width);
+    const height = Math.max(1, source?.height ?? window.screen.height);
+
     const canvas = document.createElement('canvas');
-    canvas.width = window.screen.width;
-    canvas.height = window.screen.height;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d')!;
 
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (source) {
+      ctx.drawImage(source, 0, 0, width, height);
+    } else {
+      // Only reachable if the wallpaper canvas is missing, which would be a
+      // teardown race rather than a normal state. Say so in the pixels rather than
+      // handing back a silently blank frame.
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+    }
 
     const format = `image/${this._options.format}`;
     const dataUrl = canvas.toDataURL(format, this._options.quality);

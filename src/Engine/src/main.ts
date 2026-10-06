@@ -38,6 +38,7 @@ import { HotkeySystem } from './platform/HotkeySystem.js';
 import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
 import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
+import { WINDOW_EVENTS } from './core/windowEvents.js';
 
 /**
  * One display as the native host reports it.
@@ -168,7 +169,7 @@ class Engine {
       this._bridge.sendLog('worlds:changed', { ids: restored.changed });
     }
 
-    window.addEventListener('anomaly:state', (e) => {
+    window.addEventListener(WINDOW_EVENTS.state, (e) => {
       this._persistence.acceptFromHost((e as CustomEvent<unknown>).detail);
       this._applyRestoredState();
     });
@@ -585,50 +586,101 @@ class Engine {
   }
 
   private _setupBridge(): void {
-    window.addEventListener('anomaly:pause', () => this.pause());
-    window.addEventListener('anomaly:resume', () => this.resume());
-    window.addEventListener('anomaly:style', (e) => {
+    window.addEventListener(WINDOW_EVENTS.pause, () => this.pause());
+    window.addEventListener(WINDOW_EVENTS.resume, () => this.resume());
+    window.addEventListener(WINDOW_EVENTS.style, (e) => {
       const detail = (e as CustomEvent<{ style?: string }>).detail;
       const style = detail?.style;
       if (style === 'painterly' || style === 'flat' || style === 'riso') this.setStyle(style);
     });
     // The wallpaper never holds keyboard focus, so window key listeners never
     // fire in the real host. Debug/creator toggles are driven from the tray.
-    window.addEventListener('anomaly:debug', () => this._debug.toggle());
-    window.addEventListener('anomaly:creator', () => this._creator.enable());
-    window.addEventListener('anomaly:world', (e) => {
+    window.addEventListener(WINDOW_EVENTS.debug, () => this._debug.toggle());
+    window.addEventListener(WINDOW_EVENTS.creator, () => this._creator.enable());
+    window.addEventListener(WINDOW_EVENTS.world, (e) => {
       const detail = (e as CustomEvent<{ world?: string }>).detail;
       if (detail?.world) this.setWorld(detail.world);
     });
-    window.addEventListener('anomaly:world-next', () => this.nextWorld());
-    window.addEventListener('anomaly:world-prev', () => {
+    window.addEventListener(WINDOW_EVENTS.worldNext, () => this.nextWorld());
+    window.addEventListener(WINDOW_EVENTS.worldPrev, () => {
       this._worlds.previous();
     });
 
     // The host reports the real monitor layout, because the browser's
     // `window.screen` describes the primary display only and knows nothing
     // about the others attached to this machine.
-    window.addEventListener('anomaly:monitors', (e) => {
+    window.addEventListener(WINDOW_EVENTS.monitors, (e) => {
       const detail = (e as CustomEvent<{ monitors?: MonitorReport[] }>).detail;
       if (Array.isArray(detail?.monitors)) this._resize(detail.monitors);
     });
-    window.addEventListener('anomaly:worlds', (e) => {
+    window.addEventListener(WINDOW_EVENTS.worlds, (e) => {
       const detail = (e as CustomEvent<{ worlds?: unknown[] }>).detail;
       if (Array.isArray(detail?.worlds) && detail.worlds.length) {
         const v = this._worlds.registerAll(detail.worlds);
         if (!v.valid) this._bridge.sendLog('worlds:invalid', { errors: v.errors });
       }
     });
-    window.addEventListener('anomaly:world-remove', (e) => {
+    window.addEventListener(WINDOW_EVENTS.worldRemove, (e) => {
       const id = (e as CustomEvent<{ world?: string }>).detail?.world;
       if (id) this.removeWorld(id);
     });
-    window.addEventListener('anomaly:reduced-motion', (e) => {
+    window.addEventListener(WINDOW_EVENTS.reducedMotion, (e) => {
       const on = !!(e as CustomEvent<{ on?: boolean }>).detail?.on;
       this._accessibility.setConfig({ reducedMotion: on });
     });
-    window.addEventListener('anomaly:trigger', () => this.triggerRandomAnomaly());
-    window.addEventListener('anomaly:notes', () => this.toggleFieldNotes());
+    window.addEventListener(WINDOW_EVENTS.trigger, () => this.triggerRandomAnomaly());
+    window.addEventListener(WINDOW_EVENTS.notes, () => this.toggleFieldNotes());
+
+    // Creator mode drives the world by dispatching events rather than by holding a
+    // reference to the engine, which is the right shape for a panel that can be
+    // opened and closed independently. But it dispatches five of them, and nothing
+    // was listening for any of the five: Set Time, Set Weather, Reload World,
+    // Trigger Event and Screenshot were all buttons that did nothing at all when
+    // clicked. The creator panel is reachable from the tray and Ctrl+Alt+C, so this
+    // was five dead controls in a shipping feature.
+    window.addEventListener(WINDOW_EVENTS.setTime, (e) => {
+      const d = (e as CustomEvent<{ hour?: number; minute?: number }>).detail;
+      const h = Number(d?.hour);
+      const m = Number(d?.minute);
+      if (!Number.isFinite(h)) return;
+      // setSimulatedHour takes a decimal hour, so the minute part has to be folded in.
+      this.setSimulatedHour(h + (Number.isFinite(m) ? Math.max(0, Math.min(59, m)) / 60 : 0));
+    });
+    window.addEventListener(WINDOW_EVENTS.setWeather, (e) => {
+      const condition = (e as CustomEvent<{ condition?: string }>).detail?.condition;
+      if (typeof condition === 'string' && condition) this.setSimulatedWeather(condition);
+    });
+    window.addEventListener(WINDOW_EVENTS.reloadWorld, () => {
+      // Re-activating the active world is what a reload is here: the renderer
+      // rebuilds the scene from the definition rather than swapping to a different
+      // one, which is what you want when you are iterating on the current world.
+      const id = this._worlds.getActiveId();
+      if (id) this.setWorld(id);
+    });
+    window.addEventListener(WINDOW_EVENTS.triggerEvent, (e) => {
+      const eventId = (e as CustomEvent<{ eventId?: string }>).detail?.eventId;
+      if (typeof eventId !== 'string' || !eventId) return;
+      // By event id rather than by kind, because that is what the panel collects.
+      // Subscribers are keyed on the type, so a typed event is what reaches them;
+      // an unknown id simply falls through to the log and the history.
+      this._bus.emit({
+        id: `creator_${eventId}_${Date.now()}`,
+        type: eventId,
+        timestamp: Date.now(),
+        source: 'system',
+        payload: { triggeredBy: 'creator' },
+        priority: 'normal',
+        rarity: 'common',
+        cooldown: 0,
+        duration: 0,
+        targetScene: 'main',
+        seed: Date.now(),
+        metadata: {},
+      });
+    });
+    window.addEventListener(WINDOW_EVENTS.screenshot, () => {
+      void this._screenshot.saveToFile();
+    });
 
     this._bridge.onMessage((msg) => {
       if (msg.type === 'pause') this.pause();

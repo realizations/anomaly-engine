@@ -1,4 +1,5 @@
 import type { DebugOverlay } from './DebugOverlay.js';
+import { WINDOW_EVENTS } from '../core/windowEvents.js';
 
 export interface CreatorModeConfig {
   enabled: boolean;
@@ -48,17 +49,17 @@ export class CreatorMode {
 
   triggerEvent(eventId: string): void {
     if (!this._config.allowEventTrigger) return;
-    window.dispatchEvent(new CustomEvent('anomaly:trigger-event', { detail: { eventId } }));
+    window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.triggerEvent, { detail: { eventId } }));
   }
 
   setSimulatedTime(hour: number, minute: number): void {
     if (!this._config.allowTimeSimulation) return;
-    window.dispatchEvent(new CustomEvent('anomaly:set-time', { detail: { hour, minute } }));
+    window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.setTime, { detail: { hour, minute } }));
   }
 
   setSimulatedWeather(condition: string): void {
     if (!this._config.allowWeatherSimulation) return;
-    window.dispatchEvent(new CustomEvent('anomaly:set-weather', { detail: { condition } }));
+    window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.setWeather, { detail: { condition } }));
   }
 
   private _showDebugOverlay(): void {
@@ -130,10 +131,10 @@ export class CreatorMode {
       if (condition) this.setSimulatedWeather(condition);
     });
     this._panel.querySelector('#cm-reload-world')?.addEventListener('click', () => {
-      window.dispatchEvent(new CustomEvent('anomaly:reload-world'));
+      window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.reloadWorld));
     });
     this._panel.querySelector('#cm-screenshot')?.addEventListener('click', () => {
-      window.dispatchEvent(new CustomEvent('anomaly:screenshot'));
+      window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.screenshot));
     });
   }
 
