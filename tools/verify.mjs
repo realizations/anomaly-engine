@@ -47,6 +47,7 @@ steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('seam check still catches full-width steps', ['verify-seam-check.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));
 steps.push(await run('visual baseline captures distinct directions', ['visual-baseline.mjs']));
+steps.push(await run('every story beat changes real pixels', ['story-beats.mjs']));
 steps.push(await run('per-monitor layouts', ['per-monitor.mjs']));
 steps.push(await run('per-display worlds', ['per-display-worlds.mjs']));
 steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));

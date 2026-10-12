@@ -509,7 +509,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs twenty-five steps in order. Six of them prove a gate still bites, the rest exercise the
+Runs twenty-six steps in order. Six of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -533,6 +533,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |
+| `tools/story-beats.mjs` | Proves all seven story beats measurably change the pixels they are supposed to, each measured in the region its effect lives in |
+| `tools/visual-snapshot.mjs` | Deterministic frames for proving a refactor changed no pixels; `--compare` diffs two capture directories |
 | `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
 | `tools/perf-gpu.mjs` | Measures the engine's real per-frame cost on the GPU, and proves the adaptive scaler responds to load |
