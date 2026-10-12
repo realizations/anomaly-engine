@@ -334,7 +334,7 @@ budgets are 16.7 ms at 60 Hz and 8.3 ms at 120 Hz.
 
 ### Before Release
 
-- [ ] All tests pass (`dotnet test` and `npm test`)
+- [ ] All tests pass — `npm test` in `src/Engine`, and `node tools/verify.mjs` from the repository root. There is no `dotnet test`: the native host has no test project, and its behaviour is covered by the verification gates.
 - [ ] No console errors
 - [ ] README is up to date
 - [ ] Documentation is complete

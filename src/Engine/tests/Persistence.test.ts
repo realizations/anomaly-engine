@@ -3,11 +3,22 @@ import { Persistence, reconcile, emptyState } from '../src/platform/Persistence.
 
 const LS_KEY = 'anomaly-engine:state';
 
+/**
+ * A recording stand-in for the native bridge.
+ *
+ * The spread below builds `{type, payload}` and pushes it whether or not a payload was
+ * given, so the recorded type was `{ payload: Record<string, unknown> | undefined }`
+ * rather than an optional property -- and `exactOptionalPropertyTypes` rightly rejects
+ * that against the real signature. Spreading conditionally records the two shapes the
+ * interface actually allows, which is what makes this a stand-in rather than a cast.
+ */
 function makeBridge() {
   const sent: Array<{ type: string; payload?: Record<string, unknown> }> = [];
   return {
     sent,
-    send: (type: string, payload?: Record<string, unknown>) => sent.push({ type, payload }),
+    send: (type: string, payload?: Record<string, unknown>) => {
+      sent.push(payload === undefined ? { type } : { type, payload });
+    },
   } as never;
 }
 

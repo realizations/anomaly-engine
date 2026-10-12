@@ -5,7 +5,17 @@
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes
-4. Run tests: `dotnet test` and `npm test`
+4. Run the checks, all from `src/Engine`:
+
+   ```
+   npm test          # 377 unit tests
+   npm run typecheck # src/, then src/ + tests/ together
+   npm run lint      # src/ and tests/
+   ```
+
+   `node tools/verify.mjs` from the repository root runs everything else, including
+   the licence, secret, host-event and dead-code gates. It needs a deployed Windows
+   build first: `dotnet build src\AnomalyEngine`.
 5. Submit a pull request
 
 ## Contribution Levels
@@ -20,8 +30,9 @@
 
 ## Code Style
 
-- C#: 4-space indent, `dotnet format`
-- TypeScript: 2-space indent, ESLint + Prettier
+- C#: 4-space indent. No formatter is configured, so match the surrounding file.
+- TypeScript: 2-space indent, ESLint over both `src/` and `tests/`. There is no
+  Prettier config or dependency in this repository.
 - Commits: conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 
 ## Pull Requests

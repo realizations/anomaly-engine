@@ -26,7 +26,6 @@ import { RANDOM_EVENT_TYPES } from '../src/events/RandomSource.js';
  * engine cannot produce.
  */
 const ANOMALY_IDS = new Set(BUILT_IN_ANOMALIES.map((a) => a.id));
-const WORLD_IDS = new Set(BUILT_IN_WORLDS.map((w) => w.id));
 const EMITTABLE = new Set<string>([
   ...RANDOM_EVENT_TYPES,
   'time.hourly',
@@ -68,12 +67,23 @@ describe('shipped identifiers', () => {
   });
 
   it('every world has lore, because the premise is what the journal is about', () => {
+    // `lore` is optional on the world type, which is right -- a world package from a
+    // user does not have to carry one. Every *built-in* world does, and reading
+    // `w.lore.premise` unguarded would have thrown on the first world missing it rather
+    // than naming it, so the guard is here to turn a crash into a failure that says
+    // which world.
+    const missing: string[] = [];
     for (const w of BUILT_IN_WORLDS) {
-      expect(w.lore.premise.length).toBeGreaterThan(0);
+      if (!w.lore) {
+        missing.push(w.id);
+        continue;
+      }
+      expect(w.lore.premise?.length ?? 0, `${w.id} premise`).toBeGreaterThan(0);
       // Deniability is the whole ARG premise: every anomaly is paired with a
       // plausible reason nothing is happening.
-      expect(w.lore.deniability.length).toBeGreaterThan(0);
+      expect(w.lore.deniability?.length ?? 0, `${w.id} deniability`).toBeGreaterThan(0);
     }
+    expect(missing).toEqual([]);
   });
 
   it('every world either has structures or is the one drawn by a separate constructor', () => {

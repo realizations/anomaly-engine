@@ -3,7 +3,6 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { scanText, scanRepo } from '../../../tools/secret-scan.mjs';
 import {
-  rendererEventNames,
   hostSendNames,
   eventBoundaryProblems,
 } from '../../../tools/verify-host-events.mjs';
@@ -36,7 +35,7 @@ import {
 
 const ROOT = join(process.cwd(), '..', '..');
 
-function repoFile(...parts: string): string {
+function repoFile(...parts: string[]): string {
   return readFileSync(join(ROOT, ...parts), 'utf8');
 }
 
@@ -120,10 +119,13 @@ describe('text encoding', () => {
 
   it('finds no mojibake anywhere in the tracked repository', () => {
     // Scanned with the same walker the secret scan uses, so a new file is covered
-    // without anyone remembering to add it to a list.
+    // without anyone remembering to add it to a list. The type is taken from the scan
+    // itself rather than written out here, so a field the scan drops shows up as a
+    // compile error instead of as `undefined === undefined` quietly passing.
     const { problems, scanned } = scanRepo(ROOT);
     expect(scanned).toBeGreaterThan(100);
-    expect(problems.filter((p: { rule: string }) => p.rule === 'mojibake')).toEqual([]);
+    const mojibake = problems.filter((p: { why?: string }) => p.why?.includes('rule mojibake'));
+    expect(mojibake).toEqual([]);
   });
 
   it('detects the corruption it just fixed', () => {

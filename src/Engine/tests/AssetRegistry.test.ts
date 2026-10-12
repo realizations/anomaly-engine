@@ -155,8 +155,13 @@ describe('footprints', () => {
   });
 
   it('never reports a full-width run as wider than the frame', () => {
-    const small = STRUCTURE_ASSETS['pylon-run'].footprint(ctx({ scale: 0.5, poleXs: undefined }));
-    const large = STRUCTURE_ASSETS['pylon-run'].footprint(ctx({ scale: 3, poleXs: undefined }));
+    // `poleXs: undefined` was written to mean "not supplied", and it does mean that at
+    // runtime. It is not the same thing to the type system, though: `Partial<>` plus
+    // `exactOptionalPropertyTypes` says an explicit `undefined` is not a missing value.
+    // Saying it with a comment and omitting the key gets both.
+    const noPoles: Partial<FootprintContext> = { scale: 0.5 };
+    const small = STRUCTURE_ASSETS['pylon-run'].footprint(ctx(noPoles));
+    const large = STRUCTURE_ASSETS['pylon-run'].footprint(ctx({ scale: 3 }));
     expect(small.w).toBe(1);
     expect(large.w).toBe(1);
   });
@@ -192,7 +197,7 @@ describe('footprints', () => {
   it('reports a full-width run for a pylon-run with no known pole positions', () => {
     // A pole run genuinely does span the frame, so "I do not know where the poles are"
     // has an honest answer rather than a zero-width one.
-    const f = STRUCTURE_ASSETS['pylon-run'].footprint(ctx({ poleXs: undefined }));
+    const f = STRUCTURE_ASSETS['pylon-run'].footprint(ctx());
     expect(f.w).toBe(1);
     expect(f.cx).toBe(0.5);
   });

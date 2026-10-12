@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BenchmarkSystem, type BenchmarkScene } from '../src/systems/BenchmarkSystem.js';
+import { BenchmarkSystem, type BenchmarkScene, type BenchmarkResult } from '../src/systems/BenchmarkSystem.js';
 
 /**
  * The benchmark's arithmetic, which was wrong in a way that looked like a measurement.
@@ -48,33 +48,31 @@ describe('BenchmarkSystem', () => {
     vi.unstubAllGlobals();
   });
 
-  /** Runs the loop for `count` frames, which is how a real rAF loop would proceed. */
-  async function pump(pending: Promise<unknown>, count: number): Promise<void> {
-    for (let i = 0; i < count; i++) {
+  /**
+   * Drives the rAF loop until the run finishes on its own.
+   *
+   * A real loop re-registers itself each tick, so this drains the queue the way the
+   * browser would rather than counting iterations: a run whose duration is short
+   * enough to finish on the second tick must not need the test to know that.
+   */
+  async function drain(pending: Promise<BenchmarkResult>): Promise<BenchmarkResult> {
+    for (let i = 0; i < 500 && frames.length > 0; i++) {
       const cb = frames.shift();
-      expect(cb, `expected a frame callback on step ${i}`).toBeTypeOf('function');
-      (cb as FrameRequestCallback)(0);
-      // Let the promise continuation run so the next rAF is scheduled.
+      if (!cb) break;
+      cb(0);
+      // Two microtask turns: one for the promise continuation inside `checkEnd`, and
+      // one for the `requestAnimationFrame` it schedules while resolving.
       await Promise.resolve();
       await Promise.resolve();
     }
-    return pending as Promise<void>;
+    return pending;
   }
 
   it('counts the frames it measures', async () => {
     const bench = new BenchmarkSystem();
     bench.registerScene(scene({ id: 'a' }));
 
-    const pending = bench.run('a', 100);
-    // Ten frames is past 100ms at ~16.7ms each, so the run finishes on its own.
-    for (let i = 0; i < 12 && frames.length > 0; i++) {
-      const cb = frames.shift();
-      if (!cb) break;
-      cb(0);
-      await Promise.resolve();
-      await Promise.resolve();
-    }
-    const result = await pending;
+    const result = await drain(bench.run('a', 100));
 
     expect(result.fps).toBeGreaterThan(0);
     // The reciprocal check: if fps and frameTime disagree, one of them divided by
@@ -89,15 +87,7 @@ describe('BenchmarkSystem', () => {
     const bench = new BenchmarkSystem();
     bench.registerScene(scene({ id: 'a' }));
 
-    const pending = bench.run('a', 50);
-    for (let i = 0; i < 12 && frames.length > 0; i++) {
-      const cb = frames.shift();
-      if (!cb) break;
-      cb(0);
-      await Promise.resolve();
-      await Promise.resolve();
-    }
-    const result = await pending;
+    const result = await drain(bench.run('a', 50));
 
     expect(Number.isFinite(result.frameTime)).toBe(true);
     expect(bench.exportResults()).not.toContain('null');
@@ -108,15 +98,7 @@ describe('BenchmarkSystem', () => {
     const bench = new BenchmarkSystem();
     bench.registerScene(s);
 
-    const pending = bench.run('a', 50);
-    for (let i = 0; i < 12 && frames.length > 0; i++) {
-      const cb = frames.shift();
-      if (!cb) break;
-      cb(0);
-      await Promise.resolve();
-      await Promise.resolve();
-    }
-    await pending;
+    await drain(bench.run('a', 50));
 
     expect(s.setup).toHaveBeenCalledTimes(1);
     expect(s.teardown).toHaveBeenCalledTimes(1);
@@ -147,22 +129,12 @@ describe('BenchmarkSystem', () => {
     const bench = new BenchmarkSystem();
     bench.registerScene(scene({ id: 'a' }));
 
-    for (const id of ['a', 'a']) {
-      const pending = bench.run(id, 50);
-      for (let i = 0; i < 12 && frames.length > 0; i++) {
-        const cb = frames.shift();
-        if (!cb) break;
-        cb(0);
-        await Promise.resolve();
-        await Promise.resolve();
-      }
-      await pending;
-    }
+    await drain(bench.run('a', 50));
+    await drain(bench.run('a', 50));
 
     expect(bench.getResults()).toHaveLength(2);
-    const avg = bench.getAverageFps();
     const fps = bench.getResults().map((r) => r.fps);
-    expect(avg).toBe(Math.round(fps.reduce((a, b) => a + b, 0) / fps.length));
+    expect(bench.getAverageFps()).toBe(Math.round(fps.reduce((a, b) => a + b, 0) / fps.length));
   });
 
   it('notifies a listener and stops after unsubscribing', async () => {
@@ -171,27 +143,11 @@ describe('BenchmarkSystem', () => {
     const seen: number[] = [];
     const off = bench.onResult((r) => seen.push(r.fps));
 
-    const first = bench.run('a', 50);
-    for (let i = 0; i < 12 && frames.length > 0; i++) {
-      const cb = frames.shift();
-      if (!cb) break;
-      cb(0);
-      await Promise.resolve();
-      await Promise.resolve();
-    }
-    await first;
+    await drain(bench.run('a', 50));
     expect(seen).toHaveLength(1);
 
     off();
-    const second = bench.run('a', 50);
-    for (let i = 0; i < 12 && frames.length > 0; i++) {
-      const cb = frames.shift();
-      if (!cb) break;
-      cb(0);
-      await Promise.resolve();
-      await Promise.resolve();
-    }
-    await second;
+    await drain(bench.run('a', 50));
     expect(seen).toHaveLength(1);
   });
 

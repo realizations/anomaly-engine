@@ -559,7 +559,13 @@ motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every
 identifier the data files name actually ships, and one that every emitted event is
 either acted on or explicitly atmospheric.
-`npx eslint src/ tests/` is clean.
+
+`npm run typecheck` runs `tsc` twice: once over `src/`, and once over `src/` and
+`tests/` together. The second pass exists because vitest transpiles without
+type-checking, so a test can assert something and pass while handing the code an
+argument type the compiler says cannot exist. Adding it found 33 such errors across
+eight test files. `npm run lint` covers `tests/` for the same reason — the suite is
+half the code that ships in this repository.
 
 The suite loads the renderer from `file://` rather than `http://localhost`, because serving
 over http hides module and CORS failures. That is exactly how a real bug shipped once

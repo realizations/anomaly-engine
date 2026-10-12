@@ -1,0 +1,33 @@
+{
+  "//types": "Only @types/node. vitest/globals is deliberately absent: tests import describe/it/expect explicitly, and two that reached for beforeEach without importing it were made to import it, so there is one way to say it rather than two.",
+  "//": [
+    "A second typecheck pass that includes the tests.",
+    "",
+    "`npm run typecheck` covers src/ only, so the 377-test suite has never been type",
+    "checked: vitest transpiles without checking, and every test would still pass with a",
+    "wrong argument type. Adding this pass found 33 errors across 8 files -- none of them",
+    "a behaviour bug, all of them places where a test was asserting something the types",
+    "said could not happen. That is exactly the class of error a test suite should not be",
+    "able to contain silently, so this is wired into `npm run typecheck`.",
+    "",
+    "`allowJs` is on because several tests import the repository's verification tools",
+    "directly (`tools/secret-scan.mjs`, `tools/verify-host-events.mjs`), and those are",
+    "plain JavaScript with JSDoc. Without it each import is an implicit `any`, which is",
+    "the one thing worth eliminating: a test that imports a gate should get the gate's",
+    "real signature, not silence. `checkJs` stays off so the tools are read for their",
+    "types rather than linted as a second codebase."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "allowJs": true,
+    "checkJs": false,
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "tests/**/*", "../../tools/**/*.mjs"],
+  "exclude": ["node_modules", "dist", "renderer"]
+}

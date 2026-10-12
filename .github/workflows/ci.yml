@@ -38,6 +38,10 @@ jobs:
       - name: Install
         working-directory: src/Engine
         run: npm install
+      # `npm run typecheck` runs tsc twice: once over src/, and once over src/ and
+      # tests/ together. The second pass exists because vitest transpiles without
+      # type-checking, so without it 377 tests could pass while containing argument
+      # types the compiler says cannot exist -- which is exactly what it found.
       - name: Typecheck
         working-directory: src/Engine
         run: npm run typecheck
@@ -47,6 +51,21 @@ jobs:
       - name: Unit tests
         working-directory: src/Engine
         run: npm test
+      # The host-side and repository-wide gates, run here rather than only in verify.mjs
+      # because verify.mjs needs a Windows host build and this job is the one that runs
+      # on every push without one.
+      - name: Secret scan (self-test and repository)
+        run: |
+          node tools/secret-scan.mjs --selftest
+          node tools/secret-scan.mjs
+      - name: Host event wiring (self-test and repository)
+        run: |
+          node tools/verify-host-events.mjs --selftest
+          node tools/verify-host-events.mjs
+      - name: Dead code (self-test and repository)
+        run: |
+          node tools/verify-dead-code.mjs --selftest
+          node tools/verify-dead-code.mjs
 
   # The host and the end-to-end suite must run on Windows: the wallpaper host is
   # a WPF/WebView2 app, and the e2e suite loads the renderer over file://, which

@@ -37,11 +37,49 @@ function findRoot(start: string): string {
 
 const ROOT = findRoot(process.cwd());
 
-function readJson(file: string): any {
+/**
+ * Parsed JSON, as records rather than `any`.
+ *
+ * The manifest and the schema are read from disk rather than imported, so the shape
+ * is only as good as what is written here. `unknown` is the honest return type for
+ * `JSON.parse`, and the record types below are the parts of each document this file
+ * actually reads -- which is what makes a missing field a type error at the use site
+ * instead of `undefined` discovered three assertions later.
+ */
+function readJson(file: string): unknown {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 
-/** Every `.ts` under `src/`, skipping build output and installed packages. */
+/** One entry in `assets`, `sources` or `rejectedSources`. */
+interface ManifestEntry {
+  path: string;
+  [key: string]: unknown;
+}
+
+interface Manifest {
+  $schema: string;
+  assets: ManifestEntry[];
+  sources: Record<string, unknown>[];
+  rejectedSources: Record<string, unknown>[];
+  /** The licences the ledger accepts, as prose with the licence name first. */
+  policy: { accepted: string[] };
+}
+
+interface Schema {
+  $schema: string;
+  $defs: Record<string, { properties?: Record<string, unknown>; required?: string[] }>;
+}
+
+const MANIFEST = readJson(join(ROOT, 'assets', 'manifest.json')) as Manifest;
+const SCHEMA = readJson(join(ROOT, 'assets', MANIFEST.$schema)) as Schema;
+
+/**
+ * Every `.ts` under `src/`, skipping build output and installed packages.
+ *
+ * `.d.ts` is skipped for the same reason `tools/verify-dead-code.mjs` skips it: it
+ * declares ambient types and exports no values, so counting it as a source that
+ * should reference documentation would be counting a file that cannot.
+ */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   if (!existsSync(dir)) return out;
@@ -49,15 +87,13 @@ function sourceFiles(dir: string): string[] {
     if (entry === 'node_modules' || entry === 'dist') continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...sourceFiles(full));
-    else if (full.endsWith('.ts')) out.push(full);
+    else if (full.endsWith('.ts') && !full.endsWith('.d.ts')) out.push(full);
   }
   return out;
 }
 
-const MANIFEST = readJson(join(ROOT, 'assets', 'manifest.json'));
-const SCHEMA = readJson(join(ROOT, 'assets', MANIFEST.$schema));
-const BY_PATH = new Map<string, any>(
-  MANIFEST.assets.map((a: any) => [String(a.path).replace(/\\/g, '/').toLowerCase(), a])
+const BY_PATH = new Map<string, ManifestEntry>(
+  MANIFEST.assets.map((a) => [String(a.path).replace(/\\/g, '/').toLowerCase(), a])
 );
 
 describe('dangling references', () => {
@@ -124,12 +160,13 @@ describe('manifest and schema stay in step', () => {
   it('every copied file names a source that is recorded and on disk', () => {
     const problems: string[] = [];
     for (const a of MANIFEST.assets) {
-      if (!a.copiedFrom) continue;
-      const src = BY_PATH.get(String(a.copiedFrom).replace(/\\/g, '/').toLowerCase());
-      if (!src) problems.push(`${a.path}: source ${a.copiedFrom} has no record`);
+      const copiedFrom = typeof a.copiedFrom === 'string' ? a.copiedFrom : null;
+      if (!copiedFrom) continue;
+      const src = BY_PATH.get(copiedFrom.replace(/\\/g, '/').toLowerCase());
+      if (!src) problems.push(`${a.path}: source ${copiedFrom} has no record`);
       else if (typeof src.license !== 'string') problems.push(`${a.path}: source record has no licence`);
       if (!existsSync(join(ROOT, a.path))) problems.push(`${a.path}: does not exist`);
-      if (!existsSync(join(ROOT, a.copiedFrom))) problems.push(`${a.path}: source ${a.copiedFrom} does not exist`);
+      if (!existsSync(join(ROOT, copiedFrom))) problems.push(`${a.path}: source ${copiedFrom} does not exist`);
     }
     expect(problems).toEqual([]);
   });
@@ -189,7 +226,7 @@ describe('3D models', () => {
   function modelProblems(): string[] {
     const out: string[] = [];
     for (const kind of registeredKinds()) {
-      const model = structureAsset(kind).model;
+      const model = structureAsset(kind)?.model;
       if (!model) continue;
       if (!model.src.startsWith('assets/')) {
         out.push(`${kind}: "${model.src}" is outside assets/, so license-gate.mjs will never see it`);
@@ -223,7 +260,7 @@ describe('3D models', () => {
     // Stated separately so a failure names the rule rather than one instance of it.
     expect(ASSET_DIRS).toContain('assets');
     for (const kind of registeredKinds()) {
-      const model = structureAsset(kind).model;
+      const model = structureAsset(kind)?.model;
       if (model) expect(model.src.startsWith('assets/')).toBe(true);
     }
   });

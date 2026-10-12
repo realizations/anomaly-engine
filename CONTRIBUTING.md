@@ -24,7 +24,10 @@ Start where you're comfortable. Grow at your own pace.
 2. **Clone your fork** — `git clone https://github.com/YOUR_USERNAME/anomaly-engine.git`
 3. **Create a branch** — `git checkout -b feature/your-feature-name`
 4. **Make your changes** — Write code, create assets, fix bugs
-5. **Test your changes** — Run `dotnet test` and `npm test`
+5. **Test your changes** — from `src/Engine`: `npm test`, `npm run typecheck`,
+   `npm run lint`. There is no `dotnet test`: the native host has no test project yet,
+   so its checks live in `node tools/verify.mjs` (needs a Windows build first — see
+   [`docs/setup-guide.md`](docs/setup-guide.md)) and in CI.
 6. **Commit** — `git commit -m "feat: describe your change"`
 7. **Push** — `git push origin feature/your-feature-name`
 8. **Open a PR** — Fill out the pull request template
@@ -33,8 +36,10 @@ Start where you're comfortable. Grow at your own pace.
 
 ### Code Style
 
-- C#: 4-space indent, `dotnet format`
-- TypeScript: 2-space indent, ESLint + Prettier
+- C#: 4-space indent. There is no formatter configured, so match the file you are in.
+- TypeScript: 2-space indent, enforced by ESLint (`npm run lint`, which covers
+  `tests/` as well as `src/`). There is no Prettier config and no Prettier
+  dependency — an earlier version of this file listed it.
 - Commits: conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 
 ### Pull Requests
