@@ -35,6 +35,15 @@ import type { InteractionSurfaces, ScreenRect } from '../renderer/WorldRenderer.
 /** How long the cursor must rest on a zone before `onDwell` fires. */
 export const DEFAULT_DWELL_MS = 30_000;
 
+/**
+ * Shorter dwell for the moon, which is a small target in the corner of the sky.
+ *
+ * Thirty seconds of holding a cursor still on a small bright disc is a different act
+ * from thirty seconds of resting it on a treeline. The one is noticing; the other is
+ * waiting.
+ */
+export const MOON_DWELL_MS = 10_000;
+
 /** Short enough to exercise in a test without a thirty-second wait. */
 export const TEST_DWELL_MS = 250;
 
@@ -105,7 +114,17 @@ const EXTRA_ZONES = [
     id: 'moon',
     cursor: 'default',
     hint: 'It is the right shape and the wrong distance.',
-    dwellMs: 0,
+    // A dwell, because the egg is `hover:moon@midnight` -- resting the cursor on the
+    // moon is the only gesture the sky offers. This was 0, and that made the egg
+    // unreachable in a way every table check passed: `EasterEggSystem` knew the
+    // trigger, `EGG_EFFECTS` had a beat for it, and `InteractionSystem` returns from
+    // `_tickDwell` before reaching a callback on a zone whose dwell is 0. Nothing ever
+    // fired `hover:moon@midnight` in any build.
+    //
+    // Shorter than the treeline's. The moon is a small target that a moving cursor
+    // leaves by accident, so the threshold is a third shorter; the egg is meant to feel
+    // like noticing something rather than earning it.
+    dwellMs: MOON_DWELL_MS,
     trigger: 'hover:moon@midnight',
   },
   {

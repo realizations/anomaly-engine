@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeZones, overlappingZones, DEFAULT_DWELL_MS } from '../src/systems/landmarkZones.js';
+import { describeZones, overlappingZones, DEFAULT_DWELL_MS, MOON_DWELL_MS } from '../src/systems/landmarkZones.js';
 import { BUILTIN_EASTER_EGGS } from '../src/systems/EasterEggSystem.js';
 import type { InteractionSurfaces, LandmarkRect, ScreenRect } from '../src/renderer/WorldRenderer.js';
 
@@ -98,12 +98,19 @@ describe('zone selection', () => {
     expect(out.map((z) => z.id)).not.toContain('forest');
   });
 
-  it('only the forest zone dwells', () => {
+  it('only the zones that can be rested on dwell', () => {
+    // The forest and the moon, and nothing else. The moon used to dwell for 0, which
+    // made `hover:moon@midnight` unreachable: `InteractionSystem._tickDwell` returns on
+    // a zero dwell before it reaches the callback, so the egg sat in the table with an
+    // effect and a beat and no way in. This used to assert "only the forest", which
+    // encoded the bug as expected behaviour.
     const out = describeZones(
       surfaces({ landmarks: [landmark('observatory', 0.44)], moon: MOON })
     );
     for (const z of out) {
-      expect(z.dwellMs).toBe(z.id === 'forest' ? DEFAULT_DWELL_MS : 0);
+      const expected =
+        z.id === 'forest' ? DEFAULT_DWELL_MS : z.id === 'moon' ? MOON_DWELL_MS : 0;
+      expect(z.dwellMs, `${z.id} dwell`).toBe(expected);
     }
   });
 

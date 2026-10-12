@@ -80,13 +80,21 @@ export class EasterEggSystem {
   /**
    * Listens for the Konami sequence on `window`.
    *
-   * This cannot fire in the shipped host. The wallpaper is reparented behind the
-   * desktop icons and never holds keyboard focus, which `main.ts` notes where it
-   * wires the tray-driven events for exactly this reason. `trigger('konami')` is
-   * the working entry point; nothing calls it yet.
+   * This fires wherever the page holds keyboard focus, and not in the shipped host:
+   * the wallpaper is reparented behind the desktop icons and never takes focus, so no
+   * key ever reaches it. Under `npm run dev` it is a normal browser tab and the
+   * sequence works, which is the point -- it is a developer's easter egg, reachable
+   * exactly where a developer is looking.
    *
-   * The route that would work is the global hotkey service the host already runs,
-   * since it demonstrably observes key combinations the page never sees.
+   * `trigger('konami')` is the other entry point, and that one does reach the shipped
+   * build: it is what `window.__engine.discoverEgg('konami')` calls, which is the
+   * documented escape hatch `tools/story-beats.mjs` uses to prove the beat renders.
+   * A previous version of this comment said "nothing calls it yet", which was true of
+   * the class and false of the shipped behaviour.
+   *
+   * The route that would make it a player-facing discovery does not exist yet, and the
+   * honest thing is to say so rather than to pretend a global hotkey can express ten
+   * keys in order.
    */
   private _setupKonamiListener(): void {
     window.addEventListener('keydown', (e) => {

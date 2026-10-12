@@ -174,29 +174,42 @@ preventing the engine from starting.
 
 ## Interactions
 
-**None of these are implemented.** An earlier version of this section listed hover
-and click behaviour for the forest, observatory, cabin, radio tower and moon. The
-machinery exists and is wired to the mouse — `InteractionSystem` tracks hover, click
-and multi-click, and understands named zones with callbacks — but nothing ever
-registers a zone, so there is nothing for it to hit-test against. `EasterEggSystem`
-is the same: constructed, with four eggs defined, and never asked to trigger.
+Six regions of the scene are pointable, and they are curated rather than generated —
+a hover region on a rock pile is a dead pixel that eats the cursor state and hands you
+a hint about scenery. Four are landmarks and two are bands of ground and sky.
 
-The Konami code additionally cannot work as written. It listens for `keydown` on
-`window`, and the wallpaper never holds keyboard focus, which `main.ts` says
-explicitly a few lines above where it wires the tray events. In the shipped host
-that listener cannot fire.
+| Region | Hovering shows | Clicking | Resting the cursor |
+|---------|-----------------|----------|--------------------|
+| Observatory | The dome is shut. The shutter has not moved in a long time. | logged | — |
+| Radio tower | The carrier is still going. Nobody answers it. | logged | — |
+| Cabin | Smoke, most nights. No one has come out of it. | logged | — |
+| Lighthouse | The light keeps the interval it was given. | logged | — |
+| Treeline | The treeline is not moving. | logged | **30s → the stare** |
+| Moon | It is the right shape and the wrong distance. | logged | **10s, at midnight → moonlit** |
 
-Registering the zones is the whole of the work; the handler side is done. Until it
-is, this section stays empty rather than aspirational.
+The moon is only in the scene at night, and only above the horizon, so its zone appears
+and disappears with it. Moving the cursor away resets the clock: leaving the treeline
+and coming back starts from zero rather than inheriting what you had already rested.
+
+Zones are rebuilt on every world change, because they are derived from where the
+renderer actually drew things. That is why a world with no landmarks has nothing to
+point at, which is a normal state rather than a failure.
 
 ### The Konami code
 
 The sequence is defined in `EasterEggSystem.ts` as
 `ArrowUp ArrowUp ArrowDown ArrowDown ArrowLeft ArrowRight ArrowLeft ArrowRight b a`.
 
-It needs a route to reach the engine, since keyboard input does not arrive. The
-global hotkeys the host already registers are the obvious candidate — the host
-proves it can observe a key combination that the page never sees.
+It listens for `keydown` on `window`, which the shipped wallpaper never receives — it
+sits behind the desktop icons and holds no keyboard focus. **It works under
+`npm run dev`**, where the renderer is a normal browser tab, and that is the only place
+it is meant to. The other route is `window.__engine.discoverEgg('konami')`, which the
+verification tools use to prove the beat renders.
+
+Making it a player-facing discovery needs a route that can observe ten keys in order,
+and the host's global hotkeys cannot express that: they are five fixed combinations.
+That is the honest reason it is not one, rather than a claim that it is merely
+unfinished.
 
 ## Anomalies
 

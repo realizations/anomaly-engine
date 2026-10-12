@@ -150,7 +150,11 @@ describe('nothing unreachable ships', () => {
   function modules(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       const full = join(dir, e.name);
-      return e.isDirectory() ? modules(full) : full.endsWith('.ts') ? [full] : [];
+      if (e.isDirectory()) return modules(full);
+      // `.d.ts` files declare ambient types and export nothing, so none of them can be
+      // imported. Counting them as modules would make every one of them look like dead
+      // code, which is how a type declaration ends up "fixed" by deleting it.
+      return full.endsWith('.ts') && !full.endsWith('.d.ts') ? [full] : [];
     });
   }
 

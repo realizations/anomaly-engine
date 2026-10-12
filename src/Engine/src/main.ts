@@ -34,7 +34,6 @@ import { UpdateSystem } from './platform/UpdateSystem.js';
 import { WorldLoader } from './worlds/WorldLoader.js';
 import { WorldClock } from './systems/SelfReferential.js';
 import { EasterEggSystem } from './systems/EasterEggSystem.js';
-import { HotkeySystem } from './platform/HotkeySystem.js';
 import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
 import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
@@ -92,7 +91,6 @@ class Engine {
   private _monitors: Array<MonitorReport & { index: number }> = [];
   private _worldClock: WorldClock;
   private _easterEggs: EasterEggSystem;
-  private _hotkeys: HotkeySystem;
   private _interaction: InteractionSystem;
   private _media: MediaReactivitySystem;
   private _benchmark: BenchmarkSystem;
@@ -135,10 +133,13 @@ class Engine {
     this._worlds = new WorldLoader();
     this._worldClock = new WorldClock();
     this._easterEggs = new EasterEggSystem();
-    this._hotkeys = new HotkeySystem();
     this._interaction = new InteractionSystem();
     this._media = new MediaReactivitySystem();
     this._benchmark = new BenchmarkSystem();
+    // A dev build says so on the terminal, once, when there is someone to say it to.
+    // The egg existed with a trigger nothing could produce; this is the producer, and
+    // it is gated on a build flag so it cannot reach a shipped install.
+    this._maybeDevBuildEgg();
 
     this._canvas = document.getElementById('wallpaper-canvas') as HTMLCanvasElement;
     this._renderer = new WorldRenderer(this._canvas);
@@ -834,10 +835,29 @@ class Engine {
   getNetwork(): NetworkSource { return this._network; }
   getWorldClock(): WorldClock { return this._worldClock; }
   getEasterEggs(): EasterEggSystem { return this._easterEggs; }
-  getHotkeys(): HotkeySystem { return this._hotkeys; }
   getInteraction(): InteractionSystem { return this._interaction; }
   getMedia(): MediaReactivitySystem { return this._media; }
   getBenchmark(): BenchmarkSystem { return this._benchmark; }
+
+  /**
+   * Fires the `dev-build-message` egg on a development build.
+   *
+   * The egg shipped in `EasterEggSystem` with a trigger nothing produced: the only way
+   * to reach it was `discoverEgg('dev-build')`, which is the escape hatch the
+   * verification tools use. So it passed every table check -- the egg had an effect, the
+   * effect had a beat, the beat was tested -- while being unreachable by any human in
+   * any build.
+   *
+   * `import.meta.env.DEV` is true for `vite dev` and false for `vite build`, which is
+   * the distinction that matters: the joke is "you were not supposed to see this", so
+   * showing it in the build that ships would defeat it. Vite replaces the flag at build
+   * time, so the branch is dead code in the release bundle rather than a runtime check
+   * someone can flip.
+   */
+  private _maybeDevBuildEgg(): void {
+    if (!import.meta.env.DEV) return;
+    this._tryDiscover('dev-build');
+  }
 
   setStyle(style: string): void {
     this._renderer.setStyle((style as 'painterly' | 'flat' | 'riso') ?? 'painterly');
@@ -1242,10 +1262,15 @@ class Engine {
         dwellMs: desc.dwellMs,
         onClick: () => this._bridge.sendLog(`zones:click:${desc.id}`, { zone: desc.id }),
         onDwell: () => {
-          // A dwell is only a discovery if the egg actually wants this zone, and the
-          // trigger has to match on zone id -- `forest-stare` is `idle:forest:30s`,
-          // which is specific to the treeline.
-          if (desc.id === 'forest' && desc.trigger) this._tryDiscover(desc.trigger);
+          // Whatever the zone declares, not one hard-coded zone.
+          //
+          // This was `desc.id === 'forest' && desc.trigger`, which meant the moon zone
+          // carried `hover:moon@midnight` for the whole life of the feature and no
+          // callback would ever forward it: the egg was in the table, had an effect,
+          // passed every check about tables, and could not be found by anyone. The
+          // zone's own `trigger` is the whole of the routing, and the table is curated
+          // -- a zone with no trigger simply does not fire.
+          if (desc.trigger) this._tryDiscover(desc.trigger);
         },
       });
     }

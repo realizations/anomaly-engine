@@ -36,6 +36,14 @@ export class BenchmarkSystem {
     return [...this._scenes];
   }
 
+  /**
+   * Measures a registered scene for `durationMs`.
+   *
+   * Throws for an unknown id rather than reporting a result for nothing. Nothing
+   * registers a scene today -- `run` was unreachable dead code -- so every call would
+   * have thrown, which at least fails loudly; the alternative, returning a synthetic
+   * result, is what made this class worth deleting the counter from.
+   */
   async run(sceneId: string, durationMs = 10000): Promise<BenchmarkResult> {
     const scene = this._scenes.find(s => s.id === sceneId);
     if (!scene) throw new Error(`Benchmark scene not found: ${sceneId}`);
@@ -49,6 +57,18 @@ export class BenchmarkSystem {
 
     return new Promise((resolve) => {
       const checkEnd = () => {
+        // Counted here rather than anywhere the caller might remember to.
+        //
+        // The counter used to be declared, reset in `run`, and never incremented, so
+        // `_computeResult` divided by zero on every path: fps came out 0 and frameTime
+        // came out Infinity. That did not throw -- it produced a result object with the
+        // right shape and a number that meant nothing, and `exportResults` serialised
+        // the Infinity as `null`, so the evidence vanished on the way out. Nothing
+        // registered a scene either, so this loop had never actually run; it is
+        // reachable now only through `getBenchmark()`, and it has to be right the first
+        // time something measures with it.
+        this._frameCount++;
+
         if (!this._running || performance.now() - this._startTime >= durationMs) {
           this._running = false;
           scene.teardown();
@@ -65,14 +85,28 @@ export class BenchmarkSystem {
     });
   }
 
+  /**
+   * Turns the measured window into a result.
+   *
+   * Both figures are guarded against a zero denominator rather than trusting the loop
+   * to have ticked. A benchmark that reports `frameTime: Infinity` is worse than one
+   * that reports nothing, because it looks like a measurement: `fps` rounds to 0,
+   * `JSON.stringify` writes the Infinity as `null`, and the result reads as a slow
+   * scene rather than a broken one. A caller that tears the scene down on the first
+   * frame, or a `durationMs` of zero, would otherwise produce that silently.
+   *
+   * `frames === 0` means the scene rendered nothing at all, which is a fact about the
+   * measurement rather than an error in it, so it is reported as zeros and recorded.
+   */
   private _computeResult(sceneName: string): BenchmarkResult {
     const elapsed = performance.now() - this._startTime;
-    const fps = Math.round((this._frameCount / elapsed) * 1000);
+    const frames = this._frameCount;
+    const measured = frames > 0 && elapsed > 0;
 
     return {
       name: sceneName,
-      fps,
-      frameTime: elapsed / this._frameCount,
+      fps: measured ? Math.round((frames / elapsed) * 1000) : 0,
+      frameTime: measured ? elapsed / frames : 0,
       memoryMB: this._getMemoryUsage(),
       cpuPercent: 0,
       gpuPercent: 0,

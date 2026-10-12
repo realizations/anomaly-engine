@@ -87,7 +87,12 @@ function tsFiles(dir) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...tsFiles(full));
-    else if (full.endsWith('.ts')) out.push(full);
+    // A `.d.ts` declares ambient types rather than exporting a module, so nothing can
+    // import it and reachability is not a meaningful question. `vite-env.d.ts` is the
+    // one in this project: it types `import.meta.env` for `tsc`, which runs before Vite
+    // in `npm run build` and would otherwise fail on a flag Vite substitutes at build
+    // time.
+    else if (full.endsWith('.ts') && !full.endsWith('.d.ts')) out.push(full);
   }
   return out;
 }
@@ -338,9 +343,18 @@ function selftest(realFiles) {
   // --- and the real repository --------------------------------------------
   cases.push({ label: 'accepts the repository as it now stands', expect: 0, got: problemsForReal() });
   cases.push({
-    label: 'still finds the five modules that were unreachable',
+    label: 'still finds the modules that were unreachable',
     expect: 0,
     got: [SQLITE, DAY_NIGHT].filter((m) => reachableFrom(realGraph).has(m) ? 1 : 0).length,
+  });
+
+  // An ambient declaration exports nothing, so nothing can import it. Counting one as a
+  // module would report `vite-env.d.ts` as dead weight, and the tempting response to
+  // that finding is to delete a file that the build genuinely needs.
+  cases.push({
+    label: 'does not mistake an ambient declaration for dead code',
+    expect: 0,
+    got: tsFiles(SRC).some((f) => f.endsWith('.d.ts')) ? 1 : 0,
   });
 
   let failed = 0;

@@ -72,8 +72,10 @@ The world changes throughout the day:
 - **Be patient.** Rare events are rare.
 - **Watch closely.** Some events last only seconds.
 - **Check the journal.** It remembers what you've seen.
-- **Use the tray and the hotkeys.** Hovering and clicking the world does nothing yet;
-  `Ctrl+Alt+W/S/P/F/D` are the controls that work.
+- **Use the tray and the hotkeys.** `Ctrl+Alt+W/S/P/F/D` are the controls that work.
+- **Point at things.** Hovering the observatory, the tower, the cabin, the lighthouse,
+  the treeline or the moon shows a line of text. Two of them go further if you leave
+  the cursor resting there — long enough, on two different nights.
 
 ## Need Help?
 

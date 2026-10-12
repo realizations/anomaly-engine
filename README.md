@@ -122,7 +122,7 @@ so than ship a feature table that overstates the project.
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits. |
 | **Localisation** | Spanish, German and Japanese translations ship and are reachable through `getI18n()`, but no surface calls `t()`, so a user never actually sees a translated string. The keys are complete and tested against each other; nothing consumes them. |
-| **World interaction** | Hover, click and triple-click are implemented in `InteractionSystem` and connected to the mouse, but no interactive zone is ever registered, so nothing responds. `EasterEggSystem` is the same, and the Konami code additionally listens for keydown on a window the host never focuses. |
+| **World interaction** | Hover, click and triple-click work, and two of the six zones lead to an easter egg. The Konami code listens for `keydown` on a window the host never focuses, so it only fires under `npm run dev`. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 
@@ -235,10 +235,15 @@ there was something to configure.
 
 ### Interactions
 
-Not implemented yet. `InteractionSystem` and `EasterEggSystem` are real and wired to
-the mouse, but no zone is ever registered and the Konami code listens for keydown on
-a window that never holds keyboard focus. See
-[`docs/how-to-use.md`](docs/how-to-use.md#interactions).
+Zones are registered from real scene geometry, so hover hints, click logging and
+triple-click all work — but they are deliberately not a game. Five regions are
+pointable: the observatory, the radio tower, the cabin, the lighthouse, and the
+treeline and moon, which are the two you can rest the cursor on. Two of them lead
+somewhere: resting on the treeline for thirty seconds, or on the moon for ten.
+
+The Konami code listens for `keydown`, which the shipped wallpaper never receives,
+because it sits behind the desktop icons and holds no focus. It works under
+`npm run dev`. See [`docs/how-to-use.md`](docs/how-to-use.md#interactions).
 
 ### Anomalies
 
@@ -346,7 +351,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               358 unit tests
+    tests/               377 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -548,7 +553,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 358 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 377 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every
