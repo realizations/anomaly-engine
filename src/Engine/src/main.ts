@@ -32,7 +32,6 @@ import { I18n } from './platform/I18n.js';
 import { AccessibilitySystem } from './platform/AccessibilitySystem.js';
 import { UpdateSystem } from './platform/UpdateSystem.js';
 import { WorldLoader } from './worlds/WorldLoader.js';
-import { WorldClock } from './systems/SelfReferential.js';
 import { EasterEggSystem } from './systems/EasterEggSystem.js';
 import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
@@ -89,7 +88,6 @@ class Engine {
   private _worlds: WorldLoader;
   /** The layout the host last reported, kept so a per-display world can be re-resolved. */
   private _monitors: Array<MonitorReport & { index: number }> = [];
-  private _worldClock: WorldClock;
   private _easterEggs: EasterEggSystem;
   private _interaction: InteractionSystem;
   private _media: MediaReactivitySystem;
@@ -131,7 +129,6 @@ class Engine {
     this._accessibility = new AccessibilitySystem();
     this._updater = new UpdateSystem({ checkInterval: 3600, endpoint: '', autoCheck: false, allowMandatory: true }, '0.1.0');
     this._worlds = new WorldLoader();
-    this._worldClock = new WorldClock();
     this._easterEggs = new EasterEggSystem();
     this._interaction = new InteractionSystem();
     this._media = new MediaReactivitySystem();
@@ -385,27 +382,21 @@ class Engine {
         this._lastRender = frameStart;
       }
 
-      // The world clock can drift, freeze or run backward. Binding it to the
-      // date handed to the renderer is what makes it visible rather than
-      // bookkeeping nobody sees.
-      const now = new Date();
-      const simBase = this._simDate ?? now;
-      const world = this._worldClock.getState();
-      let display = simBase;
-      if (world.mode !== 'normal') {
-        const driftMs = (Date.now() - this._clockOrigin) * world.driftRate;
-        display = new Date(simBase.getTime() + driftMs);
-        if (world.mode === 'backward') display = new Date(simBase.getTime() - driftMs);
-        if (world.mode === 'frozen') display = new Date(this._clockOrigin);
-        if (world.mode === 'glitch') {
-          // A short, deliberate discontinuity. This is the anomaly, so it should
-          // be abrupt rather than smoothed.
-          const g = Math.sin(this._frameCount * 0.37) * this._h0(0.06);
-          display = new Date(display.getTime() + g * 86400000);
-        }
-      }
-
-      this._renderer.render(display);
+      // The date handed to the renderer is the simulated hour when one is set, and
+      // the real clock otherwise.
+      //
+      // This used to read a `WorldClock` here and add its drift, freeze or glitch
+      // offset to the base date. `setMode` and `setDriftRate` had no callers, so the
+      // clock's mode was permanently 'normal' and the whole branch was unreachable --
+      // while the clock itself ticked a once-a-second interval forever, computing a
+      // world time that nothing displayed. The clock is gone.
+      //
+      // What it was reaching for already ships, and is measured: the `clock-lie` story
+      // beat moves the hour the renderer draws by up to 173 minutes, fires on the
+      // three-nights-at-03:33 egg, and is proven to change real pixels by
+      // tools/story-beats.mjs. A second, unreachable mechanism for the same effect is
+      // worse than one that works.
+      this._renderer.render(this._simDate ?? new Date());
       this._particles.update(16);
       this._particles.render(this._canvas.getContext('2d')!, this._canvas.width, this._canvas.height);
       this._entities.update(16);
@@ -417,10 +408,6 @@ class Engine {
     this._performance.update(frameTime);
 
     requestAnimationFrame(() => this._loop());
-  }
-
-  private _h0(v: number): number {
-    return this._worldClock.getState().glitchFrequency * v;
   }
 
   private _updateFps(): void {
@@ -833,7 +820,6 @@ class Engine {
   getWeather(): WeatherSystem { return this._weather; }
   getAstronomy(): AstronomySystem { return this._astronomy; }
   getNetwork(): NetworkSource { return this._network; }
-  getWorldClock(): WorldClock { return this._worldClock; }
   getEasterEggs(): EasterEggSystem { return this._easterEggs; }
   getInteraction(): InteractionSystem { return this._interaction; }
   getMedia(): MediaReactivitySystem { return this._media; }
@@ -1396,8 +1382,8 @@ class Engine {
     return pick.id;
   }
 
+  /** The hour the scene is drawn at, when creator mode has pinned one. */
   private _simDate: Date | null = null;
-  private _clockOrigin = Date.now();
 }
 
 const engine = new Engine();
