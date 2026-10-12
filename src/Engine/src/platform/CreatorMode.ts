@@ -1,5 +1,6 @@
 import type { DebugOverlay } from './DebugOverlay.js';
 import { WINDOW_EVENTS } from '../core/windowEvents.js';
+import { EN_STRINGS, type Translate } from './I18n.js';
 
 export interface CreatorModeConfig {
   enabled: boolean;
@@ -20,6 +21,26 @@ export class CreatorMode {
 
   private _debugOverlay: DebugOverlay | null = null;
   private _panel: HTMLElement | null = null;
+
+  /**
+   * The translator, held by reference rather than captured at construction.
+   *
+   * A function passed to the constructor freezes the locale at that moment, so a
+   * language change would leave the panel in the old language until it was closed and
+   * reopened. Holding the object instead and asking it at render time means a locale
+   * switch re-renders correctly, which is the whole point of being able to switch.
+   */
+  private _i18n: { t: Translate } = { t: (key) => EN_STRINGS[key] };
+
+  /** Attaches the engine's translator. Without one, the panel is English. */
+  useTranslator(i18n: { t: Translate }): void {
+    this._i18n = i18n;
+    if (this._panel) this._renderPanel();
+  }
+
+  private _t(key: Parameters<Translate>[0]): string {
+    return this._i18n.t(key);
+  }
 
   enable(): void {
     this._config.enabled = true;
@@ -104,30 +125,31 @@ export class CreatorMode {
 
   private _renderPanel(): void {
     if (!this._panel) return;
+    const t = (key: Parameters<Translate>[0]) => this._t(key);
     this._panel.innerHTML = `
-      <h3 style="margin:0 0 10px;color:#8888ff;">Creator Mode</h3>
+      <h3 style="margin:0 0 10px;color:#8888ff;">${t('creator.title')}</h3>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <button id="cm-trigger-event" style="padding:6px;cursor:pointer;">Trigger Event</button>
-        <button id="cm-set-time" style="padding:6px;cursor:pointer;">Set Time</button>
-        <button id="cm-set-weather" style="padding:6px;cursor:pointer;">Set Weather</button>
-        <button id="cm-reload-world" style="padding:6px;cursor:pointer;">Reload World</button>
-        <button id="cm-screenshot" style="padding:6px;cursor:pointer;">Screenshot</button>
+        <button id="cm-trigger-event" style="padding:6px;cursor:pointer;">${t('creator.triggerEvent')}</button>
+        <button id="cm-set-time" style="padding:6px;cursor:pointer;">${t('creator.setTime')}</button>
+        <button id="cm-set-weather" style="padding:6px;cursor:pointer;">${t('creator.setWeather')}</button>
+        <button id="cm-reload-world" style="padding:6px;cursor:pointer;">${t('creator.reloadWorld')}</button>
+        <button id="cm-screenshot" style="padding:6px;cursor:pointer;">${t('creator.screenshot')}</button>
       </div>
     `;
 
     this._panel.querySelector('#cm-trigger-event')?.addEventListener('click', () => {
-      const id = prompt('Event ID:');
+      const id = prompt(t('creator.prompt.eventId'));
       if (id) this.triggerEvent(id);
     });
     this._panel.querySelector('#cm-set-time')?.addEventListener('click', () => {
-      const time = prompt('Time (HH:MM):');
+      const time = prompt(t('creator.prompt.time'));
       if (time) {
         const [h, m] = time.split(':').map(Number);
         this.setSimulatedTime(h, m);
       }
     });
     this._panel.querySelector('#cm-set-weather')?.addEventListener('click', () => {
-      const condition = prompt('Weather condition:');
+      const condition = prompt(t('creator.prompt.weather'));
       if (condition) this.setSimulatedWeather(condition);
     });
     this._panel.querySelector('#cm-reload-world')?.addEventListener('click', () => {

@@ -8,7 +8,7 @@
 4. Run the checks, all from `src/Engine`:
 
    ```
-   npm test          # 377 unit tests
+   npm test          # 393 unit tests
    npm run typecheck # src/, then src/ + tests/ together
    npm run lint      # src/ and tests/
    ```

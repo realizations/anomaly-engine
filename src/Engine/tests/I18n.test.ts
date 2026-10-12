@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { I18n } from '../src/platform/I18n.js';
+import { I18n, EN_STRINGS, type UiKey } from '../src/platform/I18n.js';
 import { ES_LOCALE } from '../src/platform/locales/es.js';
 import { DE_LOCALE } from '../src/platform/locales/de.js';
 import { JA_LOCALE } from '../src/platform/locales/ja.js';
@@ -52,7 +52,7 @@ describe('I18n', () => {
     // A handful of strings are legitimately identical across languages -- "FPS" is
     // "FPS" everywhere -- so this only catches wholesale copying of English values.
     const untranslated = Object.entries(locale.strings).filter(
-      ([key, value]) => value === english.t(key) && /[a-z]{3,}/.test(english.t(key))
+      ([key, value]) => value === EN_STRINGS[key as UiKey] && /[a-z]{3,}/.test(EN_STRINGS[key as UiKey])
     );
     expect({ code, untranslated: untranslated.map(([k]) => k) }).toEqual({ code, untranslated: [] });
   });
@@ -89,7 +89,10 @@ describe('I18n', () => {
     // Absent entirely: the key itself comes back, which makes a missing string
     // visible in the interface rather than rendering as nothing.
     expect(i.t('tray.about')).toBe('About');
-    expect(i.t('no.such.key')).toBe('no.such.key');
+    // An unknown key is a programming error, and `UiKey` is what makes that a compile
+    // error. Cast here because testing the runtime fallback is the point: the guard is
+    // for keys arriving from outside the table, and the table itself is checked above.
+    expect(i.t('no.such.key' as UiKey)).toBe('no.such.key');
   });
 
   it('reports the locales it has', () => {

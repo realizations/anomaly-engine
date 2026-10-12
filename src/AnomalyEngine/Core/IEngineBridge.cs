@@ -51,6 +51,12 @@ public interface IEngineBridge
     /// </summary>
     void SendToRenderer(string eventName);
 
+    /// <summary>Sets the interface language by locale code. Not an event: a payload.</summary>
+    void SetLocale(string locale);
+
+    /// <summary>The interface languages the renderer reports, as (code, name).</summary>
+    Task<List<(string Code, string Name)>> GetAvailableLocalesAsync();
+
     /// <summary>Sets scene motion, 0 to 1. Not an event: this evaluates a call.</summary>
     void SetMotionIntensity(double intensity);
 }

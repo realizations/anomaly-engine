@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Turning scene geometry into somewhere to point.
  *
  * ## Why this is separate from both sides
@@ -31,6 +31,7 @@
  * below is written to describe the building rather than the discovery.
  */
 import type { InteractionSurfaces, ScreenRect } from '../renderer/WorldRenderer.js';
+import { EN_STRINGS, type Translate } from '../platform/I18n.js';
 
 /** How long the cursor must rest on a zone before `onDwell` fires. */
 export const DEFAULT_DWELL_MS = 30_000;
@@ -68,16 +69,23 @@ export interface ZoneDescriptor {
 }
 
 /**
- * The curated zone table.
- *
  * `kind` is matched against a landmark's kind; `id` is used for zones the renderer
  * does not model as structures.
+ *
+ * `as const` is not decoration: it narrows `hintKey` to the literal union, so a
+ * misspelled key here is a compile error instead of an English hint that never
+ * translates.
  */
 const ZONES = [
   {
     id: 'observatory',
     match: 'observatory' as const,
     cursor: 'pointer',
+    // The English text, as the identity default. `describeZones` takes a translator and
+    // calls this through it, so the string here is what a caller with no locale gets
+    // and what `tools/i18n-audit.mjs` matches on. Keeping it means the audit can prove
+    // the key and the literal have not drifted apart.
+    hintKey: 'hint.observatory',
     hint: 'The dome is shut. The shutter has not moved in a long time.',
     dwellMs: 0,
     trigger: 'triple-click:observatory',
@@ -86,6 +94,7 @@ const ZONES = [
     id: 'radio-tower',
     match: 'radio-tower' as const,
     cursor: 'default',
+    hintKey: 'hint.radioTower',
     hint: 'The carrier is still going. Nobody answers it.',
     dwellMs: 0,
     trigger: null,
@@ -94,6 +103,7 @@ const ZONES = [
     id: 'cabin',
     match: 'cabin' as const,
     cursor: 'default',
+    hintKey: 'hint.cabin',
     hint: 'Smoke, most nights. No one has come out of it.',
     dwellMs: 0,
     trigger: null,
@@ -102,17 +112,19 @@ const ZONES = [
     id: 'lighthouse',
     match: 'lighthouse' as const,
     cursor: 'default',
+    hintKey: 'hint.lighthouse',
     hint: 'The light keeps the interval it was given.',
     dwellMs: 0,
     trigger: null,
   },
-];
+] as const;
 
 /** Sky and ground regions, which are not landmarks and so are matched by id. */
 const EXTRA_ZONES = [
   {
     id: 'moon',
     cursor: 'default',
+    hintKey: 'hint.moon',
     hint: 'It is the right shape and the wrong distance.',
     // A dwell, because the egg is `hover:moon@midnight` -- resting the cursor on the
     // moon is the only gesture the sky offers. This was 0, and that made the egg
@@ -132,11 +144,12 @@ const EXTRA_ZONES = [
     cursor: 'default',
     // The dwell hint. Only shown while the cursor is actually resting there, so it
     // reads as the forest noticing rather than as an instruction.
+    hintKey: 'hint.forest',
     hint: 'The treeline is not moving.',
     dwellMs: DEFAULT_DWELL_MS,
     trigger: 'idle:forest:30s',
   },
-];
+] as const;
 
 /**
  * Build the zone descriptors for a scene.
@@ -144,8 +157,16 @@ const EXTRA_ZONES = [
  * Returns an empty list for a scene with nothing to point at -- the interior world --
  * rather than throwing, because a zone table is an enhancement and a wallpaper with
  * no clickable regions is a normal state, not a failure.
+ *
+ * `t` translates the hints, which are the one piece of text a player sees before doing
+ * anything at all, so they are the strings that have to survive a locale switch. It
+ * defaults to the identity rather than requiring an argument so this stays a pure
+ * geometry function that a test can call with no locale machinery in scope.
  */
-export function describeZones(surfaces: InteractionSurfaces): ZoneDescriptor[] {
+export function describeZones(
+  surfaces: InteractionSurfaces,
+  t: Translate = (key) => EN_STRINGS[key]
+): ZoneDescriptor[] {
   const out: ZoneDescriptor[] = [];
 
   for (const zone of ZONES) {
@@ -156,7 +177,7 @@ export function describeZones(surfaces: InteractionSurfaces): ZoneDescriptor[] {
       name: zone.match,
       rect: { x: match.x, y: match.y, width: match.width, height: match.height },
       cursor: zone.cursor,
-      hint: zone.hint,
+      hint: t(zone.hintKey),
       dwellMs: zone.dwellMs,
       trigger: zone.trigger,
     });
@@ -168,7 +189,7 @@ export function describeZones(surfaces: InteractionSurfaces): ZoneDescriptor[] {
       name: 'moon',
       rect: surfaces.moon,
       cursor: EXTRA_ZONES[0].cursor,
-      hint: EXTRA_ZONES[0].hint,
+      hint: t(EXTRA_ZONES[0].hintKey),
       dwellMs: EXTRA_ZONES[0].dwellMs,
       trigger: EXTRA_ZONES[0].trigger,
     });
@@ -182,7 +203,7 @@ export function describeZones(surfaces: InteractionSurfaces): ZoneDescriptor[] {
       name: 'forest',
       rect: surfaces.forest,
       cursor: EXTRA_ZONES[1].cursor,
-      hint: EXTRA_ZONES[1].hint,
+      hint: t(EXTRA_ZONES[1].hintKey),
       dwellMs: EXTRA_ZONES[1].dwellMs,
       trigger: EXTRA_ZONES[1].trigger,
     });

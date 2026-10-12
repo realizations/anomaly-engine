@@ -591,6 +591,7 @@ public class WallpaperHost : IEngineBridge, IDisposable
         "debug",
         "creator",
         "notes",
+        "locale",
         "trigger",
         "pause",
         "resume",
@@ -703,6 +704,45 @@ public class WallpaperHost : IEngineBridge, IDisposable
         _logger.Info($"Hotkey: art style -> {style}");
         _ = ExecuteScriptSafe(
             $"window.dispatchEvent(new CustomEvent('anomaly:style', {{ detail: {{ style: '{style}' }} }}));");
+    }
+
+    /// <summary>Sets the interface language by locale code, e.g. "ja".</summary>
+    public void SetLocale(string locale)
+    {
+        // Serialised as a JSON string literal because it is interpolated into a script
+        // string, and it arrives from a settings control rather than from a constant.
+        // The renderer refuses an unknown code and keeps the current language, so a bad
+        // value here is a no-op rather than a reset to English.
+        var code = System.Text.Json.JsonSerializer.Serialize(locale);
+        _logger.Info($"Interface language set to {locale}.");
+        _ = ExecuteScriptSafe(
+            $"window.dispatchEvent(new CustomEvent('anomaly:locale', {{ detail: {{ locale: {code} }} }}));");
+    }
+
+    /** The interface languages the renderer reports, as (code, name). */
+    public async Task<List<(string Code, string Name)>> GetAvailableLocalesAsync()
+    {
+        var json = await EvaluateAsync(
+            "JSON.stringify(window.__engine ? window.__engine.getAvailableLocales() : [])");
+        if (string.IsNullOrWhiteSpace(json) || json == "null") return new List<(string, string)>();
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var outp = new List<(string, string)>();
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.TryGetProperty("code", out var c) && item.TryGetProperty("name", out var n))
+                {
+                    outp.Add((c.GetString() ?? "", n.GetString() ?? ""));
+                }
+            }
+            return outp;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _logger.Warn($"Could not read the locale list: {ex.Message}");
+            return new List<(string, string)>();
+        }
     }
 
     /// <summary>Evaluates an expression in the page and returns its value as JSON.</summary>

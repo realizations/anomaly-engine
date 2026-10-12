@@ -126,6 +126,11 @@ class Engine {
     this._notes = new FieldNotes();
     this._creator = new CreatorMode();
     this._i18n = new I18n();
+    // Language first, before anything renders. The three surfaces that put text on
+    // screen -- the field notes, the creator panel and the zone hints -- are handed the
+    // translator here rather than reading a locale themselves, so a switch later in the
+    // session reaches all three.
+    this._applyLocale(this._i18n.detect(browserLanguages()));
     this._accessibility = new AccessibilitySystem();
     this._updater = new UpdateSystem({ checkInterval: 3600, endpoint: '', autoCheck: false, allowMandatory: true }, '0.1.0');
     this._worlds = new WorldLoader();
@@ -631,6 +636,13 @@ class Engine {
     });
     window.addEventListener(WINDOW_EVENTS.trigger, () => this.triggerRandomAnomaly());
     window.addEventListener(WINDOW_EVENTS.notes, () => this.toggleFieldNotes());
+    window.addEventListener(WINDOW_EVENTS.locale, (e) => {
+      const code = (e as CustomEvent<{ locale?: string }>).detail?.locale;
+      if (typeof code !== 'string' || !code) return;
+      // A rejected code is logged by `_applyLocale` returning false; it deliberately
+      // leaves the current language in place rather than resetting to English.
+      this._applyLocale(code);
+    });
 
     // Creator mode drives the world by dispatching events rather than by holding a
     // reference to the engine, which is the right shape for a panel that can be
@@ -687,7 +699,10 @@ class Engine {
       if (typeof zoneId !== 'string' || !zoneId) return;
       // The zone carries its own trigger, so the mapping from "what was clicked" to
       // "what that means" stays in one table rather than in a switch here.
-      const desc = describeZones(this._renderer.getInteractionSurfaces(this._effectiveDate())).find(
+      const desc = describeZones(
+        this._renderer.getInteractionSurfaces(this._effectiveDate()),
+        this._i18n.translator()
+      ).find(
         (z) => z.id === zoneId
       );
       if (desc?.trigger) this._tryDiscover(desc.trigger);
@@ -814,6 +829,37 @@ class Engine {
   getDebug(): DebugOverlay { return this._debug; }
   getCreator(): CreatorMode { return this._creator; }
   getI18n(): I18n { return this._i18n; }
+
+  /**
+   * Switches the interface language and rebuilds everything that renders text.
+   *
+   * Returns whether the locale was one we ship, so a caller -- and a test -- can tell a
+   * rejected code from an accepted one. An unknown code leaves the current language
+   * alone rather than falling back to English, because a mistyped `anomaly:locale` from
+   * the host should not silently reset someone's interface.
+   *
+   * `this._notes.useTranslator` and `this._creator.useTranslator` both re-render when a
+   * panel is already open, so the change is visible without closing and reopening.
+   */
+  private _applyLocale(code: string): boolean {
+    if (!this._i18n.setLocale(code)) return false;
+    const translator = this._i18n;
+    this._notes.useTranslator(translator);
+    this._creator.useTranslator(translator);
+    // Zones carry a translated hint, so they are rebuilt rather than re-labelled. Not on
+    // the boot path, though: the first `_applyLocale` runs while the constructor is
+    // still building, and there is no renderer yet to ask for surfaces. The zones built
+    // later by `_rebuildZones` pick the current language up on their own, so skipping
+    // here loses nothing.
+    if (this._renderer) this._rebuildZones();
+    this._bridge.sendLog(`locale:changed:${code}`, { locale: code });
+    return true;
+  }
+
+  /** The available interface languages, for a host that wants to offer a choice. */
+  getAvailableLocales(): { code: string; name: string }[] {
+    return this._i18n.getAvailableLocales().map((l) => ({ code: l.code, name: l.name }));
+  }
   getAccessibility(): AccessibilitySystem { return this._accessibility; }
   getPerformance(): PerformanceSystem { return this._performance; }
   getWorlds(): WorldLoader { return this._worlds; }
@@ -1235,7 +1281,7 @@ class Engine {
   private _rebuildZones(): void {
     for (const z of this._interaction.getZones()) this._interaction.unregisterZone(z.id);
     const surfaces = this._renderer.getInteractionSurfaces(this._effectiveDate());
-    for (const desc of describeZones(surfaces)) {
+    for (const desc of describeZones(surfaces, this._i18n.translator())) {
       this._interaction.registerZone({
         id: desc.id,
         name: desc.name,
@@ -1384,6 +1430,21 @@ class Engine {
 
   /** The hour the scene is drawn at, when creator mode has pinned one. */
   private _simDate: Date | null = null;
+}
+
+/**
+ * The user's ordered language preferences.
+ *
+ * `navigator.languages` is the list; `navigator.language` is only the first entry, and
+ * some hosts populate one and not the other. Read defensively because this runs at
+ * module scope on a page that also has to work under `file://` in WebView2, where the
+ * navigator is a real one but a reduced one.
+ */
+function browserLanguages(): string[] {
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  const list = Array.isArray(nav?.languages) ? nav.languages.filter((l) => typeof l === 'string') : [];
+  const single = nav?.language;
+  return typeof single === 'string' && !list.includes(single) ? [single, ...list] : list;
 }
 
 const engine = new Engine();

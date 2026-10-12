@@ -79,6 +79,7 @@ public partial class SettingsWindow : Window
         Loaded += async (_, _) =>
         {
             await ApplyInitialSelection();
+            await LoadLocalesAsync();
             _poll.Tick += (_, _) => _ = RefreshAsync();
             _poll.Start();
         };
@@ -199,6 +200,64 @@ public partial class SettingsWindow : Window
         {
             active.Style = (Style)FindResource("NavButtonActive");
         }
+    }
+
+    /* ------------------------------ language ------------------------------ */
+
+    /// <summary>
+    /// Fills the language box from the renderer's own list.
+    ///
+    /// The renderer is asked rather than a list being written here, because the set of
+    /// shipped languages is the renderer's business and a copy in this file is one that
+    /// goes stale silently: a fourth language would appear in the interface with no way
+    /// to select it, and removing one would leave a control that selects a code the
+    /// renderer refuses.
+    ///
+    /// Populated under `_loading` so filling the box does not read as the user choosing
+    /// a language and push one to the renderer on open.
+    /// </summary>
+    private async System.Threading.Tasks.Task LoadLocalesAsync()
+    {
+        if (_host is null || _closing) return;
+        var locales = await _host.GetAvailableLocalesAsync();
+        if (_closing || locales.Count == 0) return;
+
+        _loading = true;
+        try
+        {
+            LanguageBox.ItemsSource = locales.Select(l => new LocaleItem(l.Code, l.Name)).ToList();
+            var current = locales.FirstOrDefault(l => l.Code == _activeLocale);
+            LanguageBox.SelectedItem = LanguageBox.ItemsSource
+                .OfType<LocaleItem>()
+                .FirstOrDefault(i => i.Code == current.Code)
+                ?? LanguageBox.ItemsSource.OfType<LocaleItem>().FirstOrDefault();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string _activeLocale = "en";
+
+    private sealed record LocaleItem(string Code, string Name)
+    {
+        // The display name is the language's own name of itself, so a German reader sees
+        // "Deutsch" rather than "German". That is the convention that makes a list
+        // readable to someone who cannot read the other entries.
+        public override string ToString() => Name;
+    }
+
+    private void LanguageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Fires while the box is being filled and again on close; `_loading` is what
+        // makes filling it not look like a user action.
+        if (_loading || _host is null) return;
+        if (LanguageBox.SelectedItem is not LocaleItem item) return;
+
+        _host.SetLocale(item.Code);
+        _activeLocale = item.Code;
+        StatusText.Text = $"Language set to {item.Name}.";
     }
 
     /* ----------------------------- navigation ----------------------------- */

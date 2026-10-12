@@ -52,6 +52,8 @@ export const WINDOW_EVENTS = {
   trigger: 'anomaly:trigger',
   /** Host -> renderer: toggle the field-notes panel. */
   notes: 'anomaly:notes',
+  /** Host -> renderer: switch interface language, by locale code. */
+  locale: 'anomaly:locale',
 
   /** Creator mode -> renderer: pin the simulated clock. */
   setTime: 'anomaly:set-time',

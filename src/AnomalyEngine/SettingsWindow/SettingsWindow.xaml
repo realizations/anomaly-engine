@@ -664,6 +664,11 @@
                         <TextBlock Style="{StaticResource Heading}" Text="WEATHER" Margin="0,28,0,10"/>
                         <TextBlock Style="{StaticResource Note}"
                                    Text="Weather runs from a local simulation seeded by latitude and longitude. No API key is used and no request leaves the machine, so the desktop behaves consistently offline and nothing about the user's location is disclosed."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="LANGUAGE" Margin="0,28,0,10"/>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,0,0,10"
+                                   Text="The desktop follows your system language on first run. This overrides it. The field notes, the creator panel and the hover hints are translated; the world names and the anomaly names are not, because they are the fiction rather than the interface around it."/>
+                        <ComboBox x:Name="LanguageBox" SelectionChanged="LanguageBox_SelectionChanged" HorizontalAlignment="Left" MinWidth="200"/>
                     </StackPanel>
 
                     <!-- ============================= ABOUT ============================= -->

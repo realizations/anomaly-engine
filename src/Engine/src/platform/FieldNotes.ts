@@ -12,6 +12,7 @@
 import type { JournalEntry } from '../systems/JournalSystem.js';
 import type { DiscoveredSecret, SecretDefinition } from '../systems/SecretSystem.js';
 import type { WorldDefinition } from '../worlds/types.js';
+import { EN_STRINGS, type Translate, type TranslateValues, type UiKey } from './I18n.js';
 
 export interface FieldNotesData {
   world: WorldDefinition | null;
@@ -29,6 +30,16 @@ export class FieldNotes {
   private _el: HTMLElement | null = null;
   private _visible = false;
   private _timer: number | null = null;
+
+  /**
+   * The translator, asked at render time rather than captured.
+   *
+   * Holding the object rather than a bound function is what lets a language change
+   * take effect on an open panel. This is the surface the README calls the ARG one, so
+   * "reopen the panel to see the new language" would be the kind of bug nobody files.
+   */
+  private _i18n: { t: Translate } = { t: (key) => EN_STRINGS[key] };
+
   private _data: FieldNotesData = {
     world: null,
     journal: [],
@@ -38,6 +49,16 @@ export class FieldNotes {
     firstRun: null,
     anomaliesSeen: 0,
   };
+
+  /** Attaches the engine's translator. Without one, the panel is English. */
+  useTranslator(i18n: { t: Translate }): void {
+    this._i18n = i18n;
+    if (this._visible) this._render();
+  }
+
+  private _t(key: UiKey, values?: TranslateValues): string {
+    return this._i18n.t(key, values);
+  }
 
   show(data?: Partial<FieldNotesData>): void {
     if (data) this._data = { ...this._data, ...data };
@@ -135,7 +156,7 @@ export class FieldNotes {
 
     const denial = w?.lore?.deniability?.length
       ? `<div style="margin:18px 0 0;padding:12px 14px;border-left:2px solid rgba(150,150,170,.3);background:rgba(255,255,255,.03)">
-           <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7b7a86;margin-bottom:8px">Also consistent with</div>
+            <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7b7a86;margin-bottom:8px">${this._esc(this._t('notes.alsoConsistentWith'))}</div>
            ${(w.lore.deniability ?? []).map((line) => `<div style="color:#8e8c85;margin-bottom:4px">${this._esc(line)}</div>`).join('')}
          </div>`
       : '';
@@ -157,7 +178,7 @@ export class FieldNotes {
 
     const journalBlock = d.journal.length
       ? `<ol style="list-style:none;padding:0;margin:0">${entries}</ol>`
-      : `<p style="color:#7b7a86">Nothing written down yet.</p>`;
+      : `<p style="color:#7b7a86">${this._esc(this._t('notes.empty'))}</p>`;
 
     // Secrets the reader has not found show only their hint, never their name,
     // so the panel can act as a journal prompt rather than a spoiler list.
@@ -168,23 +189,23 @@ export class FieldNotes {
             const body = got
               ? `<div style="color:#c9c6be">${this._esc(s.name)}</div>
                  <div style="color:#8e8c85;font-size:12px">${this._esc(s.description)}</div>`
-              : `<div style="color:#6d6c78;font-style:italic">${this._esc(s.hints[0] ?? 'Unrecorded.')}</div>`;
+              : `<div style="color:#6d6c78;font-style:italic">${this._esc(s.hints[0] ?? this._t('notes.unrecorded'))}</div>`;
             return `<li style="margin-bottom:12px">${body}</li>`;
           }).join('')}
          </ul>`
       : '';
 
     this._el.innerHTML = `
-      <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#7b7a86">Field notes</div>
+      <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#7b7a86">${this._esc(this._t('notes.title'))}</div>
       <h1 style="font-family:'Space Grotesk', 'Segoe UI', sans-serif;font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:4px 0 0;color:#e9e7e1">${this._esc(w?.name ?? 'Unknown world')}</h1>
-      <div style="font-size:12px;color:#7b7a86;margin-bottom:16px">${this._esc(w?.biome ?? '')} · seed ${this._esc(w?.terrain?.seed ?? '')}</div>
+      <div style="font-size:12px;color:#7b7a86;margin-bottom:16px">${this._esc(w?.biome ?? '')} · ${this._esc(this._t('notes.seed'))} ${this._esc(w?.terrain?.seed ?? '')}</div>
       ${lore}
       <p style="color:#9d9a92;margin:0 0 6px;font-size:13px">${this._esc(w?.description ?? '')}</p>
       ${denial}
 
       <div style="display:flex;gap:22px;margin:22px 0;padding:14px 0;border-top:1px solid rgba(140,140,160,.14);border-bottom:1px solid rgba(140,140,160,.14)">
-        ${this._stat(d.anomaliesSeen, 'observed')}
-        ${this._stat(found.size, `of ${d.secretDefinitions.length} notes`)}
+        ${this._stat(d.anomaliesSeen, this._t('notes.observed'))}
+        ${this._stat(found.size, this._t('notes.ofCount', { n: d.secretDefinitions.length }))}
         ${this._stat(d.sessions, 'sessions')}
       </div>
 

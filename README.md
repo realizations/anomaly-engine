@@ -76,6 +76,7 @@ the full day/night cycle, not just at golden hour.
 ## Table of Contents
 
 - [Features](#features)
+- [Language](#language)
 - [Quick Start](#quick-start)
 - [How to Use](#how-to-use)
 - [Creating a World](#creating-a-world)
@@ -110,6 +111,7 @@ so than ship a feature table that overstates the project.
 | **Dynamic quality** | The scene renders to an offscreen buffer and blits up. Render scale adapts to hold a frame budget. |
 | **Live art-style switching** | Three renderer treatments from the tray or `Ctrl+Alt+S`, with an active-style checkmark. |
 | **Global hotkeys** | `Ctrl+Alt+W/S/P/F/D` — cycle world, cycle style, pause, field notes, debug. Registered with Windows, because the wallpaper never holds focus. |
+| **Localisation** | Spanish, German and Japanese. The system language is detected on first run; Settings → Integrations overrides it. The field-notes panel, the creator panel and the hover hints are translated. |
 | **Reduced motion** | Honours the OS `prefers-reduced-motion` preference by scaling ambient animation to 25%. |
 | **Settings window** | Live readouts from the renderer and working controls for world, style, frame rate, quality and reduced motion. Also opens with `--settings`. |
 | **Fullscreen passthrough** | Yields to fullscreen apps, excludes shell and `WorkerW` windows, and a manual pause survives a fullscreen app closing. |
@@ -121,18 +123,46 @@ so than ship a feature table that overstates the project.
 | Feature | What's missing |
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits — and the page's CSP sets `connect-src 'none'`, so a `fetch` from the renderer is blocked before it starts. All three are listed in `tools/verify-dead-code.mjs`, so the gate fails if one is wired up without its exemption being removed. |
-| **Localisation** | Spanish, German and Japanese translations ship and are reachable through `getI18n()`, but no surface calls `t()`, so a user never actually sees a translated string. The keys are complete and tested against each other; nothing consumes them. |
 | **World interaction** | Hover, click and triple-click work, and two of the six zones lead to an easter egg. The Konami code listens for `keydown` on a window the host never focuses, so it only fires under `npm run dev`. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 
+## Language
+
+Spanish, German and Japanese ship. The renderer reads `navigator.languages` on boot and
+picks the first language it recognises by its primary subtag, so `de-AT` resolves to
+German and a list starting `fr-CA, ja-JP` still lands on Japanese. Settings →
+Integrations overrides it, and the change is immediate: the field-notes panel and the
+creator panel both re-render in place rather than needing to be reopened.
+
+What is translated is the interface around the fiction — the field-notes chrome, the
+creator panel's buttons and prompts, and the hover hints on the six interactive zones.
+What is not translated is the world names, the anomaly names and the world lore. Those
+are the content, and a German copy of a place that does not exist in Germany would be a
+different place.
+
+World names are also the save-file keys, so translating them would orphan every
+existing user's selected world on upgrade. That is a second, independent reason not to,
+and it is the kind of thing that is much cheaper to decide now than later.
+
+### Adding a language
+
+Copy `src/Engine/src/platform/locales/de.ts`, set `code` and `name`, and fill in the
+strings. The file is typed as `Locale`, and the `en` table in `I18n.ts` is the source of
+truth for the key set — a key added there and not in your file is a compile error, not a
+silent English fallback. Add it to `builtInLocales()` and to the loop in
+`I18n.test.ts`.
+
+Use `{name}` for placeholders, not `%s`: the translations are read and edited by people
+who are not reading the source, and `{n}` is the only notation that survives a
+spreadsheet round trip.
+
 ### Deliberate non-goals for now
 
 - **No third-party art.** Anything drawn can be generated, so there is no licence to inherit
-  and no resolution ceiling. The licence gate exists to keep it that way if that changes.
+  and no resolution ceiling. The licence gate exists to keep it that way if this changes.
 - **No telemetry and no accounts.** The engine works with the network off.
-
-
+- **The fiction is not translated.** See [Language](#language).
 
 ## Quick Start
 
@@ -351,7 +381,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               377 unit tests
+    tests/               393 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -555,7 +585,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 377 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 393 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

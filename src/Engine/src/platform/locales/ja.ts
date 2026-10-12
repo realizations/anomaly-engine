@@ -1,4 +1,12 @@
-export const JA_LOCALE = {
+import type { Locale } from '../I18n.js';
+
+/**
+ * Japanese.
+ *
+ * Typed against the English table, so a key added there and not here is a compile
+ * error rather than an English string appearing in a Japanese interface at runtime.
+ */
+export const JA_LOCALE: Locale = {
   code: 'ja',
   name: '日本語',
   strings: {
@@ -40,5 +48,30 @@ export const JA_LOCALE = {
     'tray.settings': '設定',
     'tray.about': 'について',
     'tray.exit': '終了',
+
+    'creator.title': 'クリエイターモード',
+    'creator.triggerEvent': 'イベント発動',
+    'creator.setTime': '時刻を設定',
+    'creator.setWeather': '天気を設定',
+    'creator.reloadWorld': 'ワールドを再読み込み',
+    'creator.screenshot': 'スクリーンショット',
+    'creator.prompt.eventId': 'イベント ID:',
+    'creator.prompt.time': '時刻 (HH:MM):',
+    'creator.prompt.weather': '気象条件:',
+
+    'notes.title': 'フィールドノート',
+    'notes.alsoConsistentWith': '同上と矛盾しない点',
+    'notes.empty': 'まだ何も記録されていません。',
+    'notes.observed': '件を観測',
+    'notes.ofCount': '{n} 件中',
+    'notes.seed': 'シード',
+    'notes.unrecorded': '未記録。',
+
+    'hint.observatory': 'ドームは閉ざされている。シャッターは長いあいだ動いていない。',
+    'hint.radioTower': '放送は続いている。応える者はいない。',
+    'hint.cabin': 'たいていの夜に煙が出る。誰も出てきていない。',
+    'hint.lighthouse': '灯りは与えられた間隔を保っている。',
+    'hint.forest': '樹冠は動いていない。',
+    'hint.moon': '形は正しく、距離は間違っている。',
   },
 };

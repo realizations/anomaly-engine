@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
@@ -93,4 +94,19 @@ internal sealed class MarshallingStubBridge : IEngineBridge
     public void ToggleDebug() { }
     public void SendToRenderer(string eventName) { }
     public void SetMotionIntensity(double intensity) { }
+    public void SetLocale(string locale) { }
+
+    // A fixed four-language list, which is what the renderer actually reports. The
+    // settings harness renders the language section off-screen, so an empty list would
+    // render a settings page with no control on it and still pass the page audit.
+    public Task<List<(string Code, string Name)>> GetAvailableLocalesAsync()
+    {
+        return Task.FromResult(new List<(string, string)>
+        {
+            ("en", "English"),
+            ("es", "Espanol"),
+            ("de", "Deutsch"),
+            ("ja", "Japanese"),
+        });
+    }
 }
