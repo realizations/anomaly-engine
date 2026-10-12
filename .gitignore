@@ -35,3 +35,11 @@ tools/node_modules/
 .env.*
 !.env.example
 
+# One-off scratch scripts. compileicon.py sat untracked in the repository root for
+# the length of this work: it builds assets/axolotl.ico from an image that is not in
+# the repository, so it cannot run here, and it is not part of any gate. A loose
+# script that cannot run is the kind of thing that gets committed by accident a year
+# later and then maintained by nobody.
+*.py
+!tools/**/*.py
+
