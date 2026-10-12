@@ -41,6 +41,8 @@ steps.push(await run('secret scan self-test', ['secret-scan.mjs', '--selftest'])
 steps.push(await run('no secrets committed', ['secret-scan.mjs']));
 steps.push(await run('host event wiring self-test', ['verify-host-events.mjs', '--selftest']));
 steps.push(await run('every host event reaches a listener', ['verify-host-events.mjs']));
+steps.push(await run('dead code self-test', ['verify-dead-code.mjs', '--selftest']));
+steps.push(await run('nothing unreachable ships', ['verify-dead-code.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('seam check still catches full-width steps', ['verify-seam-check.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));

@@ -18,4 +18,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monitor management
 - Power management (sleep/wake/battery)
 - Fullscreen detection
-- SQLite persistence layer
+- Durable state as JSON in %APPDATA%, owned by the native host

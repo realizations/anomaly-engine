@@ -344,8 +344,9 @@ src/
       systems/           Weather, astronomy, journal, secrets, particles, audio
       anomalies/         Anomaly registry with rarity and cooldowns
       platform/          Persistence, field notes, debug, creator mode, i18n
-      integrations/      GitHub, RSS and remote event adapters (unconfigured)
-    tests/               357 unit tests
+      integrations/      GitHub, RSS and remote event adapters (unconfigured, and
+                         listed in tools/verify-dead-code.mjs so that stays honest)
+    tests/               358 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -503,7 +504,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs twenty-three steps in order. Four of them prove a gate still bites, the rest exercise the
+Runs twenty-five steps in order. Six of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -522,6 +523,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/secret-scan.mjs --selftest` | Proves that scan catches planted keys and mangled text, and leaves real accents alone |
 | `tools/verify-host-events.mjs` | Proves every event the native host sends is one the renderer actually listens for, both by name and by prefix |
 | `tools/verify-host-events.mjs --selftest` | Proves that check against the call sites that shipped broken |
+| `tools/verify-dead-code.mjs` | Proves every module under `src/` is reachable from `main.ts`, or is listed as deliberate with a reason — and that no dependency is imported by nothing |
+| `tools/verify-dead-code.mjs --selftest` | Proves that check, including that an exemption which outlives its reason fails |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |
@@ -545,7 +548,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 357 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 358 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

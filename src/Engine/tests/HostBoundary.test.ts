@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { scanText, scanRepo } from '../../../tools/secret-scan.mjs';
 import {
@@ -7,21 +7,31 @@ import {
   hostSendNames,
   eventBoundaryProblems,
 } from '../../../tools/verify-host-events.mjs';
+import {
+  importGraph,
+  reachableFrom,
+  deadCodeProblems,
+  unusedDependencies,
+  DEAD_BY_DESIGN,
+} from '../../../tools/verify-dead-code.mjs';
 
 /**
  * Two cross-language boundaries that a type checker cannot see.
  *
  * Both are here for the same reason, and it is the reason `WindowEvents.test.ts`
  * exists: the failure is silent. A tray item dispatches an event nobody listens
- * for; a field-notes separator renders as `Â·`. Nothing throws, nothing logs, and
+ * for; a field-notes separator rendered as two characters instead of one. Nothing
+ * throws, nothing logs, and
  * every test that exercises the renderer directly still passes, because the
  * renderer is fine -- it is the *wiring* to it that is wrong.
  *
  * The mojibake half is here because it shipped to players. The field-notes panel is
  * the surface the README calls the ARG surface, reachable from the tray and from
- * Ctrl+Alt+F, and three of its strings rendered `Â·` where a middot was intended.
- * The cause was UTF-8 bytes read as Latin-1 at some point in the file's history,
- * which no compiler and no runtime can detect: `Â·` is a perfectly valid string.
+ * Ctrl+Alt+F, and three of its strings rendered a mangled middot where U+00B7 was
+ * intended -- the lead byte and its continuation, split into two characters by a
+ * Latin-1 read. No compiler and no runtime can detect that, because what it produces
+ * is a perfectly valid string. Spelled out rather than pasted so this file does not
+ * trip the very scan it is testing.
  */
 
 const ROOT = join(process.cwd(), '..', '..');
@@ -100,8 +110,8 @@ describe('host/renderer event boundary', () => {
 describe('text encoding', () => {
   it('renders the middot in the field-notes overlay, not a mangled pair', () => {
     // Three lines, all user-visible, all in the panel the README calls the ARG
-    // surface. `Â·` is not a placeholder that renders as something; it is what the
-    // player read.
+    // surface. The mangled pair was not a placeholder that stood in for something:
+    // it is what the player actually read.
     const fieldNotes = repoFile('src', 'Engine', 'src', 'platform', 'FieldNotes.ts');
     expect(fieldNotes).not.toMatch(/\u00c2\u00b7/);
     expect(fieldNotes).toMatch(/clues\.join\(' \u00b7 '\)/);
@@ -131,5 +141,56 @@ describe('text encoding', () => {
     // that flagged them would be silenced by disabling itself, which is worse than
     // not having it.
     expect(scanText(`const em = '\u2014'; const dot = '\u00b7'; const dia = '\u00e4';`)).toEqual([]);
+  });
+});
+
+describe('nothing unreachable ships', () => {
+  const SRC = join(ROOT, 'src', 'Engine', 'src');
+
+  function modules(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = join(dir, e.name);
+      return e.isDirectory() ? modules(full) : full.endsWith('.ts') ? [full] : [];
+    });
+  }
+
+  const graph = importGraph(modules(SRC));
+
+  it('has no disagreement about what is reachable', () => {
+    expect(deadCodeProblems({ graph })).toEqual([]);
+  });
+
+  it('reaches the engine from its entry point', () => {
+    // If the walk silently stopped following imports, every module would look
+    // unreachable and the assertion above would still pass -- because dead code is
+    // only a finding relative to a correct graph. So the graph itself is checked:
+    // the entry point must pull in the renderer and the world registry, which is what
+    // makes the "reachable" number above mean anything.
+    const reachable = reachableFrom(graph);
+    expect(reachable.has('main.ts')).toBe(true);
+    for (const expected of ['renderer/WorldRenderer.ts', 'worlds/WorldLoader.ts', 'core/EventBus.ts']) {
+      expect(reachable.has(expected)).toBe(true);
+    }
+    // Every module is either reachable or an accounted-for exemption. Stated as an
+    // exact partition rather than a threshold so a new unreachable module fails the
+    // gate rather than quietly eating into the margin.
+    expect(graph.size - reachable.size).toBe(Object.keys(DEAD_BY_DESIGN).length);
+  });
+
+  it('carries a native database module no longer', () => {
+    // The concrete outcome: a Node native module was a runtime dependency of a
+    // browser bundle, imported by exactly one file, and nothing imported that file.
+    // The dependency is the part that costs everyone a 26 MB install, so it is the
+    // part worth asserting on.
+    const pkg = JSON.parse(repoFile('src', 'Engine', 'package.json'));
+    expect(pkg.dependencies ?? {}).toEqual({});
+    expect(unusedDependencies(pkg.dependencies ?? {}, [])).toEqual([]);
+  });
+
+  it('no longer keeps the abandoned SQLite layer', () => {
+    // Named rather than counted, so a future reintroduction fails on identity.
+    const all = modules(SRC).map((f) => f.split(/[\\/]/).join('/'));
+    expect(all).not.toContain('src/Engine/src/platform/SQLitePersistence.ts');
+    expect(all).not.toContain('src/Engine/src/renderer/DayNightCycle.ts');
   });
 });

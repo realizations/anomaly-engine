@@ -1,10 +1,18 @@
 /**
  * Durable state.
  *
- * better-sqlite3 does not load reliably inside WebView2, so persistence goes
- * through the native host to a JSON file in %APPDATA%. The data set is small
- * (selected world, style, journal, discovered secrets), so a document store is
- * the right tool and a database would be overkill.
+ * Persistence goes through the native host to a JSON file in %APPDATA%, because a
+ * native database does not load reliably inside WebView2 and the data set is small
+ * (selected world, style, journal, discovered secrets). A document store is the right
+ * tool here; a database would be overkill.
+ *
+ * There were two abandoned attempts at the other answer, and both are gone rather than
+ * dormant. `platform/SQLitePersistence.ts` imported better-sqlite3 and was the only
+ * thing in the project that did, which made a native Node module a runtime dependency
+ * of a browser bundle. `Core/AnomalyEngineDb.cs` P/Invoked `sqlite3` while the project
+ * referenced System.Data.SQLite.Core, which ships its native library under a different
+ * name, so the first call threw DllNotFoundException. tools/verify-dead-code.mjs is what
+ * stops either shape coming back unnoticed.
  *
  * When no host is present the module falls back to localStorage, so the engine
  * still persists when run in a plain browser during development.

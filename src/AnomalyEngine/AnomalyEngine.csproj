@@ -16,9 +16,23 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
   </ItemGroup>
+
+  <!--
+    No SQLite package, deliberately.
+
+    There was one, for a data layer that P/Invoked `sqlite3` while the package shipped
+    its native library as SQLite.Interop.dll, so the first call would have thrown
+    DllNotFoundException. That was verified by building the class and running it, not
+    by reading it. Nothing constructed it: the durable store is Core/StateStore.cs, a
+    JSON document in %APPDATA%, which is the right shape for the handful of fields we
+    keep and has the advantage of being readable when something goes wrong.
+
+    The managed wrapper would have worked if anyone had used it. Nothing did, and
+    carrying a package reference to keep a deleted class compiling is how the next
+    person assumes there is a database somewhere.
+  -->
 
   <!--
     Typefaces are embedded as WPF resources rather than read from disk, so the
