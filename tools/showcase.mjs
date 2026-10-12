@@ -161,7 +161,7 @@ for (const style of [STYLES[0]]) {
       const name = `world-${w.id}-${time.id}`;
       await page.screenshot({ path: join(SHOTS, `${name}.jpg`), type: 'jpeg', quality: 74 });
       if (errors.length) failures++;
-      frames.push({ file: `img/${name}.jpg`, group: 'world', style, item: { ...w, label: `${w.name} â€” ${time.label}` } });
+      frames.push({ file: `img/${name}.jpg`, group: 'world', style, item: { ...w, label: `${w.name} — ${time.label}` } });
       process.stdout.write(`  ${name}\n`);
     }
   }

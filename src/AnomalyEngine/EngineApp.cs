@@ -134,16 +134,15 @@ public class EngineApp : Application
 
     private void OnFullscreenStateChanged(object? sender, FullscreenStateChangedEventArgs e)
     {
-        if (e.IsFullscreen)
-        {
-            _logger?.Info("Fullscreen app detected, pausing.");
-            _wallpaperHost?.Pause();
-        }
-        else
-        {
-            _logger?.Info("Fullscreen app closed, resuming.");
-            _wallpaperHost?.Resume();
-        }
+        // Not Pause()/Resume(). Those set the *user* pause flag, so this handler was
+        // clearing a pause the user had asked for: pause the wallpaper from the tray,
+        // open a fullscreen app, close it, and the wallpaper came back. The host keeps
+        // the two reasons apart and ors them, which is the whole point of
+        // HandleFullscreenChange existing -- and it had no callers at all until now.
+        _logger?.Info(e.IsFullscreen
+            ? "Fullscreen app detected, pausing."
+            : "Fullscreen app closed, restoring previous state.");
+        _wallpaperHost?.HandleFullscreenChange(e.IsFullscreen);
     }
 
     protected override void OnExit(ExitEventArgs e)

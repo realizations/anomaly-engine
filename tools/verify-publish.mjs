@@ -44,11 +44,14 @@ if (!rendererBuilt) {
 rmSync(OUT, { recursive: true, force: true });
 
 console.log('publishing a self-contained win-x64 release (this takes a moment)...');
+// No `shell: true`: cmd.exe does not quote a joined argument list, so the space in a
+// path like `D:\Legend\NEW STUFF\...` arrives at MSBuild as a second project and the
+// publish fails for a reason that has nothing to do with the build.
 const publish = spawnSync(
   'dotnet',
   ['publish', 'src/AnomalyEngine/AnomalyEngine.csproj', '-c', 'Release', '-r', 'win-x64',
     '--self-contained', '-o', OUT, '--nologo'],
-  { cwd: ROOT, encoding: 'utf8', shell: true }
+  { cwd: ROOT, encoding: 'utf8' }
 );
 
 if (publish.status !== 0) {

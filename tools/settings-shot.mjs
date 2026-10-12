@@ -130,7 +130,12 @@ if (!existsSync(PROJECT)) {
 }
 mkdirSync(OUT, { recursive: true });
 
-const run = (args) => spawnSync('dotnet', args, { cwd: ROOT, encoding: 'utf8', shell: true });
+// No `shell: true`. On Windows it hands the argument array to cmd.exe, which joins
+// it with spaces and does not quote any of it, so a repository path containing a
+// space splits into two arguments and MSBuild reports "Only one project can be
+// specified". Node quotes each argument itself when it execs directly, which is what
+// we want, and the gate works from any checkout location.
+const run = (args) => spawnSync('dotnet', args, { cwd: ROOT, encoding: 'utf8' });
 
 const build = run(['build', PROJECT, '-c', 'Release', '--nologo']);
 if (build.status !== 0) {

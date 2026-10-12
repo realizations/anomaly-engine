@@ -539,10 +539,72 @@ public class WallpaperHost : IEngineBridge, IDisposable
         _ = ExecuteScriptSafe($"window.dispatchEvent(new CustomEvent('anomaly:style', {{ detail: {{ style: '{safe}' }} }}));");
     }
 
-    /// <summary>Dispatches a renderer event by its short name, e.g. "notes".</summary>
+    /// <summary>
+    /// Dispatches a renderer event by its short name, e.g. "notes".
+    ///
+    /// The name is a literal, not a fragment of script, and it is treated as one.
+    /// This method used to interpolate whatever it was given straight into a
+    /// JavaScript statement, which was wrong twice over: a caller that passed an
+    /// already-prefixed name produced `anomaly:anomaly:notes`, which no listener
+    /// matches, and a caller that wanted to send a statement instead of an event
+    /// produced an event *named* after that statement. Both happened. Four tray
+    /// items and the settings motion slider shipped inert while every other route
+    /// to the same events worked, which is exactly the shape of bug that a
+    /// "does it throw?" check misses.
+    ///
+    /// So the name is validated against the set the renderer actually listens for,
+    /// and anything else is refused with a log line rather than silently dispatched.
+    /// Sending a statement is a different method with an explicit name: see
+    /// <see cref="SetMotionIntensity"/>.
+    /// </summary>
     public void SendToRenderer(string eventName)
     {
+        if (!RendererEventNames.Contains(eventName))
+        {
+            _logger.Warn(
+                $"Refusing to send renderer event \"{eventName}\": not a known short event name. " +
+                "Pass the suffix only (the anomaly: prefix is added here), and use the dedicated " +
+                "method when you mean to evaluate something in the page.");
+            return;
+        }
         _ = ExecuteScriptSafe($"window.dispatchEvent(new CustomEvent('anomaly:{eventName}'));");
+    }
+
+    /// <summary>
+    /// Every short event name the renderer listens for, in one place.
+    ///
+    /// Mirrors `WINDOW_EVENTS` in src/Engine/src/core/windowEvents.ts. The two
+    /// languages cannot share a constant, so this list plus
+    /// tools/verify-host-events.mjs is the substitute: the tool asserts this set
+    /// and the C# call sites both match the TypeScript table, which turns a rename
+    /// on either side into a build failure instead of an inert control.
+    /// </summary>
+    public static readonly HashSet<string> RendererEventNames = new(StringComparer.Ordinal)
+    {
+        "world",
+        "world-next",
+        "world-prev",
+        "world-remove",
+        "worlds",
+        "monitors",
+        "style",
+        "debug",
+        "creator",
+        "notes",
+        "trigger",
+        "pause",
+        "resume",
+        "reduced-motion",
+        "state",
+    };
+
+    /// <summary>Sets how much the scene moves, from 0 (still) to 1 (full).</summary>
+    public void SetMotionIntensity(double intensity)
+    {
+        // Invariant culture, or a locale with a comma decimal separator writes
+        // `0,5` into the script, which JavaScript reads as two statements.
+        var v = intensity.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _ = ExecuteScriptSafe($"window.__engine && window.__engine.setMotionIntensity({v});");
     }
 
     /// Bounds of every attached display, in virtual-desktop coordinates.

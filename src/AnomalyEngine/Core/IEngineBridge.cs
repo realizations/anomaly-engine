@@ -44,5 +44,13 @@ public interface IEngineBridge
     void Pause();
     void Resume();
     void ToggleDebug();
+
+    /// <summary>
+    /// Dispatches a renderer event by its short name, e.g. "notes" for
+    /// <c>anomaly:notes</c>. The prefix is the host's business, not the caller's.
+    /// </summary>
     void SendToRenderer(string eventName);
+
+    /// <summary>Sets scene motion, 0 to 1. Not an event: this evaluates a call.</summary>
+    void SetMotionIntensity(double intensity);
 }

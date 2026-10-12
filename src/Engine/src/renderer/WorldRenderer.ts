@@ -1699,7 +1699,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // The halo starts at the moon's edge rather than inside it. Starting it at
     // 0.6r put the gradient's brightest stop in a ring *outside* the disc, which
     // showed as a hard bright circle floating around the moon in every night
-    // render â€” a ring of light that has no source.
+    // render — a ring of light that has no source.
     const halo = g.createRadialGradient(p.x, p.y, r * 0.98, p.x, p.y, r * 11);
     const haloA = (0.2 + red * 0.3) * alpha + pulse * 0.34;
     halo.addColorStop(0, css(body, haloA));
@@ -2160,7 +2160,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // was hiding the entire narrative: the cabin, the observatory and the tower
     // are the reason the world has a name, and a dense band of pines drew over all
     // three of them. The gap is also what makes them read as *built* rather than as
-    // scenery â€” people clear ground to put a building on.
+    // scenery — people clear ground to put a building on.
     this._structureClearings.length = 0;
 
     for (const s of this._world.structures ?? []) {
@@ -2600,7 +2600,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.fillStyle = walls;
     g.fillRect(x - w / 2, baseY - h, w, h);
 
-    // Log courses. Very low contrast â€” at this size they are a texture, and at
+    // Log courses. Very low contrast — at this size they are a texture, and at
     // higher contrast they read as stripes painted on a box.
     g.fillStyle = css(wallDark, 0.4);
     for (let i = 1; i < 4; i++) {
@@ -3007,7 +3007,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   /**
    * The band of ground between the treeline and the foreground.
    *
-   * This used to be an unbroken gradient with a road across it â€” about a fifth of
+   * This used to be an unbroken gradient with a road across it — about a fifth of
    * the frame with nothing in it, which is what made the scene read as a diorama:
    * a treeline, a floor, and a foreground strip, with the middle missing.
    *
@@ -3816,7 +3816,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * The `depth` direction used to draw two hard-edged parallelograms on a `screen`
    * composite, at a fixed diagonal, unrelated to where the sun or moon actually
    * was. In the mockups those read as two panes of tinted glass laid over the
-   * scene â€” the most obviously wrong thing in the frame, and the reason "light
+   * scene — the most obviously wrong thing in the frame, and the reason "light
    * shafts" ended up on the list of things this renderer was bad at.
    *
    * The problem is not softness, it is that a shaft has to come from somewhere.
@@ -3835,7 +3835,7 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * A radial gradient scaled along the shaft's axis gives both falloffs in a
    * single fill and has no internal edges at all: the circle becomes a long soft
    * beam, bright where it leaves the light and gone before it reaches the ground.
-   * It is also an order of magnitude cheaper â€” one fill per shaft rather than
+   * It is also an order of magnitude cheaper — one fill per shaft rather than
    * twelve.
    */
   private _drawLightVolumes(grade: SkyGrade, hour: number): void {

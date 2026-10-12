@@ -607,7 +607,7 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
     private void PushMotionLevel()
     {
         var value = MotionSlider.Value / 100.0;
-        _host?.SendToRenderer($"window.__engine.setMotionIntensity({value.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
+        _host?.SetMotionIntensity(value);
         StatusText.Text = $"Motion level set to {MotionSlider.Value:0}%.";
     }
 

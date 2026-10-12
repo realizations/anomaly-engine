@@ -40,7 +40,10 @@ if (!existsSync(PROJECT)) {
   process.exit(1);
 }
 
-const run = (args) => spawnSync('dotnet', args, { cwd: ROOT, encoding: 'utf8', shell: true });
+// No `shell: true`, for the reason given in tools/settings-shot.mjs: cmd.exe does not
+// quote the joined argument list, so a repository path with a space arrives at MSBuild
+// as two projects and the gate fails on a checkout that is perfectly fine.
+const run = (args) => spawnSync('dotnet', args, { cwd: ROOT, encoding: 'utf8' });
 
 const build = run(['build', PROJECT, '-c', 'Release', '--nologo']);
 if (build.status !== 0) {

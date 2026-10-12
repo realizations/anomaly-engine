@@ -74,15 +74,22 @@ public class TrayIcon : IDisposable
         menu.Items.Add(new Separator());
 
         var nextWorldItem = new MenuItem { Header = "Next World" };
-        nextWorldItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:world-next");
+        // Short names, not prefixed ones. SendToRenderer adds the `anomaly:` prefix
+        // itself, and these four call sites were passing `anomaly:world-next`, so the
+        // page received `anomaly:anomaly:world-next` -- an event nothing listens for.
+        // Next World, Previous World, Trigger Event and Field Notes were all inert
+        // from the tray while the same events worked from the hotkeys and the
+        // settings window. tools/verify-host-events.mjs is what keeps that from
+        // coming back: it fails the build on a prefixed name at any call site.
+        nextWorldItem.Click += (s, e) => _wallpaperHost.SendToRenderer("world-next");
         menu.Items.Add(nextWorldItem);
 
         var prevWorldItem = new MenuItem { Header = "Previous World" };
-        prevWorldItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:world-prev");
+        prevWorldItem.Click += (s, e) => _wallpaperHost.SendToRenderer("world-prev");
         menu.Items.Add(prevWorldItem);
 
         var triggerEventItem = new MenuItem { Header = "Trigger Event" };
-        triggerEventItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:trigger");
+        triggerEventItem.Click += (s, e) => _wallpaperHost.SendToRenderer("trigger");
         menu.Items.Add(triggerEventItem);
 
         menu.Items.Add(new Separator());
@@ -124,7 +131,7 @@ public class TrayIcon : IDisposable
         menu.Items.Add(creatorItem);
 
         var notesItem = new MenuItem { Header = "Field Notes" };
-        notesItem.Click += (s, e) => _wallpaperHost.SendToRenderer("anomaly:notes");
+        notesItem.Click += (s, e) => _wallpaperHost.SendToRenderer("notes");
         menu.Items.Add(notesItem);
 
         menu.Items.Add(new Separator());

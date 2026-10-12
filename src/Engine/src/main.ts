@@ -1121,7 +1121,7 @@ class Engine {
 
   /**
    * Fires a discharge directly. Lightning is otherwise only reachable through
-   * a storm transition, which makes it impossible to inspect on demand â€” and
+   * a storm transition, which makes it impossible to inspect on demand — and
    * the bolt is a per-frame drawing path, so being able to trigger it from a
    * tool is the only practical way to review it.
    */

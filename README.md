@@ -345,7 +345,7 @@ src/
       anomalies/         Anomaly registry with rarity and cooldowns
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured)
-    tests/               233 unit tests
+    tests/               357 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -503,7 +503,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs nineteen steps in order. Three of them prove a gate still bites, the rest exercise the
+Runs twenty-three steps in order. Four of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -518,6 +518,10 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
 | `tools/license-gate.mjs` | Asset licence policy enforcement |
 | `tools/license-gate.mjs --selftest` | Proves the gate rejects 19 bad-licence cases |
+| `tools/secret-scan.mjs` | Fails the build on credential material in any tracked file, and on text that was UTF-8 read as Latin-1 |
+| `tools/secret-scan.mjs --selftest` | Proves that scan catches planted keys and mangled text, and leaves real accents alone |
+| `tools/verify-host-events.mjs` | Proves every event the native host sends is one the renderer actually listens for, both by name and by prefix |
+| `tools/verify-host-events.mjs --selftest` | Proves that check against the call sites that shipped broken |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |
@@ -541,7 +545,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 233 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 357 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

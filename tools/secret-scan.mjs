@@ -51,6 +51,52 @@ export const PATTERNS = [
 ];
 
 /**
+ * The characters a mangled UTF-8 continuation byte can become.
+ *
+ * When UTF-8 is decoded as Windows-1252 -- which is what "the file was opened in the
+ * wrong editor" means in practice -- the continuation bytes 0x80..0x9F map to
+ * printable characters rather than to C1 controls. 0x80 is the euro sign, which is
+ * why the corruption in this repository reads as `â€”` (U+00E2 U+20AC U+201D) and not
+ * as `â` followed by two unprintables.
+ *
+ * Both readings are listed because both occur: a file read as ISO-8859-1 yields the
+ * raw continuation range, and one read as CP1252 yields this set.
+ */
+const CONTINUATION = [
+  '\\u0080-\\u00bf',
+  '\\u20ac\\u201a\\u0192\\u201e\\u2026\\u2020\\u2021\\u02c6\\u2030\\u0160\\u2039\\u0152\\u017d',
+  '\\u2018\\u2019\\u201c\\u201d\\u2022\\u2013\\u2014\\u02dc\\u2122\\u0161\\u203a\\u0153\\u017e\\u0178',
+].join('');
+
+/**
+ * Text that is UTF-8 that was read as Latin-1 and written back out.
+ *
+ * Not a security rule, and it earns its place here for the same reason every other
+ * rule in this file does: nothing else in the project can see it. A mangled string is
+ * a perfectly valid JavaScript string, so the compiler is silent, the renderer draws
+ * it, and the tests pass. This one had already reached the player -- the field-notes
+ * overlay showed `Â·` in three places, in the panel the README calls the ARG surface.
+ *
+ * The signature is a UTF-8 lead byte (U+00C2..U+00EF) immediately followed by one of
+ * the characters above. Real text does not do this: a lead-byte range character is
+ * always an accented letter or a punctuation mark in the Latin-1 supplement, and none
+ * of them is ever followed by a lone continuation character. A rule that flagged
+ * non-ASCII generally would fire on every em dash and every accented word in the
+ * repository and be switched off within a day, so the pair is what gets matched.
+ *
+ * U+FFFD is the decoder giving up outright, and is included because it is
+ * unambiguous: a replacement character in a source file means the bytes are already
+ * gone, and the fix has to start from whatever the correct text was.
+ */
+export const MOJIBAKE_PATTERNS = [
+  {
+    id: 'mojibake',
+    re: new RegExp(`[\\u00c2-\\u00ef][${CONTINUATION}]|\\ufffd`, 'g'),
+    why: 'text that was UTF-8 read as Latin-1',
+  },
+];
+
+/**
  * Values that are obviously not a credential.
  *
  * A template that says `<your key>` must not fail the scan, or the scan trains
@@ -112,6 +158,13 @@ export function scanText(text) {
     p.re.lastIndex = 0;
     for (const m of text.matchAll(p.re)) {
       if (p.capture && isPlaceholder(m[1])) continue;
+      findings.push({ line: lineOf(text, m.index), rule: p.id, why: p.why });
+    }
+  }
+
+  for (const p of MOJIBAKE_PATTERNS) {
+    p.re.lastIndex = 0;
+    for (const m of text.matchAll(p.re)) {
       findings.push({ line: lineOf(text, m.index), rule: p.id, why: p.why });
     }
   }
@@ -337,6 +390,17 @@ const SELFTEST = [
     text: 'Set the OpenWeatherMap API key in .env; the token and password fields are unused.\n',
     expect: [],
   },
+  // The mojibake cases assemble their bytes rather than writing them out, so this file
+  // stays clean: it is excluded from the repo scan precisely because it holds the
+  // patterns, and adding a literal here would make the one file that cannot be checked
+  // the file that fails.
+  { name: 'catches a middot that was read as Latin-1', text: `join(' ${'Â'}· ')`, expect: ['mojibake'] },
+  { name: 'catches an em dash that was read as CP1252', text: `// render ${'â'}€” and`, expect: ['mojibake'] },
+  { name: 'catches an umlaut that was read as Latin-1', text: `Gr${'Ã'}¼ne`, expect: ['mojibake'] },
+  { name: 'catches a decoder that gave up', text: `a ${'\uFFFD'} b`, expect: ['mojibake'] },
+  { name: 'accepts ordinary punctuation', text: 'a — b · c “d” ‘e’', expect: [] },
+  { name: 'accepts accented words in the languages we ship', text: 'Grüße, château, mañana, São Paulo, Âm Đặng', expect: [] },
+  { name: 'accepts text we do not write by hand', text: '日本語 · Привет · Γειά · ✨ · ── │ ╭', expect: [] },
 ];
 
 const ENV_EXAMPLE_CASES = [

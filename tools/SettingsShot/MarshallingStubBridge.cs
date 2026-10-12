@@ -92,4 +92,5 @@ internal sealed class MarshallingStubBridge : IEngineBridge
     public void Resume() { }
     public void ToggleDebug() { }
     public void SendToRenderer(string eventName) { }
+    public void SetMotionIntensity(double intensity) { }
 }
