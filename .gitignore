@@ -27,3 +27,11 @@ tools/node_modules/
 # showcase scripts need Playwright, and ignoring the manifest made them
 # unrunnable for anyone who cloned the repo.
 
+# Credentials. `.env` holds real keys, `.env.example` is the tracked template and
+# must always be empty, so the negation has to come after the catch-all. Without
+# this rule a `.env` is a plain untracked-looking file that `git add -A` sweeps up,
+# and the leak is only noticed after it is public.
+.env
+.env.*
+!.env.example
+

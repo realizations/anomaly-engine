@@ -37,6 +37,8 @@ if (!existsSync(DEPLOYED)) {
 
 steps.push(await run('licence gate self-test', ['license-gate.mjs', '--selftest']));
 steps.push(await run('licence gate', ['license-gate.mjs']));
+steps.push(await run('secret scan self-test', ['secret-scan.mjs', '--selftest']));
+steps.push(await run('no secrets committed', ['secret-scan.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('seam check still catches full-width steps', ['verify-seam-check.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));
