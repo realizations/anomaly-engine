@@ -120,7 +120,7 @@ so than ship a feature table that overstates the project.
 
 | Feature | What's missing |
 |---------|----------------|
-| **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits. |
+| **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits — and the page's CSP sets `connect-src 'none'`, so a `fetch` from the renderer is blocked before it starts. All three are listed in `tools/verify-dead-code.mjs`, so the gate fails if one is wired up without its exemption being removed. |
 | **Localisation** | Spanish, German and Japanese translations ship and are reachable through `getI18n()`, but no surface calls `t()`, so a user never actually sees a translated string. The keys are complete and tested against each other; nothing consumes them. |
 | **World interaction** | Hover, click and triple-click work, and two of the six zones lead to an easter egg. The Konami code listens for `keydown` on a window the host never focuses, so it only fires under `npm run dev`. |
 | **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |

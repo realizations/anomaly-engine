@@ -33,8 +33,9 @@ export const SECRET_KEYS = [
     optional: true,
     howToGet: 'https://home.openweathermap.org/api_keys',
     note:
-      'The provider takes the key as a constructor argument and nothing constructs it yet, '
-      + 'so the engine runs with no key at all. Supply one only if you wire the provider up.',
+      'The provider takes the key as a constructor argument and nothing constructs it yet. '
+      + 'WeatherSystem is constructed and started, but with no provider, so the engine runs '
+      + 'with no key at all. Supplying one changes nothing until the provider is wired up.',
   },
 ];
 

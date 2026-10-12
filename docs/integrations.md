@@ -17,7 +17,7 @@ missing rows are the point.
 
 | Adapter | File | Real state |
 |---|---|---|
-| Weather | `systems/WeatherSystem.ts` | A `WeatherProvider` interface and one implementation, `OpenWeatherMapProvider`. Not constructed anywhere. Needs an API key |
+| Weather | `systems/WeatherSystem.ts` | `WeatherSystem` itself is constructed and started, and drives the renderer from a fixed coordinate. It has no provider, so the sky is weatherless-but-correct rather than wrong. `OpenWeatherMapProvider` is the only implementation and nothing constructs it, because it needs a key. This is the row to change first if live weather is next |
 | GitHub | `integrations/GitHubSource.ts` | Fetches `/repos/{owner}/{repo}/events` on a timer and parses them. Not constructed anywhere |
 | RSS/Atom | `integrations/RSSSource.ts` | Manages a feed list, fetches on per-feed intervals, parses items. Not constructed anywhere |
 | Remote events | `integrations/RemoteEventSource.ts` | Fetches a JSON endpoint on an interval. Not constructed anywhere |
