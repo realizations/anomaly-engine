@@ -713,7 +713,6 @@ public class WallpaperHost : IEngineBridge, IDisposable
         "accessibility",
         "audio-reactivity",
         "media-track",
-        "feed-response",
         "state",
     };
 
