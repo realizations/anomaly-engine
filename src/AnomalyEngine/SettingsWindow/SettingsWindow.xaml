@@ -702,16 +702,66 @@
 
                     <!-- ======================== INTEGRATIONS ======================== -->
                     <StackPanel x:Name="IntegrationsSection" Visibility="Collapsed">
-                        <TextBlock Style="{StaticResource Heading}" Text="EXTERNAL SOURCES"/>
-                        <Border Background="{StaticResource WarnBgBrush}" BorderBrush="{StaticResource WarnLineBrush}"
-                                BorderThickness="1" CornerRadius="6" Padding="16">
-                            <StackPanel>
-                                <TextBlock Text="Off by default, and not ready to turn on" FontSize="12" FontWeight="SemiBold"
-                                           Foreground="{StaticResource WarnBrush}"/>
-                                <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
-                                           Text="GitHub, RSS and remote event adapters exist in the engine but ship unconfigured. Before any of them can be enabled they need endpoint allow-lists, payload validation and rate limits: a remote feed must be able to select a registered effect and nothing more, never to run code or shell a command."/>
-                            </StackPanel>
-                        </Border>
+                        <!--
+                            Event feeds.
+
+                            Three things are worth knowing before adding one, and all
+                            three are enforced in code rather than here:
+
+                            The engine cannot fetch anything itself. The page is served
+                            from file:// and its content security policy sets connect-src
+                            to none, so the renderer never touches the network. The host
+                            reads the document and hands over text, which means the
+                            page's "no network access" claim is a property of the
+                            product and not a setting.
+
+                            A feed does nothing until a rule says what it should do.
+                            There is no default mapping, so a newly added feed is silent
+                            until you tell it which words in a headline map to which of
+                            the six effects. That is deliberate: a feed that started
+                            firing something the moment it was added would be one
+                            nobody could predict.
+
+                            A feed can only select one of six registered effects. It
+                            cannot supply a duration, a colour, a command or a payload,
+                            because those are not in the type it is matched against.
+                        -->
+                        <TextBlock Style="{StaticResource Heading}" Text="EVENT FEEDS"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Point the engine at an RSS or Atom feed, or at a JSON feed, and say which words in a headline should cause which effect. The document is read by the host, never by the page, and only https is accepted. Nothing is sent back."/>
+
+                        <TextBlock x:Name="FeedEmptyNote" Style="{StaticResource Note}"
+                                Margin="0,12,0,0" Text="No feeds configured."/>
+
+                        <ItemsControl x:Name="FeedList" Margin="0,12,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="14">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Url}" FontSize="12"
+                                                       TextWrapping="Wrap" Foreground="#e9e7e1"/>
+                                            <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
+                                                       Text="{Binding Summary}"/>
+                                            <CheckBox Margin="0,8,0,0" Content="Poll this feed"
+                                                      IsChecked="{Binding Enabled, Mode=TwoWay}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <TextBox x:Name="FeedUrlBox" Width="360" VerticalAlignment="Center"
+                                     ToolTip="An https URL. Plain http is accepted on localhost only."/>
+                            <Button x:Name="AddFeedUrlButton" Content="Add URL" Padding="14,6" Margin="10,0,0,0"
+                                    Click="AddFeedUrl_Click" VerticalAlignment="Center"/>
+                            <Button x:Name="AddFeedButton" Content="Add a file..." Padding="14,6" Margin="10,0,0,0"
+                                    Click="AddFeed_Click" VerticalAlignment="Center"/>
+                            <Button x:Name="ClearFeedsButton" Content="Remove all" Padding="14,6"
+                                    Margin="10,0,0,0" Click="ClearFeeds_Click" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock x:Name="FeedStatusText" Style="{StaticResource Note}"
+                                   Margin="0,8,0,0" Text=""/>
 
                         <TextBlock Style="{StaticResource Heading}" Text="WEATHER" Margin="0,28,0,10"/>
                         <TextBlock Style="{StaticResource Note}"

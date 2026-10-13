@@ -11,7 +11,7 @@ import { NetworkSource } from './events/NetworkSource.js';
 import { WorldRenderer } from './renderer/WorldRenderer.js';
 import type { AnomalyKind } from './renderer/WorldRenderer.js';
 import { NativeBridge } from './platform/NativeBridge.js';
-import { Persistence } from './platform/Persistence.js';
+import { Persistence, reconcileFeeds, type PersistedFeed } from './platform/Persistence.js';
 import { buildAwaySummary, summaryToTerminalLines } from './platform/AwaySummary.js';
 import { WeatherSystem, type WeatherData } from './systems/WeatherSystem.js';
 import { DEFAULT_LOCATION, type Location } from './systems/LocalWeather.js';
@@ -36,6 +36,7 @@ import { WorldLoader } from './worlds/WorldLoader.js';
 import { EasterEggSystem } from './systems/EasterEggSystem.js';
 import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
+import { EventFeedClient, type FeedClientState } from './integrations/EventFeedClient.js';
 import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
 import { WINDOW_EVENTS } from './core/windowEvents.js';
 import { describeZones } from './systems/landmarkZones.js';
@@ -100,6 +101,14 @@ class Engine {
   private _easterEggs: EasterEggSystem;
   private _interaction: InteractionSystem;
   private _media: MediaReactivitySystem;
+
+  /**
+   * Event feeds, which request from the host rather than fetching.
+   *
+   * The renderer has no network access at all, so this object never learns a URL it
+   * could act on itself; it asks the host for a document by feed id and is handed text.
+   */
+private _feeds: EventFeedClient;
   private _benchmark: BenchmarkSystem;
   private _canvas: HTMLCanvasElement;
   private _running = false;
@@ -145,7 +154,7 @@ class Engine {
     this._worlds = new WorldLoader();
     this._easterEggs = new EasterEggSystem();
     this._interaction = new InteractionSystem();
-    this._media = new MediaReactivitySystem();
+this._media = new MediaReactivitySystem();
     this._benchmark = new BenchmarkSystem();
     // A dev build says so on the terminal, once, when there is someone to say it to.
     // The egg existed with a trigger nothing could produce; this is the producer, and
@@ -188,13 +197,49 @@ class Engine {
       this._persistence.acceptFromHost((e as CustomEvent<unknown>).detail);
       this._applyRestoredState();
     });
-    this._applyRestoredState();
 
-    const firstWorld = this._worlds.getAll()[0];
+    // A feed body arrives from the host, because the renderer cannot fetch one: the
+    // content security policy sets `connect-src 'none'`.
+    window.addEventListener(WINDOW_EVENTS.feedResponse, (e) => {
+      const d = (e as CustomEvent<{ feedId?: string; body?: string; problem?: string }>).detail;
+      if (!d || typeof d.feedId !== 'string') return;
+
+      const signals = this._feeds.receive(d.feedId, d.body ?? null, d.problem ?? null);
+      for (const signal of signals) {
+        // Through `_fireAnomaly` rather than `_pushAnomaly`, so the world-appropriate
+        // substitution applies: a forest-watcher must not fire over a salt marsh, and a
+        // feed is no different from a scheduled event in that respect.
+        this._bridge.sendLog('feed:signal', {
+          fingerprint: signal.fingerprint,
+          anomaly: signal.anomaly,
+          title: signal.title,
+        });
+        this._fireAnomaly(signal.anomaly, 12, 1);
+      }
+    });
+
+// Asked for only when the render loop says one is due, which is what keeps the
+    // host's rate limit from being a suggestion. The requester is injected rather than
+    // set through a method so there is exactly one way to supply it.
+    this._feeds = new EventFeedClient((feedId) => {
+      this._bridge.send('feed:request', { feedId });
+    });
+
+const firstWorld = this._worlds.getAll()[0];
     if (firstWorld && !this._worlds.getActiveId()) {
       this._worlds.activate(firstWorld.id);
       this._renderer.setWorld(firstWorld);
     }
+
+    // And then the saved state, for the case where there is no host to push any.
+    //
+    // This is not a duplicate of the `anomaly:state` handler above: that one adopts a
+    // document the *host* supplies at runtime, and this one restores what this machine
+    // stored for itself. Running without a host -- the engine in a plain browser over
+    // file://, which is how the end-to-end suite drives it -- has no host push at all,
+    // so without this the saved world is never restored and every launch silently falls
+    // back to the first built-in.
+    this._applyRestoredState();
     // After the world is settled, so the summary is written for the place the
     // user actually came back to.
     this._reportAbsence();
@@ -536,6 +581,7 @@ class Engine {
       // worse than one that works.
       this._renderer.render(this._simDate ?? new Date());
       this._updateMedia(frameStart);
+      this._feeds.poll();
       this._requestSavedTrack(frameStart);
       this._particles.update(16);
       this._particles.render(this._canvas.getContext('2d')!, this._canvas.width, this._canvas.height);
@@ -578,6 +624,60 @@ class Engine {
   }
 
   private _reloadTrackWhen = 0;
+
+  /**
+   * Replaces the feed configuration and remembers it.
+   *
+   * Persisted immediately rather than only on the next natural save, because a feed the
+   * user thinks is configured but which is not on disk is a feed that silently disappears
+   * on the next launch -- the failure mode this whole feature has to avoid.
+   */
+  private _setFeeds(feeds: PersistedFeed[]): void {
+    this._feeds.setFeeds(
+      feeds.map((f) => ({
+        ...f,
+        // The rule's anomaly is narrowed here, where `isAnomalyKind` has already run.
+        // `reconcileFeeds` dropped anything else, so this is a type assertion rather
+        // than a cast: there is no path where an unvalidated string reaches it.
+        rules: f.rules.map((r) => ({ match: r.match, anomaly: r.anomaly as AnomalyKind })),
+      }))
+    );
+    this._persistence?.update({ eventFeeds: feeds });
+
+    const enabled = feeds.filter((f) => f.enabled).length;
+    this._bridge.sendLog('feeds:configured', { total: feeds.length, enabled });
+  }
+
+  /** Feeds, for the settings window. */
+  getFeeds(): PersistedFeed[] {
+    return this._persistence.get().eventFeeds;
+  }
+
+  /**
+   * Replaces the feed list from the settings window.
+   *
+   * The argument arrives as a JSON string rather than as an object because it crosses
+   * the same `EvaluateScript` channel everything else does, and that returns a
+   * JSON-encoded result. It is parsed and re-validated through `reconcileFeeds`, which is
+   * what stops a hand-edited or malformed payload from putting a rule in front of the
+   * mapper that the mapper would have refused.
+   */
+  setFeeds(json: string): boolean {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      this._bridge.sendLog('feeds:rejected', { reason: 'not JSON' });
+      return false;
+    }
+
+    const feeds = reconcileFeeds(parsed);
+    this._setFeeds(feeds);
+    // Only start polling if something is actually enabled. Starting with nothing
+    // configured means a request per feed per interval to nowhere.
+    this._feeds.start();
+    return true;
+  }
 
   /**
    * Asks the host for the saved track, once the engine has settled.
@@ -1448,6 +1548,8 @@ class Engine {
        */
       firstBeats: number[];
     };
+    /** The feed client, for the settings window. */
+    feeds: FeedClientState;
     paused: boolean;
     journalCount: number;
     secretsFound: number;
@@ -1501,6 +1603,7 @@ class Engine {
         beatCount: this._media.getState().beatCount,
         firstBeats: this._media.getBeats().slice(0, 6).map((b) => Math.round(b.time * 100) / 100),
       },
+      feeds: this._feeds.getState(),
       paused: this._paused,
       journalCount: this._journal.getEntries().length,
       secretsFound: this._secrets.getDiscovered().length,
@@ -1903,6 +2006,16 @@ class Engine {
     if (s.audioReactive === true && s.audioTrackPath) {
       this._reloadTrackWhen = Date.now() + 3000;
     }
+
+    // Feeds. `setFeeds` clears the seen-history, which is the point: a feed the user has
+    // just edited should be allowed to fire the items that were already in it, rather
+    // than sitting silent because those ids were seen before the rules changed.
+    if (s.eventFeeds.length || this._feeds.getFeeds().length) {
+      this._setFeeds(s.eventFeeds);
+    }
+    if (this._feeds.getFeeds().some((f) => f.enabled)) {
+      this._feeds.start();
+    }
     this._journal.restore(s.journal);
     this._secrets.restore(s.secrets);
     this._renderer.setTerminalTelemetry(this._journal.getEntries().length, this._secrets.getDiscovered().length);
@@ -2136,3 +2249,5 @@ declare global {
   }
 }
 window.__engine = engine;
+
+

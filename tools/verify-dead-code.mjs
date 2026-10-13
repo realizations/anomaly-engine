@@ -62,15 +62,16 @@ const ENTRY = 'main.ts';
  * a `fetch` from the renderer is blocked before it starts, so wiring an adapter up
  * without changing that would produce a feature that fails silently -- worse than one
  * that is visibly absent.
+ *
+ * Empty, and that is the point rather than an oversight. It used to list three ARG
+ * event adapters as "deliberate scaffold: blocked by connect-src 'none'". They were
+ * deleted and replaced by `integrations/FeedMapper.ts` (pure parsing and mapping),
+ * `integrations/EventFeedClient.ts` (request scheduling) and `Core/EventFeedFetcher.cs`
+ * (the only code that touches a network). The CSP was not relaxed; the host fetches
+ * instead, which keeps the renderer's `connect-src 'none'` as the privacy property it
+ * is rather than an obstacle to route around.
  */
-export const DEAD_BY_DESIGN = {
-  'integrations/GitHubSource.ts':
-    'ARG event source. Deliberate scaffold: the README lists it as such. Blocked today by the page CSP, which sets connect-src to none.',
-  'integrations/RSSSource.ts':
-    'ARG event source. Deliberate scaffold: the README lists it as such. Blocked today by the page CSP, which sets connect-src to none.',
-  'integrations/RemoteEventSource.ts':
-    'ARG event source. Deliberate scaffold: the README lists it as such. Blocked today by the page CSP, which sets connect-src to none.',
-};
+export const DEAD_BY_DESIGN = {};
 
 /**
  * Modules that are not part of the shipped renderer but are still maintained.

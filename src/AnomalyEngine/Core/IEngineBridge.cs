@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace AnomalyEngine.Core;
@@ -70,6 +71,15 @@ public interface IEngineBridge
 
     /// <summary>Turns audio reactivity on or off, and whether the track is audible.</summary>
     void SetAudioReactivity(bool enabled, bool silentPlayback);
+
+    /// <summary>
+    /// Hands the host the configured feeds, as the values it will enforce.
+    ///
+    /// The host is given the allow-list rather than the URL alone, because the allow-list
+    /// is the part that is not derived from the URL: without it the check would be "is
+    /// this the host the user configured", which is the same thing twice.
+    /// </summary>
+    void SetFeeds(IReadOnlyList<EventFeedFetcher.FeedSpec> feeds);
 
     /// <summary>
     /// Whether the renderer currently holds this accessibility preference.

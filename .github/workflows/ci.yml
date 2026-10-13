@@ -88,6 +88,12 @@ jobs:
         run: |
           node tools/verify-release.mjs --selftest
           node tools/verify-release.mjs
+      - name: No network access (self-test and repository)
+        run: |
+          node tools/verify-no-network.mjs --selftest
+          node tools/verify-no-network.mjs
+      - name: Event feed fetcher
+        run: node tools/event-feed.mjs
 
   # The host and the end-to-end suite must run on Windows: the wallpaper host is
   # a WPF/WebView2 app, and the e2e suite loads the renderer over file://, which

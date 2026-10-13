@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Exercises EventFeedFetcher's rules against a real HTTP listener.
+
+    The rules are the security boundary: https only, an explicit host allow-list, no
+    redirects, a size cap, and a floor between polls. None of that can be checked by
+    reading the code, because the interesting failures are all "what happens when the
+    server does something unexpected", and an unexpected server is the entire threat
+    model.
+
+    So this spins up a loopback listener and points the fetcher at it. That is also why
+    plain HTTP on loopback is permitted: without it, none of this could be tested at all,
+    and an untestable security boundary is one that drifts.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>EventFeedTests</AssemblyName>
+    <RootNamespace>EventFeedTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AnomalyEngine\AnomalyEngine.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -253,6 +253,13 @@ describe('reduced motion scales the audio response', () => {
 });
 
 describe('renderer audio response', () => {
+  // These import the renderer module, which is several thousand lines and pulls in the
+  // whole scene graph. In isolation that is fast; under a parallel test run on a loaded
+  // machine it can exceed vitest's 5s default, which produced a failure that only ever
+  // appeared in the full suite. The timeout is the fix, not a retry: the work is the
+  // import and the import does not get cheaper.
+  const IMPORTS_RENDERER = 30_000;
+
   it('clamps its inputs', async () => {
     // Asserted through the exported clamp path rather than by constructing the
     // renderer: the values are held, not drawn, and `getAudioResponse` needs a 2d
@@ -262,7 +269,7 @@ describe('renderer audio response', () => {
     expect(nextAudioImpulse(0, 1)).toBe(1);
     expect(nextAudioImpulse(0, 5)).toBe(1);
     expect(nextAudioImpulse(0, -3)).toBe(0);
-  });
+  }, IMPORTS_RENDERER);
 
   it('holds the impulse at the peak rather than accumulating it', async () => {
     // Five beats in quick succession must leave the impulse at one, not at five.
@@ -271,7 +278,7 @@ describe('renderer audio response', () => {
     let impulse = 0;
     for (let i = 0; i < 5; i++) impulse = nextAudioImpulse(impulse, 1);
     expect(impulse).toBeLessThanOrEqual(1);
-  });
+  }, IMPORTS_RENDERER);
 
   it('decays the impulse, so a beat is a flare and not a permanently brighter sky', async () => {
     const { nextAudioImpulse } = await import('../src/renderer/WorldRenderer.js');
@@ -279,12 +286,12 @@ describe('renderer audio response', () => {
     let impulse = 1;
     for (let i = 0; i < 60; i++) impulse = nextAudioImpulse(impulse, 0);
     expect(impulse).toBeLessThan(0.01);
-  });
+  }, IMPORTS_RENDERER);
 
   it('does not decay while a beat is still arriving', async () => {
     const { nextAudioImpulse } = await import('../src/renderer/WorldRenderer.js');
     // A quiet beat during a loud one must still register: the decay is a floor
     // underneath the peak, not a replacement for it.
     expect(nextAudioImpulse(1, 0.4)).toBe(0.82);
-  });
+  }, IMPORTS_RENDERER);
 });

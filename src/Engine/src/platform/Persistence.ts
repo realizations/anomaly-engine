@@ -19,6 +19,89 @@
  */
 import type { NativeBridge } from './NativeBridge.js';
 import { clamp01 } from '../renderer/motion.js';
+import { isAnomalyKind } from '../integrations/FeedMapper.js';
+
+/**
+ * One configured feed, as it is written to the state file.
+ *
+ * Declared here rather than imported from `EventFeedClient` because that module holds
+ * the polling machinery and this is the on-disk shape. They are the same thing, and a
+ * mismatch between them would be a state file the client cannot read.
+ */
+export interface PersistedFeed {
+  id: string;
+  url: string;
+  kind: 'rss' | 'json';
+  intervalSeconds: number;
+  enabled: boolean;
+  /** Hosts the user has allowed this feed to be fetched from. */
+  allowedHosts: string[];
+  rules: Array<{ match: string; anomaly: string }>;
+}
+
+/** Ceiling on feeds held in the state file. Matches the client's own limit. */
+export const MAX_PERSISTED_FEEDS = 8;
+
+/**
+ * Rebuilds a feed list from untrusted input.
+ *
+ * Every field is checked rather than coerced. A feed with a rule naming an effect that
+ * does not exist keeps the feed but loses the rule: a typo in one rule should not
+ * silently delete the other two, and the rule cannot do anything anyway. A feed with no
+ * usable rule at all is kept and simply does nothing, which is the state a feed starts
+ * in before the user has said what it should do.
+ */
+export function reconcileFeeds(raw: unknown): PersistedFeed[] {
+  if (!Array.isArray(raw)) return [];
+
+  const out: PersistedFeed[] = [];
+  const seenIds = new Set<string>();
+
+  for (const entry of raw) {
+    if (out.length >= MAX_PERSISTED_FEEDS) break;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const f = entry as Record<string, unknown>;
+
+    const id = typeof f.id === 'string' ? f.id.trim() : '';
+    const url = typeof f.url === 'string' ? f.url.trim() : '';
+    // An id or a URL that is missing makes the feed unusable, and a duplicate id makes
+    // two feeds share a rate-limit key and a dedupe bucket, which is worse than one.
+    if (!id || !url || seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const interval = Number(f.intervalSeconds);
+    const rules: PersistedFeed['rules'] = [];
+    if (Array.isArray(f.rules)) {
+      for (const rule of f.rules) {
+        if (!rule || typeof rule !== 'object') continue;
+        const r = rule as Record<string, unknown>;
+        if (typeof r.match !== 'string' || !r.match.trim()) continue;
+        if (typeof r.anomaly !== 'string' || !isAnomalyKind(r.anomaly)) continue;
+        rules.push({ match: r.match.trim(), anomaly: r.anomaly });
+      }
+    }
+
+    const hosts = Array.isArray(f.allowedHosts)
+      ? f.allowedHosts.filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
+      : [];
+
+    out.push({
+      id,
+      url,
+      // Anything that is not one of the two known formats becomes `rss`, which fails
+      // closed: the document does not parse, so nothing fires.
+      kind: f.kind === 'json' ? 'json' : 'rss',
+      // Floored here as well as on the client. A state file edited to 1 second should not
+      // become a request a second.
+      intervalSeconds: Number.isFinite(interval) ? Math.max(60, Math.round(interval)) : 3600,
+      enabled: f.enabled === true,
+      allowedHosts: hosts,
+      rules,
+    });
+  }
+
+  return out;
+}
 
 export interface PersistedState {
   version: number;
@@ -45,6 +128,15 @@ export interface PersistedState {
   audioSilent: boolean | null;
   /** The last track chosen, kept so it can be reloaded on the next launch. */
   audioTrackPath: string | null;
+  /**
+   * Configured event feeds.
+   *
+   * User-typed and therefore untrusted in the same way an imported world is: this file is
+   * editable by hand. Every field is re-validated on load and anything malformed is
+   * dropped rather than repaired, because a repaired feed is a feed the user did not
+   * describe. `reconcileFeeds` is where that happens.
+   */
+  eventFeeds: PersistedFeed[];
   /**
    * How much of the scene moves, 0..1.
    *
@@ -128,6 +220,7 @@ export function emptyState(): PersistedState {
     audioReactive: null,
     audioSilent: null,
     audioTrackPath: null,
+    eventFeeds: [],
     motionIntensity: null,
     totalSessions: 0,
     firstRun: null,
@@ -165,6 +258,7 @@ export function reconcile(raw: unknown): PersistedState {
     audioReactive: bool(s.audioReactive),
     audioSilent: bool(s.audioSilent),
     audioTrackPath: str(s.audioTrackPath),
+    eventFeeds: reconcileFeeds(s.eventFeeds),
     motionIntensity: s.motionIntensity === null || s.motionIntensity === undefined
       ? null
       : clamp01(Number(s.motionIntensity)),

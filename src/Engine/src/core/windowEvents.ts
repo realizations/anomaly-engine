@@ -106,6 +106,17 @@ export const WINDOW_EVENTS = {
 /** Host -> renderer: set audio reactivity options. */
   audioReactivity: 'anomaly:audio-reactivity',
 
+  /**
+   * Host -> renderer: the body of a feed the renderer asked for, or why there is none.
+   *
+   * The renderer has no network access at all -- the content security policy sets
+   * `connect-src 'none'` -- so this is the only way a document can reach it. Which makes
+   * the channel worth being careful about in one direction only: the renderer can
+   * *ask*, and the host decides whether to answer.
+   */
+/** Host -> renderer: a feed body, or the reason there is not one. */
+  feedResponse: 'anomaly:feed-response',
+
   /** Creator mode -> renderer: pin the simulated clock. */
   setTime: 'anomaly:set-time',
   /** Creator mode -> renderer: force a weather condition. */

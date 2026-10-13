@@ -124,7 +124,7 @@ so than ship a feature table that overstates the project.
 
 | Feature | What's missing |
 |---------|----------------|
-| **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits — and the page's CSP sets `connect-src 'none'`, so a `fetch` from the renderer is blocked before it starts. All three are listed in `tools/verify-dead-code.mjs`, so the gate fails if one is wired up without its exemption being removed. |
+| **ARG event sources** | RSS, Atom and JSON feeds. A feed is read by the *host*, never by the page, because the page's CSP sets `connect-src 'none'` and that is the property rather than the obstacle. A feed causes nothing until you write a rule mapping words in a headline onto one of the six registered effects, and it can never cause anything else. Off by default. See [Event feeds](#event-feeds). |
 | **World interaction** | Hover, click and triple-click work, and two of the six zones lead to an easter egg. The Konami code listens for `keydown` on a window the host never focuses, so it only fires under `npm run dev`. |
 | **Desktop audio capture** | The engine reacts to an audio file you choose, and never to what is playing on the system. Capturing desktop audio needs a loopback device and a permission granted through a picker, and a wallpaper is the last thing that should be asking for either. `MediaReactivitySystem` has no capture path at all. |
 | **Distribution** | No installer, no code signing, no auto-update. |
@@ -290,6 +290,40 @@ window, because a preference can also be restored from the state file or changed
 `tools/verify-accessibility.mjs` walks each one from the checkbox to a real effect and
 fails if any link is missing.
 
+### Event feeds
+
+Settings → Integrations adds an RSS, Atom or JSON feed. The engine reads it and, when a
+headline matches a rule you wrote, causes one of the six anomalies.
+
+**The renderer cannot fetch anything.** The page is served from `file://` and its content
+security policy sets `connect-src 'none'`. That is the property, not the obstacle — the
+host reads the document and hands over text, so the page cannot phone anywhere you did not
+name, and `tools/verify-no-network.mjs` fails the build if that ever changes.
+
+**A feed does nothing until you say what it should do.** There is no default mapping. A
+newly added feed is silent until you map a word in a headline onto an effect, because a
+feed that started firing something the moment it was added would be one nobody could
+predict.
+
+**A feed can only cause one of six registered effects.** It cannot supply a duration, a
+colour, a command or a payload, because those are not in the type its headlines are matched
+against. A headline reading `lights-out` causes whatever *you* mapped that string to, which
+may be nothing at all.
+
+What the host enforces, and what `tools/event-feed.mjs` tests against a listener that
+misbehaves on request:
+
+| Rule | Why |
+| --- | --- |
+| https only, except plain http on loopback | A feed URL pasted from a page is the easiest way to end up on `http://`. |
+| An explicit host allow-list, exact host match | A substring test would pass `evil-github.com` and `github.com.attacker.net`. |
+| No redirects followed | The one thing that turns an allow-listed host into an arbitrary one. |
+| 256KB cap, applied while reading | A server that streams without end cannot make the host allocate whatever it likes. |
+| 15s timeout, and 60s between polls | The floor is also enforced in the renderer, because a renderer bug asking a thousand times a second is a denial of service pointed at somebody else's server. |
+
+Unknown fields in a JSON feed are discarded rather than merged, so a document cannot
+smuggle a value into the engine by being shaped interestingly.
+
 ### Audio reactivity
 
 Settings → Integrations picks an audio file on this machine. The engine decodes it locally,
@@ -441,7 +475,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               518 unit tests
+    tests/               550 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -588,7 +622,6 @@ Next, in priority order:
       is verified by `tools/release.mjs`, but it is unsigned, so SmartScreen warns on
       first launch, and there is no shortcut or start-menu registration and no
       auto-update. See [`docs/release-process.md`](docs/release-process.md)
-- [ ] **ARG event layer** — needs endpoint config, payload validation and rate limiting first
 - [ ] **Desktop audio capture** — the engine reacts to a local file; sampling what is
       playing on the system needs a loopback device and a permission prompt, which a
       wallpaper should not be asking for
@@ -604,7 +637,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs thirty-eight steps in order. Fourteen of them prove a gate still bites, the rest exercise the
+Runs forty-five steps in order. Twenty-two of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -633,6 +666,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-docs.mjs --selftest` | Proves that check. It exists because this file claimed reduced motion scaled animation to 25% while `motion.ts` set 0.1, in two places, across several features |
 | `tools/verify-world-schema.mjs` | Keeps the C# world validator, the `livingwall` CLI and the TypeScript `WorldDefinition` in agreement — required fields, the biome list, and the id pattern, where a stricter rule in the CLI would refuse worlds the engine accepts |
 | `tools/world-folder.mjs` | Runs the world validator against real fixtures on disk: valid worlds, broken files, a folder with one bad world among good ones, and the 200-world ceiling |
+| `tools/verify-no-network.mjs` | Asserts the renderer still cannot reach the network: `connect-src 'none'` is intact, no reachable module calls `fetch`/`WebSocket`/`XMLHttpRequest`, the renderer asks for feeds by id rather than by URL, and every effect a feed can cause is one the renderer can draw |
+| `tools/event-feed.mjs` | Points the real host fetcher at a loopback listener that redirects, lies about its length and streams without end, and proves the allow-list, the size cap and the poll floor hold |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |
@@ -663,7 +698,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 518 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 550 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

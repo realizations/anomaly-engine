@@ -87,6 +87,7 @@ public partial class SettingsWindow : Window
             await Guarded("the initial selection", ApplyInitialSelection);
             await Guarded("the locale list", LoadLocalesAsync);
             await Guarded("the audio track state", LoadMediaAsync);
+            await Guarded("the feed list", LoadFeedsAsync);
 
             // Started even if the reads above failed. A window showing stale controls and
             // live readouts is a working window; a window that never starts polling is a
@@ -798,6 +799,259 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         if (_loading || _host is null) return;
         _host.SetAccessibility(key, enabled);
         StatusText.Text = $"{DescribePreference(key)} {(enabled ? "on" : "off")}.";
+    }
+
+    /* ------------------------------ event feeds ------------------------------ */
+
+    /// <summary>
+    /// One row in the feed list.
+    ///
+    /// A record rather than the engine's own type because the window does not need the
+    /// whole shape to display a line, and binding to something with a dozen fields is how
+    /// a list control starts showing things it was not asked to show.
+    /// </summary>
+    private sealed record FeedRow
+    {
+        public string Url { get; init; } = "";
+        public string Summary { get; init; } = "";
+        public bool Enabled { get; set; }
+        public string Id { get; init; } = "";
+    }
+
+    private List<FeedRow> _feeds = new();
+
+    /// <summary>
+    /// Fills the feed list from the renderer's own state.
+    ///
+    /// Read from the engine rather than kept by the window, for the same reason as every
+    /// other control here: a feed configured in a previous session, or on the tray, has
+    /// to appear without the window having opinions about it.
+    /// </summary>
+    private async System.Threading.Tasks.Task LoadFeedsAsync()
+    {
+        if (_host is null || _closing) return;
+        var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getFeeds())");
+        if (_closing || string.IsNullOrWhiteSpace(json) || json == "null") return;
+
+        JsonElement list;
+        try
+        {
+            list = JsonDocument.Parse(RendererRead.Unwrap(json) ?? "null").RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+        if (list.ValueKind != JsonValueKind.Array) return;
+
+        _loading = true;
+        try
+        {
+            var rows = new List<FeedRow>();
+            foreach (var f in list.EnumerateArray())
+            {
+                if (f.ValueKind != JsonValueKind.Object) continue;
+                var id = f.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
+                var url = f.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                var enabled = f.TryGetProperty("enabled", out var e) &&
+                              e.ValueKind == JsonValueKind.True;
+                var rules = f.TryGetProperty("rules", out var r) ? r.GetArrayLength() : 0;
+                var hosts = f.TryGetProperty("allowedHosts", out var h) ? h.GetArrayLength() : 0;
+
+                rows.Add(new FeedRow
+                {
+                    Id = id,
+                    Url = url,
+                    Enabled = enabled,
+                    Summary = rules == 0
+                        ? "No rules yet, so this feed cannot cause anything."
+                        : $"{rules} rule(s), {hosts} allowed host(s).",
+                });
+            }
+
+            _feeds = rows;
+            FeedList.ItemsSource = _feeds;
+            FeedEmptyNote.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            FeedStatusText.Text = rows.Count == 0
+                ? ""
+                : $"{rows.Count} feed(s), {rows.Count(f => f.Enabled)} enabled.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async void AddFeed_Click(object sender, RoutedEventArgs e)
+    {
+        if (_host is null) return;
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose a feed document",
+            Filter = "Feed documents|*.xml;*.rss;*.atom;*.json|All files|*.*",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        await AddFeedAsync(dialog.FileName);
+    }
+
+    /// <summary>
+    /// Adds the URL typed on the page.
+    ///
+    /// A text box rather than a second dialog: the field stays visible afterwards, so
+    /// adding a second feed is a paste rather than a dialog, and the value the user is
+    /// about to add is visible while they add it.
+    /// </summary>
+    private async void AddFeedUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var url = FeedUrlBox.Text.Trim();
+        if (url.Length == 0)
+        {
+            FeedStatusText.Text = "Paste a feed URL first.";
+            return;
+        }
+        FeedUrlBox.Clear();
+        await AddFeedAsync(url);
+    }
+
+    private async System.Threading.Tasks.Task AddFeedAsync(string url)
+    {
+        if (_host is null) return;
+
+        var problem = FeedUrlProblem(url);
+        if (problem.Length > 0)
+        {
+            FeedStatusText.Text = problem;
+            return;
+        }
+
+        var id = "feed" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var host = new Uri(url).Host;
+        var kind = url.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? "json" : "rss";
+
+        var feeds = await ReadFeedsAsync();
+        feeds.Add(new JsonObject
+        {
+            ["id"] = id,
+            ["url"] = url,
+            ["kind"] = kind,
+            // An hour to start with. Shorter looks eager and is the wrong default for
+            // somebody's server.
+            ["intervalSeconds"] = 3600,
+            ["enabled"] = false,
+            ["allowedHosts"] = new JsonArray(JsonValue.Create(host)),
+            // No rules. A feed arrives silent and stays silent until somebody says what
+            // its headlines should do.
+            ["rules"] = new JsonArray(),
+        });
+
+        await PushFeedsAsync(feeds);
+        FeedStatusText.Text = $"Added {url}. It will not do anything until it has a rule.";
+    }
+
+    /// <summary>
+    /// The scheme check, mirrored in the window.
+    ///
+    /// Mirrored rather than asked of the host so the message appears while the field is
+    /// being typed. The host checks again regardless, and this copy exists only to avoid a
+    /// round trip for the two answers that are worth giving immediately.
+    /// </summary>
+    private static string FeedUrlProblem(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return "That is not a URL.";
+        if (uri.Scheme == Uri.UriSchemeHttps) return "";
+        if (uri.Scheme == Uri.UriSchemeHttp && (uri.IsLoopback || uri.Host == "localhost"))
+            return "";
+        return "Only https is accepted, except on localhost.";
+    }
+
+    private async void ClearFeeds_Click(object sender, RoutedEventArgs e)
+    {
+        if (_host is null) return;
+        await PushFeedsAsync(new JsonArray());
+        FeedStatusText.Text = "All feeds removed.";
+    }
+
+    /// <summary>
+    /// Reads the current feed list back from the renderer as an editable JSON array.
+    ///
+    /// Round-tripping through the renderer rather than keeping a parallel copy in the
+    /// window is the point: there is exactly one list, and it is the engine's.
+    /// </summary>
+    private async System.Threading.Tasks.Task<JsonArray> ReadFeedsAsync()
+    {
+        var json = await _host!.EvaluateAsync("JSON.stringify(window.__engine.getFeeds())");
+        if (string.IsNullOrWhiteSpace(json) || json == "null") return new JsonArray();
+
+        JsonElement list;
+        try
+        {
+            list = JsonDocument.Parse(RendererRead.Unwrap(json) ?? "null").RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return new JsonArray();
+        }
+        if (list.ValueKind != JsonValueKind.Array) return new JsonArray();
+
+        var outp = new JsonArray();
+        foreach (var f in list.EnumerateArray())
+        {
+            if (f.ValueKind == JsonValueKind.Object) outp.Add(JsonNode.Parse(f.GetRawText())?.DeepClone());
+        }
+        return outp;
+    }
+
+    private async System.Threading.Tasks.Task PushFeedsAsync(JsonArray feeds)
+    {
+        if (_host is null) return;
+        await _host.EvaluateAsync(
+            $"window.__engine.setFeeds({feeds.ToJsonString()})");
+
+        // Hand the host its own copy as well. The renderer validates and stores the list,
+        // but only the host can enforce the allow-list, so it needs the values rather
+        // than being asked to read them back out of the page.
+        PushFeedsToHost(feeds);
+        await LoadFeedsAsync();
+    }
+
+    /// <summary>
+    /// Sends the feed list to the host in the shape it enforces.
+    ///
+    /// The rules are not sent: the host never interprets them, and passing them would
+    /// suggest it might. It needs the id, the URL, whether the feed is on, how often it
+    /// may be asked, and which hosts are allowed.
+    /// </summary>
+    private void PushFeedsToHost(JsonArray feeds)
+    {
+        if (_host is null) return;
+        var specs = new List<EventFeedFetcher.FeedSpec>();
+
+        foreach (var node in feeds)
+        {
+            if (node is not JsonObject f) continue;
+            var id = f["id"]?.GetValue<string>() ?? "";
+            var url = f["url"]?.GetValue<string>() ?? "";
+            if (id.Length == 0 || url.Length == 0) continue;
+
+            var enabled = f["enabled"]?.GetValue<bool>() ?? false;
+            var interval = f["intervalSeconds"]?.GetValue<int>() ?? 3600;
+            var hosts = new List<string>();
+            if (f["allowedHosts"] is JsonArray arr)
+            {
+                foreach (var h in arr)
+                {
+                    if (h is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0)
+                        hosts.Add(s);
+                }
+            }
+
+            specs.Add(new EventFeedFetcher.FeedSpec(id, url, enabled, interval, hosts));
+        }
+
+        _host.SetFeeds(specs);
     }
 
     /* --------------------------- audio reactivity --------------------------- */

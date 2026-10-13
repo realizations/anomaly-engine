@@ -475,6 +475,17 @@ public class WallpaperHost : IEngineBridge, IDisposable
                         SendMediaTrack(pathEl.GetString() ?? string.Empty);
                     }
                     break;
+                case "feed:request":
+                    if (root.TryGetProperty("payload", out var fp) &&
+                        fp.TryGetProperty("feedId", out var feedIdEl) &&
+                        feedIdEl.ValueKind == JsonValueKind.String)
+                    {
+                        // Fire and forget: the answer comes back as an event, and this
+                        // handler runs on the UI thread where awaiting would be the
+                        // deadlock `IEngineBridge` exists to make visible.
+                        _ = FetchAndReplyAsync(feedIdEl.GetString() ?? string.Empty);
+                    }
+                    break;
                 default:
                     _logger.Debug($"Web message: {type}");
                     break;
@@ -713,6 +724,7 @@ public class WallpaperHost : IEngineBridge, IDisposable
         "accessibility",
         "audio-reactivity",
         "media-track",
+        "feed-response",
         "state",
     };
 
@@ -996,6 +1008,12 @@ public class WallpaperHost : IEngineBridge, IDisposable
     /// </summary>
     public const int MaxTrackBytes = 12 * 1024 * 1024;
 
+    /// <summary>Feeds the renderer has asked about, as last pushed by the settings window.</summary>
+    private List<EventFeedFetcher.FeedSpec> _feeds = new();
+
+    /// <summary>Created only when there is a feed to fetch, so an unused host opens no sockets.</summary>
+    private EventFeedFetcher? _fetcher;
+
     public void SendMediaTrack(string path)
     {
         byte[] bytes;
@@ -1027,6 +1045,64 @@ public class WallpaperHost : IEngineBridge, IDisposable
         _ = ExecuteScriptSafe(
             $"window.dispatchEvent(new CustomEvent('anomaly:media-track', " +
             $"{{ detail: {{ base64: '{payload}', title: {title} }} }}));");
+    }
+
+    /// <summary>
+    /// Fetches a feed the renderer asked for and answers it as an event.
+    ///
+    /// The renderer never learns the URL: it asked by feed id, and the host looks the id
+    /// up in its own list. That is what keeps the renderer unable to reach an endpoint the
+    /// user did not name, even if it wanted to.
+    /// </summary>
+    private async Task FetchAndReplyAsync(string feedId)
+    {
+        var feed = _feeds.FirstOrDefault(f => f.Id == feedId);
+        if (feed is null)
+        {
+            await SendFeedResponseAsync(feedId, null, $"No feed with id '{feedId}' is configured.");
+            return;
+        }
+
+        var result = await _fetcher!.FetchAsync(feed);
+        if (result.Ok)
+        {
+            _logger.Info($"Feed {feedId}: read {result.Body.Length} characters.");
+            await SendFeedResponseAsync(feedId, result.Body, null);
+        }
+        else
+        {
+            _logger.Warn($"Feed {feedId}: {result.Problem}");
+            await SendFeedResponseAsync(feedId, null, result.Problem);
+        }
+    }
+
+    /// <summary>
+    /// Sends the body back, or the reason there is not one.
+    ///
+    /// The body goes in as a script string literal, serialised by the same routine the
+    /// locale code uses, because a feed document contains quotes and angle brackets and
+    /// interpolating it raw would end the string literal at the first one.
+    /// </summary>
+    private Task SendFeedResponseAsync(string feedId, string? body, string? problem)
+    {
+        var id = System.Text.Json.JsonSerializer.Serialize(feedId);
+        var payload = body is null
+            ? System.Text.Json.JsonSerializer.Serialize(problem ?? "unknown")
+            : System.Text.Json.JsonSerializer.Serialize(body);
+        return ExecuteScriptSafe(
+            $"window.dispatchEvent(new CustomEvent('anomaly:feed-response', {{ detail: " +
+            $"{{ feedId: {id}, body: {payload}, problem: null }} }}));");
+    }
+
+    /// <summary>Pushes the configured feeds to the renderer.</summary>
+    public void SetFeeds(IReadOnlyList<EventFeedFetcher.FeedSpec> feeds)
+    {
+        _feeds = feeds.ToList();
+        _logger.Info($"Feeds configured: {_feeds.Count} ({_feeds.Count(f => f.Enabled)} enabled).");
+        if (_fetcher is null && _feeds.Count > 0)
+        {
+            _fetcher = new EventFeedFetcher();
+        }
     }
 
     public void SetAudioReactivity(bool enabled, bool silentPlayback)
@@ -1076,3 +1152,4 @@ public class WallpaperHost : IEngineBridge, IDisposable
         Stop();
     }
 }
+

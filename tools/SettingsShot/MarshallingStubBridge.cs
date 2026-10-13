@@ -127,6 +127,17 @@ internal sealed class MarshallingStubBridge : IEngineBridge
     public void SetAudioReactivity(bool enabled, bool silentPlayback)
         => AudioReactivityCalls.Add((enabled, silentPlayback));
 
+    // Feeds are recorded rather than dropped, for the same reason as the rest of this
+    // stub: a stub that swallows them means the integrations page renders correctly
+    // whether or not it is wired to anything.
+    public List<string> FeedPushes { get; } = new List<string>();
+
+    public void SetFeeds(IReadOnlyList<EventFeedFetcher.FeedSpec> feeds)
+    {
+        FeedPushes.Clear();
+        foreach (var f in feeds) FeedPushes.Add($"{f.Id}:{(f.Enabled ? "on" : "off")}");
+    }
+
     // A fixed four-language list, which is what the renderer actually reports. The
     // settings harness renders the language section off-screen, so an empty list would
     // render a settings page with no control on it and still pass the page audit.

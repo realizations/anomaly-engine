@@ -53,6 +53,9 @@ steps.push(await run('world schema self-test', ['verify-world-schema.mjs', '--se
 steps.push(await run('the CLI validator matches the world schema', ['verify-world-schema.mjs']));
 steps.push(await run('the world validator behaves', ['world-folder.mjs']));
 steps.push(await run('a renderer read failure cannot crash the settings window', ['renderer-read.mjs']));
+steps.push(await run('no-network self-test', ['verify-no-network.mjs', '--selftest']));
+steps.push(await run('the renderer cannot reach the network', ['verify-no-network.mjs']));
+steps.push(await run('the feed fetcher holds its rules', ['event-feed.mjs']));
 steps.push(await run('release self-test', ['verify-release.mjs', '--selftest']));
 steps.push(await run('the release does what it claims', ['verify-release.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
