@@ -41,6 +41,30 @@ public interface IEngineBridge
     void SetFpsLimit(int fps);
     void SetRenderScale(double? scale);
     void SetReducedMotion(bool on);
+
+    /// <summary>
+    /// Sets one accessibility preference, by the renderer's own key name.
+    ///
+    /// A name and a value rather than a whole config, and the name is the renderer's
+    /// vocabulary rather than this window's: <c>AccessibilitySystem.KEYS</c> is the
+    /// list, and an unrecognised name is logged and dropped by the renderer instead of
+    /// being stored as a preference nobody reads.
+    ///
+    /// This is the channel that makes the five preferences that existed only as
+    /// fields reachable at all. There is one rather than five methods because they
+    /// differ only in the string, and five methods would be five chances for the
+    /// window and the renderer to disagree about which one a key belongs to.
+    /// </summary>
+    void SetAccessibility(string key, bool enabled);
+
+    /// <summary>
+    /// Whether the renderer currently holds this accessibility preference.
+    ///
+    /// Read back from the engine rather than tracked by this window: a preference can
+    /// also be restored from the state file on launch or changed from the tray, and a
+    /// checkbox that kept its own copy would show the wrong answer in both cases.
+    /// </summary>
+    Task<bool> GetAccessibilityAsync(string key);
     void Pause();
     void Resume();
     void ToggleDebug();

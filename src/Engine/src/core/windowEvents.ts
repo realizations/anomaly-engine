@@ -54,6 +54,22 @@ export const WINDOW_EVENTS = {
   notes: 'anomaly:notes',
   /** Host -> renderer: switch interface language, by locale code. */
   locale: 'anomaly:locale',
+/**
+ * A name and a value rather than a whole config, so a settings control cannot send
+ * a field the renderer does not have, and so adding a preference needs one event
+ * rather than a change of shape. The names are validated against
+ * `AccessibilitySystem.KEYS` on arrival: an unknown name is logged and dropped
+ * rather than stored as a key nobody reads, which is the failure this gate exists to
+ * make impossible to repeat.
+ *
+ * The marker line is on its own because `tools/verify-host-events.mjs` reads a
+ * single-line comment immediately above the entry to decide whether a host is allowed
+ * to send it. A multi-line comment above a one-line marker, or the marker inside a
+ * block comment, both read as "the page dispatches this at itself" -- which is wrong,
+ * and wrong in the direction that makes the check refuse to protect the event.
+ */
+/** Host -> renderer: set one accessibility preference, by name. */
+  accessibility: 'anomaly:accessibility',
 
   /** Creator mode -> renderer: pin the simulated clock. */
   setTime: 'anomaly:set-time',
@@ -70,3 +86,16 @@ export const WINDOW_EVENTS = {
 } as const;
 
 export type WindowEventName = (typeof WINDOW_EVENTS)[keyof typeof WINDOW_EVENTS];
+
+/**
+ * Events internal to the renderer, between a panel and the thing that opened it.
+ *
+ * Separate from `WINDOW_EVENTS` because none of these cross the host boundary: they
+ * exist so that `AccessibilitySystem` can dismiss whatever panel is on top without
+ * holding a reference to any of them, which is what keeps adding a panel from being a
+ * change to the accessibility code.
+ */
+export const PANEL_EVENTS = {
+  /** Panel -> anything listening: close me. */
+  dismiss: 'anomaly:panel-dismiss',
+} as const;

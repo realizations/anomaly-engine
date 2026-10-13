@@ -96,6 +96,26 @@ internal sealed class MarshallingStubBridge : IEngineBridge
     public void SetMotionIntensity(double intensity) { }
     public void SetLocale(string locale) { }
 
+    // The five preferences are recorded rather than discarded. Nothing in the harness
+    // reads them yet, but a stub that swallows them means the accessibility page
+    // renders correctly whether or not it is wired to anything -- which is the state
+    // this whole block started from.
+    public List<(string Key, bool Enabled)> AccessibilityCalls { get; } = new();
+
+    public void SetAccessibility(string key, bool enabled)
+        => AccessibilityCalls.Add((key, enabled));
+
+    public Task<bool> GetAccessibilityAsync(string key)
+    {
+        // No LINQ: this file deliberately has no usings, so that the stub stays a
+        // transcription of the interface rather than a place to write logic.
+        for (var i = AccessibilityCalls.Count - 1; i >= 0; i--)
+        {
+            if (AccessibilityCalls[i].Key == key) return Task.FromResult(AccessibilityCalls[i].Enabled);
+        }
+        return Task.FromResult(false);
+    }
+
     // A fixed four-language list, which is what the renderer actually reports. The
     // settings harness renders the language section off-screen, so an empty list would
     // render a settings page with no control on it and still pass the page audit.

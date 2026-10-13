@@ -26,6 +26,20 @@ export interface PersistedState {
   style: string | null;
   reducedMotion: boolean | null;
   /**
+   * The rest of the accessibility preferences.
+   *
+   * Five booleans that were never written here and never read from here, while the
+   * settings window had nowhere to put them either. Null means "never chosen", which is
+   * what keeps a saved state file from overwriting the operating system's own
+   * preference on the first launch after an upgrade: the system's answer is only
+   * replaced once the user has actually answered.
+   */
+  highContrast: boolean | null;
+  muteAll: boolean | null;
+  keyboardNavigation: boolean | null;
+  scalableUI: boolean | null;
+  focusVisible: boolean | null;
+  /**
    * How much of the scene moves, 0..1.
    *
    * Kept separate from reducedMotion, which is an accessibility preference rather
@@ -100,6 +114,11 @@ export function emptyState(): PersistedState {
     worldId: null,
     style: null,
     reducedMotion: null,
+    highContrast: null,
+    muteAll: null,
+    keyboardNavigation: null,
+    scalableUI: null,
+    focusVisible: null,
     motionIntensity: null,
     totalSessions: 0,
     firstRun: null,
@@ -129,6 +148,11 @@ export function reconcile(raw: unknown): PersistedState {
     worldId: str(s.worldId),
     style: str(s.style),
     reducedMotion: bool(s.reducedMotion),
+    highContrast: bool(s.highContrast),
+    muteAll: bool(s.muteAll),
+    keyboardNavigation: bool(s.keyboardNavigation),
+    scalableUI: bool(s.scalableUI),
+    focusVisible: bool(s.focusVisible),
     motionIntensity: s.motionIntensity === null || s.motionIntensity === undefined
       ? null
       : clamp01(Number(s.motionIntensity)),

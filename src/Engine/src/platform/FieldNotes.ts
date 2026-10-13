@@ -13,6 +13,8 @@ import type { JournalEntry } from '../systems/JournalSystem.js';
 import type { DiscoveredSecret, SecretDefinition } from '../systems/SecretSystem.js';
 import type { WorldDefinition } from '../worlds/types.js';
 import { EN_STRINGS, type Translate, type TranslateValues, type UiKey } from './I18n.js';
+import type { AccessibilitySystem } from './AccessibilitySystem.js';
+import { PANEL_EVENTS } from '../core/windowEvents.js';
 
 export interface FieldNotesData {
   world: WorldDefinition | null;
@@ -56,6 +58,69 @@ export class FieldNotes {
     if (this._visible) this._render();
   }
 
+  /**
+   * Attaches the accessibility preferences.
+   *
+   * Optional because the panel is usable without it -- it just loses the focus ring,
+   * the Escape shortcut and the enlarged text. Held rather than read once, because a
+   * preference the user changes while the panel is open has to apply to the open panel.
+   */
+  useAccessibility(a11y: AccessibilitySystem): void {
+    this._unregister?.();
+    this._a11y = a11y;
+    if (this._el) this._registerPanel();
+  }
+
+  private _a11y: AccessibilitySystem | null = null;
+  private _unregister: (() => void) | null = null;
+
+  /**
+   * Joins the keyboard-navigation panel stack.
+   *
+   * Which makes the panel scrollable and Escape-dismissible, which is the point: it
+   * was declared `overflow-y: auto` with `pointer-events: none` and had no close
+   * control, so on a display where the content was taller than the panel there was no
+   * way to read the bottom of it and no way to close it before its 24-second timer.
+   */
+  private _registerPanel(): void {
+    if (!this._el || !this._a11y) return;
+    this._unregister = this._a11y.registerPanel(this._el);
+
+    // Delegated from the panel, not bound to the button: `_render` replaces the whole
+    // innerHTML, so a listener attached to the button itself is thrown away by the
+    // next refresh and the close control silently stops working after one update.
+    this._el.addEventListener(PANEL_EVENTS.dismiss, this._onDismiss);
+    this._el.addEventListener('click', this._onClick);
+    this._el.addEventListener('keydown', this._onKeyDown);
+  }
+
+  private _onDismiss = (): void => {
+    this.hide();
+  };
+
+  private _onClick = (e: MouseEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest?.('#anomaly-panel-close')) return;
+    this.hide();
+  };
+
+  /**
+   * Space and Enter dismiss, which is what a button does and what this one is.
+   *
+   * `AccessibilitySystem` handles Escape and the Tab trap at the window, because those
+   * are properties of "a panel is open" rather than of this panel. A key that means
+   * "activate the control I am on" is a property of the control, so it stays here.
+   */
+  private _onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    const target = e.target as HTMLElement | null;
+    if (!target || target.id !== 'anomaly-panel-close') return;
+    // Otherwise the space key both activates the button and scrolls the panel.
+    e.preventDefault();
+    e.stopPropagation();
+    this.hide();
+  };
+
   private _t(key: UiKey, values?: TranslateValues): string {
     return this._i18n.t(key, values);
   }
@@ -70,6 +135,7 @@ export class FieldNotes {
     this._visible = true;
     this._create();
     this._render();
+    this._registerPanel();
     this._resetTimer();
   }
 
@@ -81,8 +147,13 @@ export class FieldNotes {
     }
     const el = this._el;
     this._el = null;
+    this._unregister?.();
+    this._unregister = null;
     if (!el) return;
     el.style.opacity = '0';
+    el.removeEventListener(PANEL_EVENTS.dismiss, this._onDismiss);
+    el.removeEventListener('click', this._onClick);
+    el.removeEventListener('keydown', this._onKeyDown);
     // Let the fade finish before removing it from the DOM.
     window.setTimeout(() => el.remove(), 500);
   }
@@ -122,10 +193,26 @@ export class FieldNotes {
       font: 13px/1.72 'Inter', 'Segoe UI', system-ui, sans-serif;
       opacity: 0;
       transition: opacity 0.45s ease;
-      pointer-events: none;
+      /*
+       * Was pointer-events: none, over an overflow-y: auto container -- a scrollbar
+       * that cannot be scrolled. The panel declared that its content may exceed its
+       * height and then refused every pointer aimed at it, so on a short display the
+       * bottom of the journal was unreachable and could not be selected. It read as a
+       * deliberate "readout, not a surface" choice, and on a wallpaper it looked
+       * exactly like the panel being broken.
+       */
+      pointer-events: auto;
       box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
     `;
     document.body.appendChild(el);
+    /*
+     * `role="dialog"` plus a label, because this is the one overlay on the desktop
+     * that contains real prose a screen reader should be able to land on. `tabindex`
+     * is set by `AccessibilitySystem.registerPanel`, which owns the focus policy.
+     */
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'false');
+    el.setAttribute('aria-label', this._t('notes.title'));
     // Force a reflow so the opacity transition actually runs.
     void el.offsetWidth;
     el.style.opacity = '1';
@@ -196,7 +283,14 @@ export class FieldNotes {
       : '';
 
     this._el.innerHTML = `
-      <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#7b7a86">${this._esc(this._t('notes.title'))}</div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#7b7a86">${this._esc(this._t('notes.title'))}</div>
+        <button id="anomaly-panel-close" type="button"
+          aria-label="${this._esc(this._t('common.close'))}"
+          style="margin:-6px -8px 0 0;width:26px;height:26px;flex:0 0 auto;cursor:pointer;
+                 background:transparent;border:1px solid rgba(140,140,160,.3);border-radius:5px;
+                 color:#c9c6be;font-size:15px;line-height:1;padding:0">&times;</button>
+      </div>
       <h1 style="font-family:'Space Grotesk', 'Segoe UI', sans-serif;font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:4px 0 0;color:#e9e7e1">${this._esc(w?.name ?? 'Unknown world')}</h1>
       <div style="font-size:12px;color:#7b7a86;margin-bottom:16px">${this._esc(w?.biome ?? '')} · ${this._esc(this._t('notes.seed'))} ${this._esc(w?.terrain?.seed ?? '')}</div>
       ${lore}
@@ -206,17 +300,17 @@ export class FieldNotes {
       <div style="display:flex;gap:22px;margin:22px 0;padding:14px 0;border-top:1px solid rgba(140,140,160,.14);border-bottom:1px solid rgba(140,140,160,.14)">
         ${this._stat(d.anomaliesSeen, this._t('notes.observed'))}
         ${this._stat(found.size, this._t('notes.ofCount', { n: d.secretDefinitions.length }))}
-        ${this._stat(d.sessions, 'sessions')}
+        ${this._stat(d.sessions, this._t('notes.sessions'))}
       </div>
 
-      <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7b7a86;margin:22px 0 10px">Observations</div>
+      <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7b7a86;margin:22px 0 10px">${this._esc(this._t('notes.observations'))}</div>
       ${journalBlock}
 
-      ${secretBlock ? `<div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7b7a86;margin:22px 0 10px">Open questions</div>${secretBlock}` : ''}
+      ${secretBlock ? `<div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7b7a86;margin:22px 0 10px">${this._esc(this._t('notes.openQuestions'))}</div>${secretBlock}` : ''}
 
       <div style="font-size:11px;color:#5f5e68;margin-top:24px">
-        ${d.firstRun ? `First recorded ${this._esc(new Date(d.firstRun).toLocaleDateString())}.` : ''}
-        Dismisses on its own.
+        ${d.firstRun ? this._esc(this._t('notes.firstRecorded', { date: new Date(d.firstRun).toLocaleDateString() })) : ''}
+        ${this._esc(this._t('notes.dismisses'))}
       </div>
     `;
   }
@@ -230,5 +324,7 @@ export class FieldNotes {
 
   dispose(): void {
     this.hide();
+    this._unregister?.();
+    this._unregister = null;
   }
 }

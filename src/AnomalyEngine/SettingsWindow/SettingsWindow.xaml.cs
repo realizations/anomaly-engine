@@ -115,6 +115,7 @@ public partial class SettingsWindow : Window
             };
             ReducedMotion.IsChecked = status.Value.ReducedMotion;
             _paused = status.Value.Paused;
+            ApplyAccessibility(status.Value.Accessibility, status.Value.UiScale, status.Value.Muted);
             UpdateQuickControls();
         }
         catch (Exception ex)
@@ -143,6 +144,8 @@ public partial class SettingsWindow : Window
             "How hard the engine is allowed to work. Everything here has a safe default, so this section is optional."),
         ("Events", null!, null!, "Events",
             "The rare things that happen while you are not looking. Each is scoped to the place it occurs in."),
+        ("Accessibility", null!, null!, "Accessibility",
+            "Contrast, sound, keyboard control and text size. Each one is read from the engine when this window opens rather than remembered here, so what you see is what is running."),
         ("Notes", null!, null!, "Field Notes",
             "What has been noticed, and what it might have been instead."),
         ("Monitors", null!, null!, "Displays",
@@ -158,11 +161,12 @@ public partial class SettingsWindow : Window
         var panels = new FrameworkElement[]
         {
             HomeSection, WorldsSection, AppearanceSection, PerformanceSection,
-            EventsSection, NotesSection, MonitorsSection, IntegrationsSection, AboutSection,
+            EventsSection, AccessibilitySection, NotesSection, MonitorsSection,
+            IntegrationsSection, AboutSection,
         };
         var navs = new Button?[]
         {
-            NavHome, NavWorlds, NavLook, NavPerf, NavEvents,
+            NavHome, NavWorlds, NavLook, NavPerf, NavEvents, NavA11y,
             NavNotes, NavMon, Net, NavAbout,
         };
 
@@ -184,6 +188,7 @@ public partial class SettingsWindow : Window
             "Appearance" => AppearanceSection,
             "Performance" => PerformanceSection,
             "Events" => EventsSection,
+            "Accessibility" => AccessibilitySection,
             "Notes" => NotesSection,
             "Monitors" => MonitorsSection,
             "Integrations" => IntegrationsSection,
@@ -267,6 +272,7 @@ public partial class SettingsWindow : Window
     private void BtnAppearance_Click(object sender, RoutedEventArgs e) => ShowSection("Appearance");
     private void BtnPerformance_Click(object sender, RoutedEventArgs e) => ShowSection("Performance");
     private void BtnEvents_Click(object sender, RoutedEventArgs e) => ShowSection("Events");
+    private void BtnAccessibility_Click(object sender, RoutedEventArgs e) => ShowSection("Accessibility");
     private void BtnNotes_Click(object sender, RoutedEventArgs e) => ShowSection("Notes");
     /// Opens the field-notes overlay on the desktop itself, which is a
     /// different action from navigating to the section that describes it.
@@ -704,6 +710,65 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         StatusText.Text = "Reduced motion off.";
     }
 
+    /* ---------------------------- accessibility ---------------------------- */
+
+    /// <summary>
+    /// Mirrors the engine's five preferences into the five checkboxes.
+    ///
+    /// Only ever called once, under <c>_loading</c>. Applying them on every poll --
+    /// which is what the frame-rate readouts do -- would undo a tick the moment the
+    /// user made it: the box would flip back within a poll interval and the control
+    /// would look like it had thrown the click away.
+    /// </summary>
+    private void ApplyAccessibility(AccessibilityState a, double uiScale = 1.0, bool muted = false)
+    {
+        HighContrastBox.IsChecked = a.HighContrast;
+        MuteAllBox.IsChecked = a.MuteAll;
+        KeyboardNavBox.IsChecked = a.KeyboardNavigation;
+        FocusVisibleBox.IsChecked = a.FocusVisible;
+        ScalableUiBox.IsChecked = a.ScalableUI;
+
+        // Read from the engine rather than computed here, so the number on screen is
+        // the multiplier actually in force even when it was restored from the state
+        // file or changed from somewhere other than this window.
+        UiScaleText.Text = $"Currently {uiScale:0.00}x. Mute is {(muted ? "on" : "off")}.";
+    }
+
+    // Five pairs of handlers rather than five shared ones.
+
+    // The alternative is a single handler that reads the sender's name and looks the
+    // key up in a table, which is the same shape as a dictionary in a language with
+    // real dictionaries: more indirection, and a compile error for a typo is replaced
+    // by a silent no-op. Each pair is four lines, and the log line names the
+    // preference in English rather than in the renderer's camelCase.
+    private void HighContrast_Checked(object sender, RoutedEventArgs e) => SetAccessibility("highContrast", true);
+    private void HighContrast_Unchecked(object sender, RoutedEventArgs e) => SetAccessibility("highContrast", false);
+    private void MuteAll_Checked(object sender, RoutedEventArgs e) => SetAccessibility("muteAll", true);
+    private void MuteAll_Unchecked(object sender, RoutedEventArgs e) => SetAccessibility("muteAll", false);
+    private void KeyboardNav_Checked(object sender, RoutedEventArgs e) => SetAccessibility("keyboardNavigation", true);
+    private void KeyboardNav_Unchecked(object sender, RoutedEventArgs e) => SetAccessibility("keyboardNavigation", false);
+    private void FocusVisible_Checked(object sender, RoutedEventArgs e) => SetAccessibility("focusVisible", true);
+    private void FocusVisible_Unchecked(object sender, RoutedEventArgs e) => SetAccessibility("focusVisible", false);
+    private void ScalableUi_Checked(object sender, RoutedEventArgs e) => SetAccessibility("scalableUI", true);
+    private void ScalableUi_Unchecked(object sender, RoutedEventArgs e) => SetAccessibility("scalableUI", false);
+
+    private static string DescribePreference(string key) => key switch
+    {
+        "highContrast" => "Higher contrast",
+        "muteAll" => "Mute everything",
+        "keyboardNavigation" => "Keyboard control",
+        "focusVisible" => "Focus outlines",
+        "scalableUI" => "Enlarged interface text",
+        _ => key,
+    };
+
+    private void SetAccessibility(string key, bool enabled)
+    {
+        if (_loading || _host is null) return;
+        _host.SetAccessibility(key, enabled);
+        StatusText.Text = $"{DescribePreference(key)} {(enabled ? "on" : "off")}.";
+    }
+
     /* ------------------------------- readouts ------------------------------- */
 
     private struct EngineStatus
@@ -724,6 +789,28 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         public int SecretsFound;
         public int SecretsTotal;
         public int AnomalyKinds;
+        public double UiScale;
+        public bool Muted;
+
+        /// <summary>
+        /// The five preferences from the accessibility page, as the engine holds them.
+        /// </summary>
+        public AccessibilityState Accessibility;
+    }
+
+    /// <summary>
+    /// The renderer's accessibility preferences, mirrored.
+    ///
+    /// A struct rather than a dictionary so a missing key reads as false rather than
+    /// throwing, and so the five names exist in exactly one place on this side.
+    /// </summary>
+    private struct AccessibilityState
+    {
+        public bool HighContrast;
+        public bool MuteAll;
+        public bool KeyboardNavigation;
+        public bool ScalableUI;
+        public bool FocusVisible;
     }
 
     private async System.Threading.Tasks.Task<EngineStatus?> GetStatusAsync()
@@ -739,6 +826,15 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         double Db(string k) => d.TryGetValue(k, out var v) && v.TryGetDouble(out var n) ? n : 0;
         string S(string k) => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
         bool B(string k) => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.True;
+        // Nested read for the accessibility block. A flat `B("highContrast")` would
+        // always be false, because the renderer groups the five under one object, and
+        // five boxes that are all unticked on open look exactly like a working page
+        // showing five false preferences.
+        bool NB(string outer, string inner) =>
+            d.TryGetValue(outer, out var o)
+            && o.ValueKind == JsonValueKind.Object
+            && o.TryGetProperty(inner, out var iv)
+            && iv.ValueKind == JsonValueKind.True;
 
         return new EngineStatus
         {
@@ -757,6 +853,16 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
             SecretsFound = I("secretsFound"),
             SecretsTotal = I("secretsTotal"),
             AnomalyKinds = I("anomalyKinds"),
+            UiScale = Db("uiScale") <= 0 ? 1.0 : Db("uiScale"),
+            Muted = B("muted"),
+            Accessibility = new AccessibilityState
+            {
+                HighContrast = NB("accessibility", "highContrast"),
+                MuteAll = NB("accessibility", "muteAll"),
+                KeyboardNavigation = NB("accessibility", "keyboardNavigation"),
+                ScalableUI = NB("accessibility", "scalableUI"),
+                FocusVisible = NB("accessibility", "focusVisible"),
+            },
         };
     }
 

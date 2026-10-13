@@ -30,7 +30,7 @@ const OUT = resolve(ROOT, 'build', 'review');
 const PROJECT = resolve(HERE, 'SettingsShot', 'SettingsShot.csproj');
 const SELFTEST = process.argv.includes('--selftest');
 
-const PAGES = ['home', 'worlds', 'appearance', 'performance', 'events', 'field-notes', 'displays', 'integrations', 'about'];
+const PAGES = ['home', 'worlds', 'appearance', 'performance', 'events', 'accessibility', 'field-notes', 'displays', 'integrations', 'about'];
 
 /**
  * Checks a directory of page renders and returns the problems it finds.
@@ -58,8 +58,8 @@ export function auditPageRenders(dir, pages = PAGES) {
     // The size check does not prove the window switched pages, and that failure is
     // not hypothetical: ShowSection falls back to `Sections[0]` when handed a name
     // it does not recognise, which is Home. A window whose navigation is wired to the
-    // wrong panel therefore renders Home nine times, every file comfortably over
-    // 8KB, and a presence-and-size check alone reports all nine pages rendering.
+    // wrong panel therefore renders Home once per page, every file comfortably over
+    // 8KB, and a presence-and-size check alone reports every page rendering.
     //
     // Byte equality is the right test. Two renders of the same panel are the same
     // pixels through the same encoder, so identical digests mean a duplicate file;
@@ -94,7 +94,7 @@ function selftest() {
     cases.push({ name, problems, shouldBeRejected, ok: problems.length > 0 === shouldBeRejected });
 
   for (const p of PAGES) writeFileSync(file(p), body(p));
-  record('nine distinct renders are accepted', auditPageRenders(dir), false);
+  record(`${PAGES.length} distinct renders are accepted`, auditPageRenders(dir), false);
 
   rmSync(file('events'));
   record('a missing page is rejected', auditPageRenders(dir), true);

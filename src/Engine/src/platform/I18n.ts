@@ -77,6 +77,20 @@ export const EN_STRINGS = {
   'notes.ofCount': 'of {n} notes',
   'notes.seed': 'seed',
   'notes.unrecorded': 'Unrecorded.',
+  // These five were written into the panel as literal English while the rest of it
+  // went through the translator, so the field-notes page was the one surface that
+  // stayed English for a German or Japanese reader. `tools/i18n-audit.mjs` cannot see
+  // a hardcoded string, which is why they survived it.
+  'notes.observations': 'Observations',
+  'notes.openQuestions': 'Open questions',
+  'notes.sessions': 'sessions',
+  'notes.firstRecorded': 'First recorded {date}.',
+  'notes.dismisses': 'Dismisses on its own, or press Escape.',
+
+  // --- panels ---------------------------------------------------------------
+  // Shared by every dismissible overlay, because the close button and the Escape
+  // shortcut are both new and neither can be announced without a label.
+  'common.close': 'Close',
 
   // --- zone hints -----------------------------------------------------------
   // Shown on hover, before anything has been clicked. Each one describes the thing it

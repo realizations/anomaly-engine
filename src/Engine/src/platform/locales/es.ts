@@ -70,6 +70,13 @@ export const ES_LOCALE: Locale = {
     'notes.ofCount': 'de {n} notas',
     'notes.seed': 'semilla',
     'notes.unrecorded': 'Sin registrar.',
+    'notes.observations': 'Observaciones',
+    'notes.openQuestions': 'Preguntas abiertas',
+    'notes.sessions': 'sesiones',
+    'notes.firstRecorded': 'Registrado por primera vez el {date}.',
+    'notes.dismisses': 'Se cierra solo, o pulsa Escape.',
+
+    'common.close': 'Cerrar',
 
     'hint.observatory': 'La cúpula está cerrada. El obturador no se mueve desde hace mucho tiempo.',
     'hint.radioTower': 'La portadora sigue emitiendo. Nadie contesta.',

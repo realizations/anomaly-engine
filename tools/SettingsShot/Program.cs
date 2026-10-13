@@ -158,6 +158,7 @@ var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)
             ("NavLook", "appearance"),
             ("NavPerf", "performance"),
             ("NavEvents", "events"),
+            ("NavA11y", "accessibility"),
             ("NavNotes", "field-notes"),
             ("NavMon", "displays"),
             ("Net", "integrations"),

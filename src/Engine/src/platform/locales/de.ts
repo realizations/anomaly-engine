@@ -70,6 +70,13 @@ export const DE_LOCALE: Locale = {
     'notes.ofCount': 'von {n} Notizen',
     'notes.seed': 'Startwert',
     'notes.unrecorded': 'Nicht erfasst.',
+    'notes.observations': 'Beobachtungen',
+    'notes.openQuestions': 'Offene Fragen',
+    'notes.sessions': 'Sitzungen',
+    'notes.firstRecorded': 'Erstmals erfasst am {date}.',
+    'notes.dismisses': 'Schließt sich von selbst, oder Escape drücken.',
+
+    'common.close': 'Schließen',
 
     'hint.observatory': 'Die Kuppel ist geschlossen. Der Verschluss bewegt sich seit Langem nicht.',
     'hint.radioTower': 'Die Trägerfrequenz läuft weiter. Niemand antwortet.',

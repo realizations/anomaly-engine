@@ -1,6 +1,7 @@
 import type { DebugOverlay } from './DebugOverlay.js';
-import { WINDOW_EVENTS } from '../core/windowEvents.js';
+import { WINDOW_EVENTS, PANEL_EVENTS } from '../core/windowEvents.js';
 import { EN_STRINGS, type Translate } from './I18n.js';
+import type { AccessibilitySystem } from './AccessibilitySystem.js';
 
 export interface CreatorModeConfig {
   enabled: boolean;
@@ -41,6 +42,40 @@ export class CreatorMode {
   private _t(key: Parameters<Translate>[0]): string {
     return this._i18n.t(key);
   }
+
+  /**
+   * Attaches the accessibility preferences.
+   *
+   * Optional, for the same reason as on the field-notes panel: the panel works without
+   * it and loses only the focus ring, the Escape shortcut and the enlarged text.
+   */
+  useAccessibility(a11y: AccessibilitySystem): void {
+    this._unregister?.();
+    this._a11y = a11y;
+    if (this._panel) this._registerPanel();
+  }
+
+  private _a11y: AccessibilitySystem | null = null;
+  private _unregister: (() => void) | null = null;
+
+  private _registerPanel(): void {
+    if (!this._panel || !this._a11y) return;
+    this._unregister = this._a11y.registerPanel(this._panel);
+    this._panel.addEventListener(PANEL_EVENTS.dismiss, this._onDismiss);
+    // Delegated, because `_renderPanel` replaces the innerHTML and a listener bound to
+    // the close button itself would be dropped by the next render.
+    this._panel.addEventListener('click', this._onClick);
+  }
+
+  private _onDismiss = (): void => {
+    this.disable();
+  };
+
+  private _onClick = (e: MouseEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest?.('#anomaly-panel-close')) return;
+    this.disable();
+  };
 
   enable(): void {
     this._config.enabled = true;
@@ -100,6 +135,9 @@ export class CreatorMode {
   private _createPanel(): void {
     this._panel = document.createElement('div');
     this._panel.id = 'anomaly-creator-panel';
+    this._panel.setAttribute('role', 'dialog');
+    this._panel.setAttribute('aria-modal', 'false');
+    this._panel.setAttribute('aria-label', this._t('creator.title'));
     this._panel.style.cssText = `
       position: fixed;
       top: 10px;
@@ -116,9 +154,14 @@ export class CreatorMode {
     `;
     document.body.appendChild(this._panel);
     this._renderPanel();
+    this._registerPanel();
   }
 
   private _destroyPanel(): void {
+    this._unregister?.();
+    this._unregister = null;
+    this._panel?.removeEventListener(PANEL_EVENTS.dismiss, this._onDismiss);
+    this._panel?.removeEventListener('click', this._onClick);
     this._panel?.remove();
     this._panel = null;
   }
@@ -127,7 +170,13 @@ export class CreatorMode {
     if (!this._panel) return;
     const t = (key: Parameters<Translate>[0]) => this._t(key);
     this._panel.innerHTML = `
-      <h3 style="margin:0 0 10px;color:#8888ff;">${t('creator.title')}</h3>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px">
+        <h3 style="margin:0;color:#8888ff;">${t('creator.title')}</h3>
+        <button id="anomaly-panel-close" type="button" aria-label="${t('common.close')}"
+          style="margin:-4px -4px 0 0;width:24px;height:24px;flex:0 0 auto;cursor:pointer;
+                 background:transparent;border:1px solid rgba(100,100,200,.45);border-radius:5px;
+                 color:#c9c6be;font-size:14px;line-height:1;padding:0">&times;</button>
+      </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button id="cm-trigger-event" style="padding:6px;cursor:pointer;">${t('creator.triggerEvent')}</button>
         <button id="cm-set-time" style="padding:6px;cursor:pointer;">${t('creator.setTime')}</button>

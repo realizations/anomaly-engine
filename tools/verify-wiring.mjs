@@ -139,16 +139,13 @@ export const EXEMPT = {
     getSecret: 'Same.',
     onDiscover: 'Nothing observes it; the journal entry is written by the trigger handler.',
   },
-  AudioSystem: {
+AudioSystem: {
     registerTrack: 'No audio ships. This project generates everything it draws, and an audio licence is a different proposition from a font licence.',
     play: 'Same.',
-    stopAll: 'Same.',
+    stopAll: 'Reached from mute(), which is inside this file rather than from main.ts, so a name-based scan cannot see it.',
     setVolume: 'Same.',
     setMasterVolume: 'Same.',
-    mute: 'Same.',
-    unmute: 'Same.',
     onTrackEvent: 'Same.',
-    isMuted: 'Same. The mute flag exists so that when audio does ship, a muted state is already correct.',
   },
   UpdateSystem: {
     onUpdateAvailable: 'No auto-updater is shipped, deliberately: an app that phones home is not what this is. README.md says so under Distribution. onError is not listed because WeatherSystem and RemoteEventSource both declare one and the gate counts by name -- which is a limitation of a name-based check, not a claim that this one is called.',
@@ -174,7 +171,7 @@ export const EXEMPT = {
     isVisible: 'The overlay is toggled and never queried. Settings reflects the toggle state itself.',
   },
   FieldNotes: {
-    isVisible: 'Same: the panel is toggled and never asked.',
+    isVisible: 'The panel is toggled and never asked.',
   },
   CreatorMode: {
     disable: 'Creator mode is enabled from the tray and stays enabled for the session.',
@@ -186,7 +183,6 @@ export const EXEMPT = {
   },
   AccessibilitySystem: {
     shouldUseHighContrast: 'The engine asks for the config and pushes it to the renderer; this is the single-key form.',
-    shouldMuteAll: 'Same.',
   },
   EasterEggSystem: {
     isDiscovered: 'The engine counts discoveries from the progress record.',

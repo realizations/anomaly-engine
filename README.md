@@ -248,13 +248,14 @@ creator mode are tray and CLI actions rather than hotkeys, because a wallpaper t
 
 ### Settings
 
-The settings window has nine sections:
+The settings window has ten sections:
 
 - **Home** — Current world, status, quick controls
 - **Worlds** — Install, activate, preview, delete worlds
 - **Appearance** — Art style and the settings that change how the frame is built
 - **Performance** — FPS limit, quality preset, pause conditions
 - **Events** — Enable/disable event sources, rarity settings
+- **Accessibility** — Contrast, sound, keyboard control, focus outlines, text size
 - **Field notes** — Journal, world lore, discovered secrets and progress
 - **Displays** — Per-display worlds, and which display each one is using
 - **Integrations** — Weather, GitHub, RSS, remote event feed
@@ -263,6 +264,30 @@ The settings window has nine sections:
 Secrets and journal progress live in **Field notes** rather than in a settings page of their
 own: nothing about discovering a secret is a preference, and giving it a page would imply
 there was something to configure.
+
+#### Accessibility
+
+Six preferences, each of which changes something on the desktop:
+
+| Preference | What it does |
+| --- | --- |
+| Follow Windows reduce-motion | Caps motion intensity rather than freezing the scene. A still wallpaper reads as a screenshot. |
+| Higher contrast | Drops the film grain and flattens the shading. Grain over dark shading destroys the contrast of the shading it sits on. |
+| Mute everything | Stops playback and silences the mixer. Nothing resumes by itself: a wallpaper that starts making noise with no visible cause is worse than one that stays quiet. |
+| Keyboard control of the panels | Escape closes whatever panel is open, and Tab stays inside it. |
+| Always show the focus outline | Paints a focus ring, rather than trusting a browser default chosen against an unknown background. |
+| Enlarge the interface text | Scales the field notes and creator panels by 25%, as a multiplier so it composes with browser zoom. |
+
+The panels sit over a WebGL canvas showing an arbitrary world at an arbitrary brightness, so
+the contrast and focus settings are drawn explicitly. The field-notes panel is also a real
+dialog: it takes focus when it opens, it is scrollable and selectable, and it has a close
+button as well as Escape. It was previously `pointer-events: none` over `overflow-y: auto` —
+a scrollbar that could not be scrolled, with no way to close it before its 24-second timer.
+
+Each preference is read back from the engine when the window opens rather than remembered by
+the window, because a preference can also be restored from the state file or changed from the
+tray. `tools/verify-accessibility.mjs` walks each one from the checkbox to a real effect and
+fails if any link is missing.
 
 ### Interactions
 
@@ -382,7 +407,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               451 unit tests
+    tests/               480 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -515,6 +540,7 @@ Done:
 - [x] Per-monitor worlds - one engine, one composition per display, follows hot-plug, and each
       display can be given its own world
 - [x] Accessibility — reduced motion, high contrast, keyboard focus, live region
+- [x] Accessibility — six preferences that each change something, and a gate that proves it
 - [x] Licence gate — machine-enforced, proven by 19 adversarial cases
 - [x] Bundled typefaces — three OFL families, verified to load and actually apply
 - [x] CI — typecheck, lint, unit tests, clean-build check, e2e, durable state
@@ -540,7 +566,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs thirty steps in order. Six of them prove a gate still bites, the rest exercise the
+Runs thirty-two steps in order. Eight of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -563,6 +589,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-dead-code.mjs --selftest` | Proves that check, including that an exemption which outlives its reason fails |
 | `tools/verify-wiring.mjs` | Proves every class `main.ts` constructs has a method someone calls, and that every unused method carries a written reason. This is the gate that catches a system which is constructed, exposed through a getter, and completely inert — which is what `WeatherSystem` was |
 | `tools/verify-wiring.mjs --selftest` | Proves that check, including that a stale exemption fails and that a same-named method in another class does not count as a use |
+| `tools/verify-accessibility.mjs` | Walks each of the six accessibility preferences from the settings checkbox through the handler, the host, the event name and the persisted key to a line that actually changes something. Five of them had no control, no effect and no persistence |
+| `tools/verify-accessibility.mjs --selftest` | Proves that check, including a preference that is stored and accepted but never read, and a key present in only one of the renderer's two key lists |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |
@@ -590,7 +618,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 451 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 480 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

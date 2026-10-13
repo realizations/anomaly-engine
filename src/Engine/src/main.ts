@@ -30,7 +30,7 @@ import { DebugOverlay } from './platform/DebugOverlay.js';
 import { FieldNotes } from './platform/FieldNotes.js';
 import { CreatorMode } from './platform/CreatorMode.js';
 import { I18n } from './platform/I18n.js';
-import { AccessibilitySystem } from './platform/AccessibilitySystem.js';
+import { AccessibilitySystem, type AccessibilityConfig } from './platform/AccessibilitySystem.js';
 import { UpdateSystem } from './platform/UpdateSystem.js';
 import { WorldLoader } from './worlds/WorldLoader.js';
 import { EasterEggSystem } from './systems/EasterEggSystem.js';
@@ -151,19 +151,17 @@ class Engine {
     // because it pushes settings into the renderer and the renderer does not exist
     // yet at construction time. Reduced motion reaches the canvas through the
     // motion intensity, which is the only surface that actually moves.
-    this._applyAccessibility();
-    this._accessibility.onConfigChange((cfg) => {
-      this._renderer.setHighContrast(cfg.highContrast);
-      this._applyMotionPreference();
-      this._persistence?.update({ reducedMotion: cfg.reducedMotion });
-    });
-
-    // Durable state is pushed in by the host, or read from localStorage in a
-    // plain browser. Restoring before the first frame means a saved world and
-    // style apply without a visible switch.
+    //
+    // Registered after `_persistence` is built below, so the very first change it
+    // fires -- the persisted preferences being restored -- is written back rather
+    // than dropped by an optional chain against a field that is still undefined.
     this._persistence = new Persistence(this._bridge);
     this._persistence.load();
     this._persistence.installFlushOnHide();
+
+    this._applyAccessibility();
+    this._accessibility.onConfigChange((cfg) => this._onAccessibilityChange(cfg));
+    this._attachAccessibilityToPanels();
 
     // Worlds are data, not code. Imported worlds are rebuilt before any restored
     // state is applied, because a saved world id may refer to an imported world
@@ -359,11 +357,54 @@ class Engine {
    * A completely frozen scene reads as a screenshot, which is its own kind of
    * wrong; what should go is the parts that are tiring, which is what the
    * per-category responses in motion.ts are for.
+   *
+   * High contrast reaches the renderer, which drops the film grain and flattens the
+   * shading -- a grain pattern over a dark scene destroys the contrast of the shading
+   * it is sitting on top of. Mute reaches the audio system. The other three are
+   * document-level and are applied by `AccessibilitySystem` itself, because what they
+   * govern is the panels rather than the canvas.
    */
   private _applyAccessibility(): void {
     const cfg = this._accessibility.getConfig();
     this._renderer.setHighContrast(cfg.highContrast);
+    this._applyMutePreference();
     this._applyMotionPreference();
+  }
+
+  /**
+   * Pushes a preference change into everything that has to act on it.
+   *
+   * One place rather than three, because the five preferences have two destinations
+   * each -- renderer and disk -- and the previous version updated exactly one of the
+   * two, which is why `muteAll` and `focusVisible` could be flipped by a settings
+   * control and change nothing at all.
+   */
+  private _onAccessibilityChange(cfg: AccessibilityConfig): void {
+    this._renderer.setHighContrast(cfg.highContrast);
+    this._applyMutePreference();
+    this._applyMotionPreference();
+    this._persistence?.update({
+      reducedMotion: cfg.reducedMotion,
+      highContrast: cfg.highContrast,
+      muteAll: cfg.muteAll,
+      keyboardNavigation: cfg.keyboardNavigation,
+      scalableUI: cfg.scalableUI,
+      focusVisible: cfg.focusVisible,
+    });
+  }
+
+  /**
+   * Applies the mute preference to the audio system.
+   *
+   * `mute()` also stops whatever is playing and `unmute()` does not resume it, so
+   * unmuting restores the ability to be heard rather than the sound itself. That is
+   * deliberate: a wallpaper that resumes playing the moment a box is unticked, with
+   * no indication of why it suddenly started, is worse than one that stays quiet
+   * until the next thing it would have played anyway.
+   */
+  private _applyMutePreference(): void {
+    if (this._accessibility.shouldMuteAll()) this._audio.mute();
+    else this._audio.unmute();
   }
 
   /**
@@ -797,6 +838,17 @@ class Engine {
       const on = !!(e as CustomEvent<{ on?: boolean }>).detail?.on;
       this._accessibility.setConfig({ reducedMotion: on });
     });
+    // The settings window sends one preference at a time by name. An unknown name is
+    // logged and dropped: storing it would produce a field that reads back as a
+    // preference the user never made, and refusing the whole message would mean one
+    // bad name from a stale settings window discarded the rest.
+    window.addEventListener(WINDOW_EVENTS.accessibility, (e) => {
+      const d = (e as CustomEvent<{ key?: string; value?: boolean }>).detail;
+      if (!d || typeof d.key !== 'string') return;
+      if (!this._accessibility.setByKey(d.key, d.value === true)) {
+        this._bridge.sendLog('accessibility:unknown-key', { key: d.key });
+      }
+    });
     window.addEventListener(WINDOW_EVENTS.trigger, () => this.triggerRandomAnomaly());
     window.addEventListener(WINDOW_EVENTS.notes, () => this.toggleFieldNotes());
     window.addEventListener(WINDOW_EVENTS.locale, (e) => {
@@ -1136,6 +1188,18 @@ class Engine {
     return this._i18n.getAvailableLocales().map((l) => ({ code: l.code, name: l.name }));
   }
   getAccessibility(): AccessibilitySystem { return this._accessibility; }
+
+  /**
+   * Hands the accessibility preferences to the two panels that have DOM to honour them.
+   *
+   * Done here rather than in each panel's constructor because neither panel can be given
+   * the system before the engine finishes building, and both are constructed before it
+   * does. They take it optionally, so a panel used on its own in a test still works.
+   */
+  private _attachAccessibilityToPanels(): void {
+    this._notes.useAccessibility(this._accessibility);
+    this._creator.useAccessibility(this._accessibility);
+  }
   getPerformance(): PerformanceSystem { return this._performance; }
   getWorlds(): WorldLoader { return this._worlds; }
   getWeather(): WeatherSystem { return this._weather; }
@@ -1204,6 +1268,19 @@ class Engine {
     worldName: string;
     fpsLimit: number;
     reducedMotion: boolean;
+    /**
+     * All five remaining accessibility preferences.
+     *
+     * Reported as a whole rather than one field per key, because the settings window
+     * renders whatever the engine says is true instead of tracking its own copies: five
+     * parallel fields would drift the first time a preference was changed from the tray
+     * or restored from the state file rather than from the settings window.
+     */
+    accessibility: AccessibilityConfig;
+    /** The interface text multiplier actually in force, for the settings readout. */
+    uiScale: number;
+    /** Whether the mixer is muted, which the mute preference drives. */
+    muted: boolean;
     paused: boolean;
     journalCount: number;
     secretsFound: number;
@@ -1248,6 +1325,9 @@ class Engine {
       worldName: this._worlds.getActive()?.name ?? 'Unknown',
       fpsLimit: this._fpsLimit,
       reducedMotion: this._accessibility.getConfig().reducedMotion,
+      accessibility: this._accessibility.getConfig(),
+      uiScale: this._accessibility.getUiScale(),
+      muted: this._audio.isMuted(),
       paused: this._paused,
       journalCount: this._journal.getEntries().length,
       secretsFound: this._secrets.getDiscovered().length,
@@ -1595,6 +1675,21 @@ class Engine {
     }
     if (s.reducedMotion !== null) {
       this._accessibility.setConfig({ reducedMotion: s.reducedMotion });
+    }
+    // The other five, each only when the user has actually chosen one. A null in the
+    // state file means "never asked", and overwriting the operating system's answer with
+    // a default on the first launch after an upgrade would silently undo a setting
+    // somebody made in Windows accessibility settings.
+    if (s.highContrast !== null) {
+      this._accessibility.setConfig({ highContrast: s.highContrast });
+    }
+    if (s.muteAll !== null) this._accessibility.setConfig({ muteAll: s.muteAll });
+    if (s.keyboardNavigation !== null) {
+      this._accessibility.setConfig({ keyboardNavigation: s.keyboardNavigation });
+    }
+    if (s.scalableUI !== null) this._accessibility.setConfig({ scalableUI: s.scalableUI });
+    if (s.focusVisible !== null) {
+      this._accessibility.setConfig({ focusVisible: s.focusVisible });
     }
     this._journal.restore(s.journal);
     this._secrets.restore(s.secrets);

@@ -374,6 +374,7 @@
                     <Button x:Name="NavLook"   Content="Appearance"     Style="{StaticResource NavButton}" Click="BtnAppearance_Click"/>
                     <Button x:Name="NavPerf"   Content="Performance"    Style="{StaticResource NavButton}" Click="BtnPerformance_Click"/>
                     <Button x:Name="NavEvents" Content="Events"         Style="{StaticResource NavButton}" Click="BtnEvents_Click"/>
+                    <Button x:Name="NavA11y"   Content="Accessibility"  Style="{StaticResource NavButton}" Click="BtnAccessibility_Click"/>
                     <Button x:Name="NavNotes"  Content="Field Notes"    Style="{StaticResource NavButton}" Click="BtnNotes_Click"/>
                     <Button x:Name="NavMon"    Content="Displays"       Style="{StaticResource NavButton}" Click="BtnMonitors_Click"/>
                     <Button x:Name="Net"       Content="Integrations"   Style="{StaticResource NavButton}" Click="BtnIntegrations_Click"/>
@@ -542,6 +543,57 @@
                         <TextBlock x:Name="MotionReducedNote" Style="{StaticResource Note}" Margin="0,6,0,0"
                                    Visibility="Collapsed"
                                    Text="Windows reduce-motion is on, so this is capped low regardless of the setting."/>
+                    </StackPanel>
+
+                    <!-- ======================= ACCESSIBILITY ======================= -->
+                    <!--
+                        Five controls that had nowhere to live.
+
+                        Each of these was a field on the renderer's accessibility
+                        config, set by nothing, read by nothing, and reported to
+                        nobody: high contrast, mute, keyboard navigation, enlarged
+                        interface text, and visible focus outlines. Two of them
+                        toggled a class name on the document root, in a project
+                        with no stylesheet, which is why they looked implemented
+                        and were not.
+
+                        The one preference that already had a control (Windows
+                        reduce-motion) stays on Appearance, next to the motion
+                        slider it caps, rather than being duplicated here. A
+                        checkbox that exists in two places and is remembered in one
+                        is a checkbox that will eventually disagree with itself.
+                    -->
+                    <StackPanel x:Name="AccessibilitySection" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource Heading}" Text="CONTRAST"/>
+                        <CheckBox x:Name="HighContrastBox" Content="Higher contrast"
+                                  Checked="HighContrast_Checked" Unchecked="HighContrast_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Removes the film grain, flattens the shading, and stops the panels from being translucent over whatever the wallpaper happens to be showing. A wallpaper behind glass has no guaranteed contrast ratio, so this is the setting that makes the text readable rather than merely dark."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="SOUND" Margin="0,28,0,10"/>
+                        <CheckBox x:Name="MuteAllBox" Content="Mute everything"
+                                  Checked="MuteAll_Checked" Unchecked="MuteAll_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Stops any track and silences the mixer. Nothing resumes by itself when this is unticked: a wallpaper that starts making noise with no visible cause is worse than one that stays quiet."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="KEYBOARD" Margin="0,28,0,10"/>
+                        <CheckBox x:Name="KeyboardNavBox" Content="Keyboard control of the panels"
+                                  Checked="KeyboardNav_Checked" Unchecked="KeyboardNav_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Escape closes whatever panel is open, and Tab stays inside it instead of walking off onto the desktop underneath. There is nothing to click here, so without this the field notes panel cannot be closed at all until its timer runs out."/>
+
+                        <CheckBox x:Name="FocusVisibleBox" Content="Always show the focus outline" Margin="0,16,0,0"
+                                  Checked="FocusVisible_Checked" Unchecked="FocusVisible_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Draws a focus ring on whatever the keyboard is on. The panels sit over a WebGL canvas showing an arbitrary world, so the ring is drawn explicitly rather than left to whatever the browser would pick against an unknown background."/>
+
+                        <TextBlock Style="{StaticResource Heading}" Text="TEXT SIZE" Margin="0,28,0,10"/>
+                        <CheckBox x:Name="ScalableUiBox" Content="Enlarge the interface text"
+                                  Checked="ScalableUi_Checked" Unchecked="ScalableUi_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Scales the field notes and creator panels by 25%. It is a multiplier rather than a fixed size, so it composes with the browser zoom you already use instead of overriding it."/>
+                        <TextBlock x:Name="UiScaleText" Style="{StaticResource Note}" Margin="0,6,0,0"
+                                   Text="Currently 1.00x."/>
                     </StackPanel>
 
                     <!-- ======================== PERFORMANCE ========================= -->

@@ -66,6 +66,13 @@ export const JA_LOCALE: Locale = {
     'notes.ofCount': '{n} 件中',
     'notes.seed': 'シード',
     'notes.unrecorded': '未記録。',
+    'notes.observations': '観測記録',
+    'notes.openQuestions': '未解決の問い',
+    'notes.sessions': 'セッション',
+    'notes.firstRecorded': '初記録: {date}。',
+    'notes.dismisses': '自動的に閉じるか、Esc キーを押してください。',
+
+    'common.close': '閉じる',
 
     'hint.observatory': 'ドームは閉ざされている。シャッターは長いあいだ動いていない。',
     'hint.radioTower': '放送は続いている。応える者はいない。',

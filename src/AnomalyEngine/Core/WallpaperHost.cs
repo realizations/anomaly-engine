@@ -596,6 +596,7 @@ public class WallpaperHost : IEngineBridge, IDisposable
         "pause",
         "resume",
         "reduced-motion",
+        "accessibility",
         "state",
     };
 
@@ -857,6 +858,28 @@ public class WallpaperHost : IEngineBridge, IDisposable
         var v = on ? "true" : "false";
         _ = ExecuteScriptSafe($"window.dispatchEvent(new CustomEvent('anomaly:reduced-motion', {{ detail: {{ on: {v} }} }}));");
         _logger.Info($"Reduced motion {(on ? "enabled" : "disabled")}.");
+    }
+
+    public void SetAccessibility(string key, bool enabled)
+    {
+        // Both halves serialised: the key is a string chosen by a settings control
+        // rather than a constant, and it is interpolated into a script string, so an
+        // unescaped quote in it would end the literal and produce a syntax error in
+        // the page instead of a rejected preference. The renderer drops a name it does
+        // not recognise and logs it, so a stale settings window costs a log line.
+        var name = System.Text.Json.JsonSerializer.Serialize(key ?? string.Empty);
+        var v = enabled ? "true" : "false";
+        _logger.Info($"Accessibility {key} {(enabled ? "enabled" : "disabled")}.");
+        _ = ExecuteScriptSafe(
+            $"window.dispatchEvent(new CustomEvent('anomaly:accessibility', {{ detail: {{ key: {name}, value: {v} }} }}));");
+    }
+
+    public async Task<bool> GetAccessibilityAsync(string key)
+    {
+        var name = System.Text.Json.JsonSerializer.Serialize(key ?? string.Empty);
+        var json = await EvaluateAsync(
+            $"window.__engine ? !!window.__engine.getAccessibility().getConfig()[{name}] : false");
+        return string.Equals(json?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
     }
 
     public void HandlePowerStateChange(PowerState state)
