@@ -43,12 +43,15 @@ steps.push(await run('host event wiring self-test', ['verify-host-events.mjs', '
 steps.push(await run('every host event reaches a listener', ['verify-host-events.mjs']));
 steps.push(await run('dead code self-test', ['verify-dead-code.mjs', '--selftest']));
 steps.push(await run('nothing unreachable ships', ['verify-dead-code.mjs']));
+steps.push(await run('wiring self-test', ['verify-wiring.mjs', '--selftest']));
+steps.push(await run('everything constructed is used', ['verify-wiring.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('seam check still catches full-width steps', ['verify-seam-check.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));
 steps.push(await run('visual baseline captures distinct directions', ['visual-baseline.mjs']));
 steps.push(await run('every story beat changes real pixels', ['story-beats.mjs']));
 steps.push(await run('weather reaches the renderer', ['weather-live.mjs']));
+steps.push(await run('debug overlay reports the running engine', ['debug-overlay-live.mjs']));
 steps.push(await run('per-monitor layouts', ['per-monitor.mjs']));
 steps.push(await run('per-display worlds', ['per-display-worlds.mjs']));
 steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));

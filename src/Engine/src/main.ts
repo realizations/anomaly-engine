@@ -366,7 +366,27 @@ class Engine {
     this._applyMotionPreference();
   }
 
+  /**
+   * Stops the engine and releases everything it holds.
+   *
+   * The distinction between `stop` and `dispose` was missing here, and it was missing
+   * everywhere: nothing ever called `dispose` on any of the systems this constructs, so
+   * `stop()` cleared six intervals and left every other timer, listener and DOM node
+   * alive. For a wallpaper that is invisible until the user toggles pause a few hundred
+   * times, at which point there are several hundred live intervals driving a scene that
+   * is supposed to be still.
+   *
+   * `stop` is now the reversible half -- it can be followed by `start` -- and `dispose`
+   * is the terminal one. `dispose` calls `stop` first, so a caller that only ever wants
+   * to stop does not have to remember which is which.
+   */
   stop(): void {
+    if (!this._running) {
+      // Still tear down the non-interval resources: a caller may be disposing after a
+      // failed start, where `_running` was never set.
+      this._releaseResources();
+      return;
+    }
     this._running = false;
     this._scheduler.stop();
     this._clock.stop();
@@ -374,6 +394,48 @@ class Engine {
     this._anomalies.stop();
     this._astronomy.stop();
     this._weather.stop();
+    this._particles.stop();
+    this._debug.toggle();
+  }
+
+  /** Terminal teardown. After this the engine cannot be restarted. */
+  dispose(): void {
+    this.stop();
+    this._releaseResources();
+  }
+
+  /**
+   * Releases the resources that survive a stop.
+   *
+   * Grouped rather than inlined so `stop` and `dispose` release exactly the same set.
+   * Two lists that drift apart is the bug this shape exists to prevent.
+   */
+  private _releaseResources(): void {
+    this._notes.dispose();
+    this._creator.dispose();
+    this._debug.dispose();
+    this._screenshot.dispose();
+    this._interaction.dispose();
+    this._secrets.dispose();
+    this._journal.dispose();
+    this._moments.dispose();
+    this._benchmark.dispose();
+    this._particles.dispose();
+    this._entities.dispose();
+    this._worlds.dispose();
+    this._weather.dispose();
+    this._astronomy.dispose();
+    this._anomalies.dispose();
+    this._audio.dispose();
+    this._media.dispose();
+    this._i18n.dispose();
+    this._accessibility.dispose();
+    this._performance.dispose();
+    this._state.dispose();
+    this._updater.dispose();
+    this._easterEggs.dispose();
+    this._network.dispose();
+    this._persistence?.dispose();
   }
 
   pause(): void {
@@ -438,7 +500,68 @@ class Engine {
       this._fps = this._frameCount;
       this._frameCount = 0;
       this._lastFpsTime = now;
+      this._pushDebugOverlay();
     }
+  }
+
+  /**
+   * Feeds the debug overlay.
+   *
+   * `DebugOverlay.update` was never called from anywhere, so the overlay opened and
+   * rendered its own hardcoded defaults -- `FPS: 0`, `WebView: unknown` -- and README.md
+   * advertised it as reporting frame time, memory and render scale. Every number the
+   * engine already computed is here; the overlay was simply not being told.
+   *
+   * Pushed once a second rather than once a frame: the overlay repaints on its own
+   * 100 ms timer, and building this object per frame to be thrown away sixty times a
+   * second would cost more than the thing being measured.
+   *
+   * Called even when the overlay is hidden, because `show` may be called at any moment
+   * and a panel that fills in over a second looks broken.
+   */
+  private _pushDebugOverlay(): void {
+    const w = this._lastWeather;
+    const sky = this._sky;
+    const eggs = this._easterEggs.getProgress();
+    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+
+    this._debug.update({
+      fps: this._fps,
+      frameTime: this._lastFrameTime,
+      memoryMB: mem ? mem.usedJSHeapSize / 1048576 : 0,
+      renderScale: this._renderer.getRenderScale(),
+      particleCount: this._particles.getParticleCount(),
+      activeScene: this._worlds.getActive()?.name ?? 'none',
+      worldTime: this._effectiveDate().toLocaleTimeString(),
+      eventQueueLength: this._scheduler.size,
+      activeEffects: (() => {
+        const beat = this._renderer.getActiveStoryBeat();
+        return beat ? [beat.beat.kind] : [];
+      })(),
+
+      weather: w?.condition ?? null,
+      temperature: w?.temperature ?? null,
+      windSpeed: w?.windSpeed ?? null,
+      humidity: w?.humidity ?? null,
+      regime: this._lastRegime,
+
+      sunAltitude: sky?.sunAltitude ?? null,
+      moonAltitude: sky?.moonAltitude ?? null,
+      moonPhase: sky?.moonPhase ?? null,
+      moonIllumination: sky?.moonIllumination ?? null,
+      isNight: sky?.isNight ?? null,
+
+      anomaliesSeen: this._anomalies.getDefinitions().length,
+      journalCount: this._journal.getEntries().length,
+      secretsFound: this._secrets.getDiscovered().length,
+      secretsTotal: this._secrets.getProgress().total,
+      eggsFound: eggs.discovered,
+      eggsTotal: eggs.total,
+
+      style: this._renderer.getStyle(),
+      locale: this._i18n.getLocale().code,
+      running: this._running,
+    });
   }
 
   private _setupEventHandlers(): void {
@@ -449,6 +572,12 @@ class Engine {
     // pressure, visibility and uvIndex, and produced a wind direction with `Math.sign`,
     // which turns 270 degrees into 1 and 90 degrees into 1 -- so the wind blew the same
     // way regardless of which way it was coming from. The model computes all of it.
+    // Subscribed once, outside `onUpdate`. Registering an error handler inside the
+    // update handler would add one per weather reading -- ten an hour, forever.
+    this._weather.onError((err) => {
+      this._bridge.sendLog('weather:error', { error: err.message });
+    });
+
     this._weather.onUpdate((w) => {
       this._applyWeather(w);
 

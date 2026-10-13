@@ -286,12 +286,42 @@ export class Persistence {
       this._flushTimer = null;
       this.save();
     };
+    // Held so `dispose` can remove them. Three anonymous listeners registered here were
+    // unremovable, which meant a `dispose` that existed could not actually stop the
+    // flush from firing against a disposed instance -- and a wallpaper that is paused
+    // and resumed repeatedly accumulates one set per cycle.
+    this._flush = flush;
+    this._onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
     window.addEventListener('pagehide', flush);
     window.addEventListener('beforeunload', flush);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') flush();
-    });
+    document.addEventListener('visibilitychange', this._onVisibility);
   }
+
+  /**
+   * Removes the flush listeners and cancels any pending write.
+   *
+   * Flushes on the way out: the whole point of the listeners is that state survives an
+   * abrupt exit, and a teardown is exactly such an exit.
+   */
+  dispose(): void {
+    if (this._flush) {
+      window.removeEventListener('pagehide', this._flush);
+      window.removeEventListener('beforeunload', this._flush);
+      if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
+      this._flush = null;
+      this._onVisibility = null;
+    }
+    if (this._flushTimer !== null) {
+      window.clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+      this.save();
+    }
+  }
+
+  private _flush: (() => void) | null = null;
+  private _onVisibility: (() => void) | null = null;
 
   save(): void {
     this._writeFallback(this._state);

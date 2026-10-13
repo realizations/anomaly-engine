@@ -66,6 +66,10 @@ jobs:
         run: |
           node tools/verify-dead-code.mjs --selftest
           node tools/verify-dead-code.mjs
+      - name: Wiring (self-test and repository)
+        run: |
+          node tools/verify-wiring.mjs --selftest
+          node tools/verify-wiring.mjs
 
   # The host and the end-to-end suite must run on Windows: the wallpaper host is
   # a WPF/WebView2 app, and the e2e suite loads the renderer over file://, which

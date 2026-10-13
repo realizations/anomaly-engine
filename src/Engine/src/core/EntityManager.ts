@@ -149,6 +149,18 @@ export class EntityManager {
     this._layers.clear();
   }
 
+  /**
+   * Terminal teardown.
+   *
+   * A separate name from `clear` because they answer different questions: `clear`
+   * empties the world and leaves the manager usable, `dispose` ends its life. The engine
+   * calls both -- `clear` when a world is replaced, `dispose` at shutdown -- and having
+   * only the first meant there was no way to say "this is finished".
+   */
+  dispose(): void {
+    this.clear();
+  }
+
   pause(): void {
     for (const entity of this._entities.values()) {
       entity.state = 'paused';

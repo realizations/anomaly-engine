@@ -41,6 +41,17 @@ export class EventScheduler {
     this._events = this._events.filter(e => e.id !== id);
   }
 
+  /**
+   * How many events are scheduled.
+   *
+   * For the debug overlay's queue line. A scheduler whose queue only grows is one that
+   * has started firing events it will never stop, and that is precisely the sort of
+   * thing an overlay exists to make visible.
+   */
+  get size(): number {
+    return this._events.length;
+  }
+
   private _tick(): void {
     const now = new Date();
     for (const evt of this._events) {
