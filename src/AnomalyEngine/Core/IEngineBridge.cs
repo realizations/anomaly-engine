@@ -58,6 +58,20 @@ public interface IEngineBridge
     void SetAccessibility(string key, bool enabled);
 
     /// <summary>
+    /// Hands the renderer the bytes of an audio track the user chose.
+    ///
+    /// Base64 rather than raw bytes because the channel is a JSON web message. The
+    /// host reads the file and the renderer decodes it, because the renderer cannot:
+    /// the page is served from <c>file://</c>, where Chromium blocks local
+    /// <c>fetch</c>, and the content security policy sets <c>connect-src 'none'</c> on
+    /// top of that.
+    /// </summary>
+    void SendMediaTrack(string path);
+
+    /// <summary>Turns audio reactivity on or off, and whether the track is audible.</summary>
+    void SetAudioReactivity(bool enabled, bool silentPlayback);
+
+    /// <summary>
     /// Whether the renderer currently holds this accessibility preference.
     ///
     /// Read back from the engine rather than tracked by this window: a preference can

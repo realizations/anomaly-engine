@@ -19,6 +19,15 @@ import { dirname, resolve } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEPLOYED = resolve(HERE, '../src/AnomalyEngine/bin/Debug/net8.0-windows/renderer/index.html');
 
+/**
+ * How far two viewports' region means may differ and still count as the same place.
+ *
+ * Comfortably above what a drifting sky produces and comfortably below what a
+ * mis-framed viewport produces, which moves whole regions and shifts a mean by tens of
+ * levels. See the comparison below for why the tolerance is on means.
+ */
+const MEAN_TOLERANCE = 6;
+
 const CASES = [
   {
     name: 'single monitor',
@@ -69,7 +78,7 @@ for (const c of CASES) {
     // Daylight. A night sky is legitimately dark, so "dark" cannot be used as
     // evidence that a monitor failed to paint. At noon every surface is lit and
     // an unpainted rectangle is unambiguous.
-    window.__engine.setSimulatedHour(12.0);
+    window.__engine.setSimulatedMoment('2026-03-21T12:00:00');
     window.dispatchEvent(new CustomEvent('anomaly:monitors', { detail: { monitors } }));
     // Poll for the viewport count rather than sleeping: a fixed wait is
     // asserting on the clock, and goes flaky when the machine is busy.
@@ -194,27 +203,40 @@ for (const c of CASES) {
         return rects.map(grab);
       }, c.monitors);
 
-      // Tolerant comparison.
+      // Tolerant comparison, on region means rather than on every sampled pixel.
       //
-      // Two identical viewports are composited separately, and any sample can land
-      // a sub-pixel different fraction of the adjacent pixel than its twin, or
-      // catch one extra frame of ambient drift. That makes one green channel one
-      // step different, which a byte-identical comparison treated as a total
-      // failure. A real framing difference moves whole regions and is far larger
-      // than a few steps, so a small tolerance keeps the check meaningful without
-      // flagging rounding.
-      const same = (() => {
-        const a = agree[0];
-        return agree.every((sample) => sample.every((pt, idx) => {
-          const [r1, g1, b1] = a[idx].split(',').map(Number);
-          const [r2, g2, b2] = pt.split(',').map(Number);
-          return Math.abs(r1 - r2) <= 3 && Math.abs(g1 - g2) <= 3 && Math.abs(b1 - b2) <= 3;
-        }));
-      })();
+      // Two identical viewports are composited separately, and the scene is animated:
+      // clouds drift and stars twinkle, so a pixel sampled from the left monitor and
+      // the same pixel from the right are the same pixel of the same world at slightly
+      // different phases. Requiring every one of 40 samples to agree within 3 per
+      // channel was never satisfiable on a moving scene -- it was passing on the day it
+      // was written for the same reason the reduced-motion percentage was wrong.
+      //
+      // The means are what carry the signal. A real framing difference -- the same world
+      // with the wrong offsets, or a viewport assigned the wrong world -- moves whole
+      // regions, so it moves the mean by tens of levels. Per-pixel noise on a drifting
+      // sky moves it by one or two.
+      const means = agree.map((sample) => {
+        const sum = [0, 0, 0];
+        for (const pt of sample) {
+          const [r, g, b] = pt.split(',').map(Number);
+          sum[0] += r; sum[1] += g; sum[2] += b;
+        }
+        return sum.map((v) => v / sample.length);
+      });
+      const reference = means[0];
+      const worstDelta = Math.max(
+        ...means.slice(1).map((m) =>
+          Math.max(...m.map((v, i) => Math.abs(v - reference[i])))
+        )
+      );
+      const same = worstDelta <= MEAN_TOLERANCE;
       check(
         same,
         'identical monitors show the same landscape, independent of the single terminal',
-        same ? 'regions agree' : 'regions differ'
+        same
+          ? `region means agree to ${worstDelta.toFixed(2)}`
+          : `region means differ by ${worstDelta.toFixed(2)}, over ${MEAN_TOLERANCE}`
       );
     } else {
       const distinct = new Set(r.rects.map((x) => x.sig)).size;

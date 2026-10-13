@@ -39,6 +39,12 @@ export interface PersistedState {
   keyboardNavigation: boolean | null;
   scalableUI: boolean | null;
   focusVisible: boolean | null;
+  /** Whether the scene responds to a local audio track. */
+  audioReactive: boolean | null;
+  /** Whether that track is analysed without being played. */
+  audioSilent: boolean | null;
+  /** The last track chosen, kept so it can be reloaded on the next launch. */
+  audioTrackPath: string | null;
   /**
    * How much of the scene moves, 0..1.
    *
@@ -119,6 +125,9 @@ export function emptyState(): PersistedState {
     keyboardNavigation: null,
     scalableUI: null,
     focusVisible: null,
+    audioReactive: null,
+    audioSilent: null,
+    audioTrackPath: null,
     motionIntensity: null,
     totalSessions: 0,
     firstRun: null,
@@ -153,6 +162,9 @@ export function reconcile(raw: unknown): PersistedState {
     keyboardNavigation: bool(s.keyboardNavigation),
     scalableUI: bool(s.scalableUI),
     focusVisible: bool(s.focusVisible),
+    audioReactive: bool(s.audioReactive),
+    audioSilent: bool(s.audioSilent),
+    audioTrackPath: str(s.audioTrackPath),
     motionIntensity: s.motionIntensity === null || s.motionIntensity === undefined
       ? null
       : clamp01(Number(s.motionIntensity)),

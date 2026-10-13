@@ -113,6 +113,7 @@ so than ship a feature table that overstates the project.
 | **Live art-style switching** | Three renderer treatments from the tray or `Ctrl+Alt+S`, with an active-style checkmark. |
 | **Global hotkeys** | `Ctrl+Alt+W/S/P/F/D` — cycle world, cycle style, pause, field notes, debug. Registered with Windows, because the wallpaper never holds focus. |
 | **Localisation** | Spanish, German and Japanese. The system language is detected on first run; Settings → Integrations overrides it. The field-notes panel, the creator panel and the hover hints are translated. |
+| **Audio reactivity** | Settings → Integrations picks a local audio file. The engine finds its transients offline and pulses the night sky on them. Never captures what is playing on the system. Off by default. |
 | **Reduced motion** | Honours the OS `prefers-reduced-motion` preference by scaling ambient animation to 10%, and caps the motion slider to the same ceiling. |
 | **Settings window** | Live readouts from the renderer and working controls for world, style, frame rate, quality and reduced motion. Also opens with `--settings`. |
 | **Fullscreen passthrough** | Yields to fullscreen apps, excludes shell and `WorkerW` windows, and a manual pause survives a fullscreen app closing. |
@@ -125,7 +126,7 @@ so than ship a feature table that overstates the project.
 |---------|----------------|
 | **ARG event sources** | GitHub, RSS and remote event adapters are implemented but intentionally unconfigured and off by default. They need endpoint URLs, payload validation and rate limits — and the page's CSP sets `connect-src 'none'`, so a `fetch` from the renderer is blocked before it starts. All three are listed in `tools/verify-dead-code.mjs`, so the gate fails if one is wired up without its exemption being removed. |
 | **World interaction** | Hover, click and triple-click work, and two of the six zones lead to an easter egg. The Konami code listens for `keydown` on a window the host never focuses, so it only fires under `npm run dev`. |
-| **Audio reactivity** | The system exists; desktop audio capture does not, so it is inert. |
+| **Desktop audio capture** | The engine reacts to an audio file you choose, and never to what is playing on the system. Capturing desktop audio needs a loopback device and a permission granted through a picker, and a wallpaper is the last thing that should be asking for either. `MediaReactivitySystem` has no capture path at all. |
 | **Distribution** | No installer, no code signing, no auto-update. |
 
 ## Language
@@ -284,10 +285,43 @@ dialog: it takes focus when it opens, it is scrollable and selectable, and it ha
 button as well as Escape. It was previously `pointer-events: none` over `overflow-y: auto` —
 a scrollbar that could not be scrolled, with no way to close it before its 24-second timer.
 
-Each preference is read back from the engine when the window opens rather than remembered by
-the window, because a preference can also be restored from the state file or changed from the
-tray. `tools/verify-accessibility.mjs` walks each one from the checkbox to a real effect and
+Each preference is read back from the engine when the window opens rather than remembered by the
+window, because a preference can also be restored from the state file or changed from the tray.
+`tools/verify-accessibility.mjs` walks each one from the checkbox to a real effect and
 fails if any link is missing.
+
+### Audio reactivity
+
+Settings → Integrations picks an audio file on this machine. The engine decodes it locally,
+finds its transients, and pulses the night sky on them.
+
+It is **not** desktop audio capture. Capturing what is playing on the system needs a loopback
+device and a permission granted through a picker, and a wallpaper is the last thing that
+should be asking for either. A file is explicit, works offline, is never transmitted, and
+carries no asset-licence question.
+
+The detection is not a lookup table:
+
+- short-time energy in three bands, so a kick and a hi-hat are separable;
+- a Hann window, without which a sustained note ripples as the analysis window slides and
+  produces a dozen "beats" in three seconds of a held chord;
+- normalised against the loudest moment in the whole track rather than per band, because
+  per-band normalisation turns the spectral leakage in an empty band into full-scale signal;
+- thresholded against a *ratio* of the running local median, not a multiple of it — a
+  product threshold stays near zero when the median does, and then any noise passes it;
+- against a three-frame baseline rather than the single previous frame;
+- with an absolute silence gate, because silence has a median of zero and therefore no
+  relative threshold at all.
+
+`src/Engine/tests/OnsetDetector.test.ts` asserts all of that against a synthesised click
+track, including that 90, 120 and 140bpm are recovered. `tools/audio-reactive-live.mjs` then
+proves the whole path on the deployed build: it generates a 120bpm track, hands it over the
+same channel the host uses, and checks the transients are found, the transport starts, and
+switching it off stops it.
+
+The response is deliberately small. A loud passage lifts the star field slightly; a beat
+flares it. It is not a whole-frame brightness change, because a sky that changes on every
+beat is a strobe — and reduced motion scales the response to a quarter for the same reason.
 
 ### Interactions
 
@@ -407,7 +441,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               480 unit tests
+    tests/               518 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -566,7 +600,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs thirty-seven steps in order. Thirteen of them prove a gate still bites, the rest exercise the
+Runs thirty-eight steps in order. Fourteen of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -601,6 +635,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/story-beats.mjs` | Proves all seven story beats measurably change the pixels they are supposed to, each measured in the region its effect lives in |
 | `tools/weather-live.mjs` | Walks the whole weather path against the deployed build — model, system, renderer — and proves the reading in the status document is the one being drawn |
 | `tools/debug-overlay-live.mjs` | Toggles the overlay through the host's own route and proves it reports live fps, frame time, weather, moon phase and discovery, rather than its defaults |
+| `tools/audio-reactive-live.mjs` | Generates a 120bpm click track, hands it to the deployed engine over the same channel the host uses, and proves the transients are found, the transport starts, and switching it off actually stops it |
 | `tools/visual-snapshot.mjs` | Deterministic frames for proving a refactor changed no pixels; `--compare` diffs two capture directories |
 | `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
@@ -622,7 +657,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 480 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 518 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

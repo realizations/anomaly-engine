@@ -186,6 +186,26 @@ const DEBUG_RISO_DUMP = false;
 const BOLT_STEP_MAX = 0.055;
 const BOLT_ATTACK_FRAMES = 18;
 
+/**
+ * The beat impulse's decay, as a function.
+ *
+ * Extracted so it can be asserted without a canvas. The rule is arithmetic and was
+ * previously buried in `setAudioReactivity`, where the only way to test it was to
+ * construct the renderer with a 2d context stub large enough to get past its paper
+ * texture builder -- which is a fake that grows every time the constructor does.
+ *
+ * Two properties matter and both are easy to get wrong:
+ *
+ *   - it is a *peak* and not an accumulation. Five beats in quick succession leave it
+ *     at one, not at five.
+ *   - it decays, so a beat is a flare and not a permanently brighter sky. A stuck
+ *     impulse is worse than no response at all, because the user has no way back.
+ */
+export function nextAudioImpulse(previous: number, impulse: number): number {
+  const peak = clamp01(impulse);
+  return Math.max(previous * 0.82, peak);
+}
+
 export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
   private _crt: CrtTerminal | null = null;
@@ -1601,6 +1621,28 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     g.restore();
   }
 
+  /**
+   * Feeds the audio track's level and beat into the sky.
+   *
+   * Two values rather than a single "energy" because they are different things and a
+   * single number forces a choice between them. The level is a slow follower that
+   * brightens the whole field, so a loud passage lifts the sky. The impulse is a
+   * decaying spike on each detected transient, so a beat flares individual stars
+   * rather than lifting everything.
+   *
+   * Stars rather than the whole frame because the sky is the one surface that is
+   * already doing something rhythmic, because it is only bright at night, and because
+   * a whole-frame brightness change on every beat is a strobe -- which is worse than
+   * no response at all, and worse still for someone who turned reduced motion on.
+   */
+  setAudioReactivity(level: number, impulse: number): void {
+    this._audioLevel = clamp01(level);
+    this._audioImpulse = nextAudioImpulse(this._audioImpulse, impulse);
+  }
+
+  private _audioLevel = 0;
+  private _audioImpulse = 0;
+
   private _drawStars(grade: SkyGrade): void {
     if (grade.starAlpha <= 0.01) return;
     const g = this._ctx;
@@ -1610,11 +1652,19 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     const a = grade.starAlpha * dim;
     g.save();
     g.globalCompositeOperation = 'lighter';
+
+    // The audio lift. `lighter` compositing is already additive, so brightening the
+    // source here is what makes a loud passage read as more stars rather than as a
+    // filter over the same ones. Capped, because `lighter` has no ceiling and a level
+    // that ran to 1.0 with a full impulse on top would clip the brightest stars to
+    // white discs.
+    const lift = 1 + this._audioLevel * 0.55 + this._audioImpulse * 0.8;
+
     for (const s of this._stars) {
       const px = s.x * this._w + this._mouse.px * 5;
       const py = s.y * this._h + this._mouse.py * 3;
       const tw = 1 - TWINKLE.amplitude + this._amp('twinkle', TWINKLE.amplitude) * (0.5 + 0.5 * Math.sin(this._sec * this._rate('twinkle', TWINKLE.rate) + s.tw));
-      const alpha = a * (0.16 + s.mag * 0.84) * tw;
+      const alpha = Math.min(1, a * (0.16 + s.mag * 0.84) * tw * lift);
       if (alpha < 0.02) continue;
 
       // Core and halo are drawn at different radii. A single soft disc per star

@@ -116,6 +116,17 @@ internal sealed class MarshallingStubBridge : IEngineBridge
         return Task.FromResult(false);
     }
 
+    // The media channel. Recorded for the same reason the accessibility one is: a stub
+    // that swallows them means the integrations page renders correctly whether or not
+    // it is wired to anything.
+    public List<string> SentTracks { get; } = new List<string>();
+    public List<(bool Enabled, bool Silent)> AudioReactivityCalls { get; } = new List<(bool, bool)>();
+
+    public void SendMediaTrack(string path) => SentTracks.Add(path);
+
+    public void SetAudioReactivity(bool enabled, bool silentPlayback)
+        => AudioReactivityCalls.Add((enabled, silentPlayback));
+
     // A fixed four-language list, which is what the renderer actually reports. The
     // settings harness renders the language section off-screen, so an empty list would
     // render a settings page with no control on it and still pass the page audit.

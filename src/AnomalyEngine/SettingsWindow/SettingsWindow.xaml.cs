@@ -80,6 +80,7 @@ public partial class SettingsWindow : Window
         {
             await ApplyInitialSelection();
             await LoadLocalesAsync();
+            await LoadMediaAsync();
             _poll.Tick += (_, _) => _ = RefreshAsync();
             _poll.Start();
         };
@@ -767,6 +768,121 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         if (_loading || _host is null) return;
         _host.SetAccessibility(key, enabled);
         StatusText.Text = $"{DescribePreference(key)} {(enabled ? "on" : "off")}.";
+    }
+
+    /* --------------------------- audio reactivity --------------------------- */
+
+    private async Task LoadMediaAsync()
+    {
+        if (_host is null || _closing) return;
+        // Read from the status document rather than evaluating the media system
+        // directly: it already carries everything the panel shows, and a second
+        // evaluate is a second thing that can disagree.
+        var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getStatus().media)");
+        if (_closing || string.IsNullOrWhiteSpace(json) || json == "null") return;
+
+        JsonElement state;
+        try
+        {
+            state = JsonDocument.Parse(json).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        _loading = true;
+        try
+        {
+            if (state.ValueKind != JsonValueKind.Object) return;
+
+            var title = state.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+            TrackPathText.Text = title.Length > 0 ? title : "No track chosen.";
+
+            var beats = state.TryGetProperty("beatCount", out var b) && b.TryGetInt32(out var n) ? n : 0;
+            MediaBeatText.Text = beats > 0
+                ? $"{beats} transients found."
+                : beats == 0 && title.Length > 0
+                    ? "No transients found. Ambient music often has none; that is not an error."
+                    : "";
+
+            // Reflected from the engine rather than remembered by the window: the
+            // preference can also be restored from the state file on launch, and a
+            // checkbox that keeps its own copy would show the wrong answer.
+            AudioReactiveBox.IsChecked =
+                state.TryGetProperty("playing", out var p) && p.ValueKind == JsonValueKind.True;
+
+            // The times themselves, read from the status document rather than through a
+            // second evaluate: the document already carries them, and a panel that
+            // special-cases one field is a panel that will forget to update it.
+            var media = state.TryGetProperty("media", out var m) ? m : default;
+            if (media.ValueKind == JsonValueKind.Object &&
+                media.TryGetProperty("firstBeats", out var fb) &&
+                fb.ValueKind == JsonValueKind.Array && fb.GetArrayLength() > 0)
+            {
+                var times = fb.EnumerateArray()
+                    .Where(e => e.TryGetDouble(out _))
+                    .Select(e => $"{e.GetDouble():0.00}s");
+                TrackPathText.Text = $"{TrackPathText.Text}  ·  first transients at {string.Join(", ", times)}";
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async void PickTrack_Click(object sender, RoutedEventArgs e)
+    {
+        if (_host is null) return;
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose an audio track",
+            // Anything Chromium can decode. The renderer does the decoding and reports
+            // a failure through the log, so filtering here is a convenience rather than
+            // a contract -- a format that fails is reported, not silently ignored.
+            Filter = "Audio files|*.mp3;*.wav;*.ogg;*.m4a;*.flac;*.aac|All files|*.*",
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        TrackPathText.Text = System.IO.Path.GetFileName(dialog.FileName);
+        StatusText.Text = "Reading the track...";
+
+        _host.SendMediaTrack(dialog.FileName);
+        await _host.EvaluateAsync(
+            $"window.__engine._persistence.update({{ audioTrackPath: {System.Text.Json.JsonSerializer.Serialize(dialog.FileName)} }})")
+            .ConfigureAwait(true);
+
+        // The beat count is filled in by the decoder a moment later, so this reads the
+        // state once, briefly, rather than showing zero and never correcting it.
+        await Task.Delay(1200);
+        await LoadMediaAsync();
+    }
+
+    private void AudioReactive_Checked(object sender, RoutedEventArgs e) => PushAudioReactivity();
+    private void AudioReactive_Unchecked(object sender, RoutedEventArgs e) => PushAudioReactivity();
+    private void AudioSilent_Checked(object sender, RoutedEventArgs e) => PushAudioReactivity();
+    private void AudioSilent_Unchecked(object sender, RoutedEventArgs e) => PushAudioReactivity();
+
+    /// <summary>
+    /// Sends both audio options together.
+    ///
+    /// They are always changed as a pair -- the child box is meaningless without the
+    /// parent -- and sending them separately would leave a moment where the engine
+    /// believes the other thing.
+    /// </summary>
+    private void PushAudioReactivity()
+    {
+        if (_loading || _host is null) return;
+        var enabled = AudioReactiveBox.IsChecked == true;
+        _host.SetAudioReactivity(enabled, AudioSilentBox.IsChecked == true);
+        StatusText.Text = enabled
+            ? AudioSilentBox.IsChecked == true
+                ? "Audio reactivity on, analysed silently."
+                : "Audio reactivity on."
+            : "Audio reactivity off.";
     }
 
     /* ------------------------------- readouts ------------------------------- */

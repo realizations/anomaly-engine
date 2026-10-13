@@ -721,6 +721,40 @@
                         <TextBlock Style="{StaticResource Note}" Margin="0,0,0,10"
                                    Text="The desktop follows your system language on first run. This overrides it. The field notes, the creator panel and the hover hints are translated; the world names and the anomaly names are not, because they are the fiction rather than the interface around it."/>
                         <ComboBox x:Name="LanguageBox" SelectionChanged="LanguageBox_SelectionChanged" HorizontalAlignment="Left" MinWidth="200"/>
+
+                        <!--
+                            Audio reactivity.
+
+                            The engine reacts to a file on this machine, and never to
+                            what is playing on the system. Capturing desktop audio
+                            needs a loopback device and a permission granted through
+                            a picker, and a wallpaper is the last thing that should be
+                            asking for either. A file is explicit, works offline, and
+                            carries no licence question, which is why this is here
+                            rather than a microphone permission prompt.
+
+                            The analysis is real: transients are found per band against
+                            a local median, so a held note does not produce a beat
+                            train and a quiet passage before a loud one is still heard.
+                            The engine tests assert that against a synthesised click
+                            track.
+                        -->
+                        <TextBlock Style="{StaticResource Heading}" Text="AUDIO REACTIVITY" Margin="0,28,0,10"/>
+                        <CheckBox x:Name="AudioReactiveBox" Content="Let the sky respond to an audio track"
+                                  Checked="AudioReactive_Checked" Unchecked="AudioReactive_Unchecked"/>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,10,0,0"
+                                   Text="Off by default. The file is read locally and never leaves the machine."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="PickTrackButton" Content="Choose a track..." Padding="14,6"
+                                    Click="PickTrack_Click" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="TrackPathText" Margin="12,0,0,0" VerticalAlignment="Center"
+                                       Style="{StaticResource Note}" Text="No track chosen."/>
+                        </StackPanel>
+                        <CheckBox x:Name="AudioSilentBox" Content="Analyse it without playing it" Margin="0,14,0,0"
+                                  Checked="AudioSilent_Checked" Unchecked="AudioSilent_Unchecked"/>
+                        <TextBlock x:Name="MediaBeatText" Style="{StaticResource Note}" Margin="0,6,0,0" Text=""/>
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Muting from the Accessibility page silences the track immediately. Reduced motion keeps the response but drops it to a quarter, because a sky that flares on every beat is a strobe and strobes are the one thing on this surface that is genuinely dangerous for some people."/>
                     </StackPanel>
 
                     <!-- ============================= ABOUT ============================= -->

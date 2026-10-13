@@ -465,6 +465,16 @@ public class WallpaperHost : IEngineBridge, IDisposable
                 case "ready":
                     _logger.Debug("Renderer signalled ready.");
                     break;
+                case "media:request-track":
+                    // Asked for on launch when audio reactivity was left on, so the
+                    // track is reloaded without the user picking it again.
+                    if (root.TryGetProperty("payload", out var mp) &&
+                        mp.TryGetProperty("path", out var pathEl) &&
+                        pathEl.ValueKind == JsonValueKind.String)
+                    {
+                        SendMediaTrack(pathEl.GetString() ?? string.Empty);
+                    }
+                    break;
                 default:
                     _logger.Debug($"Web message: {type}");
                     break;
@@ -701,6 +711,8 @@ public class WallpaperHost : IEngineBridge, IDisposable
         "resume",
         "reduced-motion",
         "accessibility",
+        "audio-reactivity",
+        "media-track",
         "state",
     };
 
@@ -984,6 +996,58 @@ public class WallpaperHost : IEngineBridge, IDisposable
         var json = await EvaluateAsync(
             $"window.__engine ? !!window.__engine.getAccessibility().getConfig()[{name}] : false");
         return string.Equals(json?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Ceiling on an audio track. See Engine.MAX_TRACK_BYTES on the other side: the
+    /// transfer is base64 over a JSON message, so both ends bound it and they bound it
+    /// to the same number.
+    /// </summary>
+    public const int MaxTrackBytes = 12 * 1024 * 1024;
+
+    public void SendMediaTrack(string path)
+    {
+        byte[] bytes;
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                _logger.Warn($"Media track not found: {path}");
+                return;
+            }
+            if (info.Length > MaxTrackBytes)
+            {
+                _logger.Warn($"Media track is {info.Length / (1024 * 1024)}MB, over the " +
+                             $"{MaxTrackBytes / (1024 * 1024)}MB limit: {info.Name}");
+                return;
+            }
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Could not read the media track: {ex.Message}");
+            return;
+        }
+
+        var title = System.Text.Json.JsonSerializer.Serialize(Path.GetFileName(path));
+        var payload = Convert.ToBase64String(bytes);
+        _logger.Info($"Media track: {Path.GetFileName(path)} ({bytes.Length / 1024}KB).");
+        _ = ExecuteScriptSafe(
+            $"window.dispatchEvent(new CustomEvent('anomaly:media-track', " +
+            $"{{ detail: {{ base64: '{payload}', title: {title} }} }}));");
+    }
+
+    public void SetAudioReactivity(bool enabled, bool silentPlayback)
+    {
+        // One event rather than two calls into the renderer: the pair is always set
+        // together by the settings checkbox and its child, and two events would allow a
+        // state where the child says one thing and the parent another.
+        var detail = $"{{ enabled: {(enabled ? "true" : "false")}, silentPlayback: {(silentPlayback ? "true" : "false")} }}";
+        _logger.Info($"Audio reactivity {(enabled ? "enabled" : "disabled")}" +
+                     (enabled ? (silentPlayback ? " (silent)" : " (audible)") : "") + ".");
+        _ = ExecuteScriptSafe(
+            $"window.dispatchEvent(new CustomEvent('anomaly:audio-reactivity', {{ detail: {detail} }}));");
     }
 
     public void HandlePowerStateChange(PowerState state)

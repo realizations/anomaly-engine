@@ -65,7 +65,11 @@ async function measure(browser, style) {
   await page.evaluate((s) => {
     window.__engine.setWorld('the-town-that-wasnt-there');
     window.__engine.setStyle(s);
-    window.__engine.setSimulatedHour(16.8);
+    // The whole moment, not just the hour. Pinning only the hour leaves the date real,
+    // and the date drives season, moon phase and the weather seed -- so what this
+    // renders moved with the calendar and the thresholds below were calibrated on one
+    // arbitrary day.
+    window.__engine.setSimulatedMoment('2026-03-21T16:48:00');
   }, style);
   // The separation is cached, so let it print rather than sampling a warm-up frame.
   await page.waitForTimeout(2500);
@@ -135,14 +139,25 @@ for (const bar of BARS) {
 // that only asserts riso is textured cannot tell a halftone from a scene that is
 // simply noisy, and would keep passing if the soft styles ever picked up the same
 // texture.
+//
+// Compared against riso's own measurement from this run rather than against the bars.
+//
+// The bars were originally riso's numbers on one day, transcribed by hand, and the
+// measurement is a maximum over many frames -- the most variable statistic there is.
+// Pinning the clock stopped the drift over the calendar, but the bars still encoded
+// one arbitrary run: on an unmodified tree they already failed, and after pinning they
+// failed differently. A negative assertion about a *relationship* between two styles
+// should use that relationship, measured in the same run, and not a copy of one of its
+// endpoints from another day.
 for (const [style, m] of [['painterly', painterly], ['flat', flat]]) {
-  const over = BARS.filter((bar) => m[bar.region] >= bar.threshold);
+  const atOrAbove = BARS.filter((bar) => m[bar.region] >= riso[bar.region]);
   check(
-    over.length === 0,
+    atOrAbove.length === 0,
     `${style} is not mistaken for a print`,
-    over.length
-      ? `${over.map((b) => `${b.region} ${m[b.region]}`).join(', ')} cleared a riso bar`
-      : `sky ${m.sky}, ridge ${m.ridge}, forest ${m.forest}, range ${m.forestRange} -- all below their bars`
+    atOrAbove.length
+      ? `${atOrAbove.map((b) => `${b.region} ${m[b.region]} against riso ${riso[b.region]}`).join(', ')} reached the print`
+      : `sky ${m.sky}/${riso.sky}, ridge ${m.ridge}/${riso.ridge}, ` +
+        `forest ${m.forest}/${riso.forest}, range ${m.forestRange}/${riso.forestRange} -- all below riso`
   );
 }
 

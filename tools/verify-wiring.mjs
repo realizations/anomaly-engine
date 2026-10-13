@@ -141,11 +141,11 @@ export const EXEMPT = {
   },
 AudioSystem: {
     registerTrack: 'No audio ships. This project generates everything it draws, and an audio licence is a different proposition from a font licence.',
-    play: 'Same.',
-    stopAll: 'Reached from mute(), which is inside this file rather than from main.ts, so a name-based scan cannot see it.',
-    setVolume: 'Same.',
+    setVolume: 'Same. No track is ever registered, so there is no id to set a volume for.',
     setMasterVolume: 'Same.',
-    onTrackEvent: 'Same.',
+    play: 'Same. Nothing registers a track, so there is no id to play. The one internal `audio.play()` is on an HTMLAudioElement in this file and is not a call to this method.',
+    stopAll: 'Reached from mute(), which is in this file rather than in main.ts, so a name-based scan cannot see it. The mute preference does reach mute().',
+    onTrackEvent: 'Same: no track event is ever emitted.',
   },
   UpdateSystem: {
     onUpdateAvailable: 'No auto-updater is shipped, deliberately: an app that phones home is not what this is. README.md says so under Distribution. onError is not listed because WeatherSystem and RemoteEventSource both declare one and the gate counts by name -- which is a limitation of a name-based check, not a claim that this one is called.',
@@ -168,10 +168,12 @@ AudioSystem: {
     onCapture: 'The creator panel reports capture through the return value, not a subscription.',
   },
   DebugOverlay: {
-    isVisible: 'The overlay is toggled and never queried. Settings reflects the toggle state itself.',
+isVisible: 'The overlay is toggled and never queried. Settings reflects the toggle state itself.',
+    hide: 'Called from toggle() and dispose(), both in this file. A name-based scan cannot see a call made by the class that declares the method.',
   },
   FieldNotes: {
-    isVisible: 'The panel is toggled and never asked.',
+    isVisible: 'Same: the panel is toggled and never asked.',
+    hide: 'Called from toggle(), from the auto-hide path and from dispose(), all in this file.',
   },
   CreatorMode: {
     disable: 'Creator mode is enabled from the tray and stays enabled for the session.',
@@ -267,12 +269,31 @@ export function identifierCounts(sources) {
   const byFile = new Map();
   for (const { file, text } of sources) {
     const counts = new Map();
-    for (const m of text.matchAll(/\b[A-Za-z_]\w*\b/g)) {
+    // Comments are stripped before counting.
+    //
+    // A word in a comment is not a call, and letting prose satisfy a dead-code check
+    // is the worst kind of false negative: the gate reports "used" for something no code
+    // touches, and the reader has no way to know it only matched a sentence. It was
+    // found by a doc comment that happened to contain the word "play".
+    for (const m of stripComments(text).matchAll(/\b[A-Za-z_]\w*\b/g)) {
       counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
     }
     byFile.set(file, counts);
   }
   return byFile;
+}
+
+/**
+ * Removes block and line comments.
+ *
+ * Not a parser, and deliberately: this only has to stop a comment being counted as an
+ * identifier, and a real parse of every source file would be a larger thing to get
+ * wrong than the thing it is protecting. String literals are left alone, because
+ * `postMessage` inside a string is rare enough that handling it would cost more in
+ * false negatives than it would fix.
+ */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
 }
 
 /**
@@ -586,6 +607,43 @@ function selftest(mainText, sources, SRC) {
     true,
     declaredMethods(readFileSync(join(SRC, 'systems', 'EasterEggSystem.ts'), 'utf8'), 'EasterEggSystem')
       .includes('trigger')
+  );
+
+  // The comment-stripping fix was found because a doc comment happened to contain the
+  // word "play" and satisfied a dead-method check. Without a case for it, the same class
+  // of false negative comes back the next time someone writes prose near a method name.
+  //
+  // Built on a real file rather than a fixture: the method parser is deliberately
+  // narrow, and a hand-written one-line class is not something it has to accept, so a
+  // fixture would have been testing the fixture.
+  const eggText = readFileSync(join(SRC, 'systems', 'EasterEggSystem.ts'), 'utf8');
+  at('the fixture really does declare the method under test', true, declaredMethods(eggText, 'EasterEggSystem').includes('trigger'));
+
+  const proseOnly = [
+    { file: join(SRC, 'systems', 'EasterEggSystem.ts'), text: eggText },
+    {
+      file: 'Notes.ts',
+      // The method named, twice, and both times only in prose.
+      text: '// the trigger path is documented here\n/* trigger, again */\nexport const x = 1;\n',
+    },
+  ];
+  at(
+    'a method named only in a comment counts as uncalled',
+    true,
+    wiringProblems({ mainText, sources: proseOnly, exempt: {} }).some((p) => p.includes('trigger'))
+  );
+
+  const realCall = [
+    { file: join(SRC, 'systems', 'EasterEggSystem.ts'), text: eggText },
+    {
+      file: 'Caller.ts',
+      text: 'export function triggerIt(e: EasterEggSystem) {\n  e.trigger("x", 1);\n}\n',
+    },
+  ];
+  at(
+    'the same method named in real code counts as called',
+    false,
+    wiringProblems({ mainText, sources: realCall, exempt: {} }).some((p) => p.includes('trigger'))
   );
 
   let failed = 0;

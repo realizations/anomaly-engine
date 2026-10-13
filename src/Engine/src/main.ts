@@ -59,6 +59,14 @@ interface MonitorReport {
   primary?: boolean;
 }
 
+/** What the host sends back for an audio track request. */
+interface MediaTrackPayload {
+  /** The samples, base64 encoded, in whatever container the decoder understands. */
+  base64: string;
+  /** File name, for the panel and the log. */
+  title: string;
+}
+
 class Engine {
   private _bus: EventBus;
   private _scheduler: EventScheduler;
@@ -405,6 +413,12 @@ class Engine {
   private _applyMutePreference(): void {
     if (this._accessibility.shouldMuteAll()) this._audio.mute();
     else this._audio.unmute();
+
+    // The audio-reactivity track is the one thing in the engine that makes sound of its
+    // own, so it has to follow the mute preference as well. The mixer route does not
+    // cover it: that is the engine's own generated tracks, and this is a file the user
+    // supplied.
+    this._media.setMuted(this._accessibility.shouldMuteAll());
   }
 
   /**
@@ -521,6 +535,8 @@ class Engine {
       // tools/story-beats.mjs. A second, unreachable mechanism for the same effect is
       // worse than one that works.
       this._renderer.render(this._simDate ?? new Date());
+      this._updateMedia(frameStart);
+      this._requestSavedTrack(frameStart);
       this._particles.update(16);
       this._particles.render(this._canvas.getContext('2d')!, this._canvas.width, this._canvas.height);
       this._entities.update(16);
@@ -532,6 +548,50 @@ class Engine {
     this._performance.update(frameTime);
 
     requestAnimationFrame(() => this._loop());
+  }
+
+  /**
+   * Advances the audio transport and pushes the response into the renderer.
+   *
+   * Called from the render loop with the frame's own timestamp, and only while
+   * unpaused. A system on its own interval would keep time through a pause, so the
+   * first frame after resuming would fire every beat that had accumulated -- a burst of
+   * pulses out of nowhere on a scene the user had just asked to stop moving.
+   */
+  private _updateMedia(nowMs: number): void {
+    const media = this._media;
+    media.update(nowMs);
+
+    const state = media.getState();
+    const config = media.getConfig();
+    if (!config.enabled) return;
+
+    // Reduced motion scales the response the same way it scales everything else: the
+    // beat still registers, it just does not flare. A strobing sky is the one thing
+    // on this surface that is genuinely dangerous for some people.
+    const scale = this._accessibility.shouldReduceMotion() ? 0.25 : 1;
+    const impulse = state.beatDetected ? scale : 0;
+    this._renderer.setAudioReactivity(
+      config.reactToLevel ? state.level * scale : 0,
+      config.reactToBeat ? impulse : 0
+    );
+  }
+
+  private _reloadTrackWhen = 0;
+
+  /**
+   * Asks the host for the saved track, once the engine has settled.
+   *
+   * Deferred rather than immediate because the state document arrives on the very first
+   * page load, while the host may still be finishing its own start-up. Asking then
+   * races the WebView being ready to receive the answer.
+   */
+  private _requestSavedTrack(nowMs: number): void {
+    if (this._reloadTrackWhen === 0 || nowMs < this._reloadTrackWhen) return;
+    const s = this._persistence.get();
+    this._reloadTrackWhen = 0;
+    if (!s.audioTrackPath) return;
+    this._bridge.send('media:request-track', { path: s.audioTrackPath });
   }
 
   private _updateFps(): void {
@@ -851,6 +911,28 @@ class Engine {
     });
     window.addEventListener(WINDOW_EVENTS.trigger, () => this.triggerRandomAnomaly());
     window.addEventListener(WINDOW_EVENTS.notes, () => this.toggleFieldNotes());
+    window.addEventListener(WINDOW_EVENTS.mediaTrack, (e) => {
+      void this._loadMediaTrack((e as CustomEvent<MediaTrackPayload>).detail);
+    });
+    window.addEventListener(WINDOW_EVENTS.audioReactivity, (e) => {
+      const d = (e as CustomEvent<{ enabled?: boolean; silentPlayback?: boolean }>).detail;
+      const enabled = d?.enabled === true;
+      const silent = d?.silentPlayback === true;
+
+      this._media.setConfig({ enabled, silentPlayback: silent });
+
+      if (enabled && this._media.getState().beatCount > 0) {
+        // Enabling without a track is legal and does nothing: the system needs a file
+        // before it has beats, and asking the host for one here would re-read the last
+        // choice every time somebody ticked the box.
+        this._media.startTransport(performance.now());
+      } else if (!enabled) {
+        this._media.stop();
+      }
+
+      this._persistence?.update({ audioReactive: enabled, audioSilent: silent });
+      this._renderer.setAudioReactivity(0, 0);
+    });
     window.addEventListener(WINDOW_EVENTS.locale, (e) => {
       const code = (e as CustomEvent<{ locale?: string }>).detail?.locale;
       if (typeof code !== 'string' || !code) return;
@@ -1207,6 +1289,76 @@ class Engine {
   getNetwork(): NetworkSource { return this._network; }
   getEasterEggs(): EasterEggSystem { return this._easterEggs; }
   getInteraction(): InteractionSystem { return this._interaction; }
+  /**
+   * Ceiling on an audio track the host will hand over.
+   *
+   * Twelve megabytes is about eight minutes of CD-quality audio and is a bound, not a
+   * target: the transfer is base64 over a JSON web message, so a large file becomes a
+   * very large string on both sides of it. Refusing is better than accepting one and
+   * stalling the renderer.
+   */
+  private static readonly MAX_TRACK_BYTES = 12 * 1024 * 1024;
+
+  /**
+   * Decodes and analyses the track the host sent.
+   *
+   * The renderer cannot read the file itself -- the page is served from `file://`,
+   * where Chromium blocks local `fetch`, and the content security policy sets
+   * `connect-src 'none'` on top of that -- so the host reads the bytes and sends them
+   * here as base64.
+   */
+  private async _loadMediaTrack(payload: MediaTrackPayload | undefined): Promise<void> {
+    if (!payload?.base64 || typeof payload.title !== 'string') {
+      this._bridge.sendLog('media:rejected', { reason: 'no samples' });
+      return;
+    }
+
+    let bytes: number;
+    try {
+      bytes = Math.floor((payload.base64.length * 3) / 4);
+    } catch {
+      this._bridge.sendLog('media:rejected', { reason: 'unreadable payload' });
+      return;
+    }
+
+    if (bytes > Engine.MAX_TRACK_BYTES) {
+      this._bridge.sendLog('media:rejected', { reason: 'too large', bytes });
+      return;
+    }
+
+    try {
+      const binary = atob(payload.base64);
+      const buffer = new ArrayBuffer(binary.length);
+      const view = new Uint8Array(buffer);
+      for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
+
+      // The decoder resamples to the AudioContext's rate; a null context means the
+      // decode below will fail and the catch handles it, so this is only for the
+      // analysis path.
+      const context = new OfflineAudioContext(1, 1, 44100);
+      const decoded = await context.decodeAudioData(buffer);
+
+      // Mono, because the detector's bands are summed across channels anyway and a
+      // stereo file decoded twice is twice the work for the same answer.
+      const mono = new Float32Array(decoded.length);
+      for (let c = 0; c < decoded.numberOfChannels; c++) {
+        const channel = decoded.getChannelData(c);
+        for (let i = 0; i < channel.length; i++) mono[i] += channel[i] / decoded.numberOfChannels;
+      }
+
+      const count = await this._media.load(mono, decoded.sampleRate, payload.title);
+      this._bridge.sendLog('media:loaded', { title: payload.title, beats: count });
+    } catch (error) {
+      // A browser that cannot decode the format is a real outcome, not a bug: the user
+      // picked an .m4a on a build without the codec. Reported and moved on.
+      this._bridge.sendLog('media:decode-failed', {
+        title: payload.title,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Current audio-reactivity state, for the settings window. */
   getMedia(): MediaReactivitySystem { return this._media; }
   getBenchmark(): BenchmarkSystem { return this._benchmark; }
 
@@ -1281,6 +1433,21 @@ class Engine {
     uiScale: number;
     /** Whether the mixer is muted, which the mute preference drives. */
     muted: boolean;
+    /** The audio-reactivity system, for the settings readout. */
+    media: {
+      playing: boolean;
+      title: string;
+      beatCount: number;
+      /**
+       * The first few transient times, in seconds.
+       *
+       * Sent because "found 40 beats" and "found 40 beats in the wrong place" look the
+       * same on a panel, and a person tuning a track needs the times as much as the
+       * count. A handful rather than all of them: a five-minute track can have several
+       * hundred, and the status document is polled on a timer.
+       */
+      firstBeats: number[];
+    };
     paused: boolean;
     journalCount: number;
     secretsFound: number;
@@ -1328,6 +1495,12 @@ class Engine {
       accessibility: this._accessibility.getConfig(),
       uiScale: this._accessibility.getUiScale(),
       muted: this._audio.isMuted(),
+      media: {
+        playing: this._media.getState().playing,
+        title: this._media.getState().title,
+        beatCount: this._media.getState().beatCount,
+        firstBeats: this._media.getBeats().slice(0, 6).map((b) => Math.round(b.time * 100) / 100),
+      },
       paused: this._paused,
       journalCount: this._journal.getEntries().length,
       secretsFound: this._secrets.getDiscovered().length,
@@ -1580,6 +1753,31 @@ class Engine {
     this._simDate.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0);
   }
 
+  /**
+   * Pins the whole moment -- date, hour, minute and second -- rather than the hour.
+   *
+   * `setSimulatedHour` substitutes the hour into *today*, which leaves the date real, and
+   * the date is what drives season, moon phase and the weather seed. Three pixel-
+   * comparing tools pinned only the hour, so their expected output moved with the
+   * calendar: `riso renders a halftone`, `flicker is bounded` and `per-monitor layouts`
+   * all passed on the day they were written and failed on a later one, with no change to
+   * any code. A gate whose result depends on what day it is run is not a gate.
+   *
+   * Unparsable input leaves the clock alone rather than resetting to noon, which is the
+   * same rule the locale channel follows: a bad value is a no-op, not a change of state.
+   */
+  setSimulatedMoment(iso: string): boolean {
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return false;
+    this._simDate = parsed;
+    return true;
+  }
+
+  /** Clears a pinned moment and returns the scene to the real clock. */
+  clearSimulatedMoment(): void {
+    this._simDate = null;
+  }
+
   setSimulatedWeather(condition: string): void {
     this._renderer.setWeather({
       condition: (condition as 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog') ?? 'clear',
@@ -1690,6 +1888,20 @@ class Engine {
     if (s.scalableUI !== null) this._accessibility.setConfig({ scalableUI: s.scalableUI });
     if (s.focusVisible !== null) {
       this._accessibility.setConfig({ focusVisible: s.focusVisible });
+    }
+
+    // Audio reactivity. The track itself is reloaded from disk on a timer rather than
+    // here, because the host has not necessarily finished reading it by the time the
+    // state document arrives, and asking for a file that may be mid-transfer gets a
+    // partial decode.
+    if (s.audioReactive !== null || s.audioSilent !== null) {
+      this._media.setConfig({
+        enabled: s.audioReactive === true,
+        silentPlayback: s.audioSilent === true,
+      });
+    }
+    if (s.audioReactive === true && s.audioTrackPath) {
+      this._reloadTrackWhen = Date.now() + 3000;
     }
     this._journal.restore(s.journal);
     this._secrets.restore(s.secrets);

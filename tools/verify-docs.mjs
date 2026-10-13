@@ -161,11 +161,10 @@ const CLAIMS = [
     holds: (d) => {
       const problems = [];
 
-      // "Audio reactivity: the system exists; desktop audio capture does not, so it is
-      // inert." If anyone ever wires capture, this has to stop saying inert.
-      //
-      // Capture only. `AudioContext` on its own means playback, which is what
-      // AudioSystem already does and is not the claim.
+      // "Audio reactivity: ... it is inert." That was true once. If it ever stops being
+      // true the README has to say what shipped instead, and the claim's absence is
+      // the signal. Checked on both sides: a renderer that captures audio and a host
+      // that reads a file are different claims.
       const claimsInert = /\*\*Audio reactivity\*\*\s*\|[^|]*inert/i.test(d.README);
       if (claimsInert) {
         const sources = readdirSync(resolve(ROOT, 'src', 'Engine', 'src', 'systems')).filter((f) =>
@@ -176,9 +175,23 @@ const CLAIMS = [
             readFileSync(resolve(ROOT, 'src', 'Engine', 'src', 'systems', f), 'utf8')
           )
         );
+        const hostReadsTracks = /SendMediaTrack/.test(d.HOST);
         if (capturesAudio) {
           problems.push('README says audio reactivity is inert, but the renderer now captures audio');
         }
+        if (hostReadsTracks) {
+          problems.push(
+            'README says audio reactivity is inert, but the host now reads a track from disk'
+          );
+        }
+      }
+
+      // The converse: a feature that reads a track and is documented as inert is the
+      // lie, and it is the direction the check above cannot see.
+      if (/SendMediaTrack/.test(d.HOST) && claimsInert) {
+        problems.push(
+          'the host reads audio tracks while the README still calls audio reactivity inert'
+        );
       }
 
       // "No installer." There is a .wxs in build/installer, which is the source for an
@@ -248,6 +261,7 @@ function load() {
     HOTKEY: read('src', 'AnomalyEngine', 'Core', 'HotkeyService.cs'),
     XAML: read('src', 'AnomalyEngine', 'SettingsWindow', 'SettingsWindow.xaml'),
     CS: read('src', 'AnomalyEngine', 'SettingsWindow', 'SettingsWindow.xaml.cs'),
+    HOST: read('src', 'AnomalyEngine', 'Core', 'WallpaperHost.cs'),
     MOTION: read('src', 'Engine', 'src', 'renderer', 'motion.ts'),
     CSP: read('src', 'Engine', 'renderer', 'index.html'),
   };

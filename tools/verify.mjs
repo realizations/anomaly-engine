@@ -59,6 +59,7 @@ steps.push(await run('visual baseline captures distinct directions', ['visual-ba
 steps.push(await run('every story beat changes real pixels', ['story-beats.mjs']));
 steps.push(await run('weather reaches the renderer', ['weather-live.mjs']));
 steps.push(await run('debug overlay reports the running engine', ['debug-overlay-live.mjs']));
+steps.push(await run('a local audio track reaches the running engine', ['audio-reactive-live.mjs']));
 steps.push(await run('per-monitor layouts', ['per-monitor.mjs']));
 steps.push(await run('per-display worlds', ['per-display-worlds.mjs']));
 steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));

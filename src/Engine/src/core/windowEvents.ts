@@ -71,6 +71,41 @@ export const WINDOW_EVENTS = {
 /** Host -> renderer: set one accessibility preference, by name. */
   accessibility: 'anomaly:accessibility',
 
+  /**
+   * Renderer -> host: ask for the bytes of the audio track the user chose.
+   *
+   * The renderer cannot read the file itself: the page is served from `file://`, where
+   * Chromium blocks both `fetch` of local files and cross-file module imports, and the
+   * content security policy sets `connect-src 'none'` on top of that. So the renderer
+   * asks and the host reads and answers over the same web-message channel the renderer
+   * already uses to save state.
+   */
+  mediaTrackRequest: 'anomaly:media-track-request',
+  /**
+   * Host -> renderer: the requested track's samples, base64 encoded.
+   *
+   * Base64 rather than raw bytes because the channel is JSON on both ends. The payload
+   * is bounded by the host, which refuses anything over `MaxTrackBytes`; a five-minute
+   * track is a few megabytes, which is a large JSON string but a one-off transfer that
+   * happens when the user picks a file rather than on a loop.
+   *
+   * The marker is a single line of its own because verify-host-events.mjs reads a
+   * one-line comment immediately above the entry to decide whether a host may send it,
+   * and a multi-line comment reads as "the page dispatches this at itself".
+   */
+/** Host -> renderer: the requested track's samples, base64 encoded. */
+  mediaTrack: 'anomaly:media-track',
+  /**
+   * Host -> renderer: turn audio reactivity on or off, and say whether the track
+   * should be audible.
+   *
+   * One event for both. They are set together by the settings checkbox and the child
+   * box under it, and two events would allow a moment where the parent says on and
+   * the child says silent-off.
+   */
+/** Host -> renderer: set audio reactivity options. */
+  audioReactivity: 'anomaly:audio-reactivity',
+
   /** Creator mode -> renderer: pin the simulated clock. */
   setTime: 'anomaly:set-time',
   /** Creator mode -> renderer: force a weather condition. */
