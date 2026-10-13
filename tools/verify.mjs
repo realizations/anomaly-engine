@@ -47,6 +47,8 @@ steps.push(await run('wiring self-test', ['verify-wiring.mjs', '--selftest']));
 steps.push(await run('everything constructed is used', ['verify-wiring.mjs']));
 steps.push(await run('accessibility self-test', ['verify-accessibility.mjs', '--selftest']));
 steps.push(await run('every accessibility preference reaches the desktop', ['verify-accessibility.mjs']));
+steps.push(await run('documentation self-test', ['verify-docs.mjs', '--selftest']));
+steps.push(await run('the documentation matches the code', ['verify-docs.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('seam check still catches full-width steps', ['verify-seam-check.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));

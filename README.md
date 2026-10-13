@@ -113,7 +113,7 @@ so than ship a feature table that overstates the project.
 | **Live art-style switching** | Three renderer treatments from the tray or `Ctrl+Alt+S`, with an active-style checkmark. |
 | **Global hotkeys** | `Ctrl+Alt+W/S/P/F/D` — cycle world, cycle style, pause, field notes, debug. Registered with Windows, because the wallpaper never holds focus. |
 | **Localisation** | Spanish, German and Japanese. The system language is detected on first run; Settings → Integrations overrides it. The field-notes panel, the creator panel and the hover hints are translated. |
-| **Reduced motion** | Honours the OS `prefers-reduced-motion` preference by scaling ambient animation to 25%. |
+| **Reduced motion** | Honours the OS `prefers-reduced-motion` preference by scaling ambient animation to 10%, and caps the motion slider to the same ceiling. |
 | **Settings window** | Live readouts from the renderer and working controls for world, style, frame rate, quality and reduced motion. Also opens with `--settings`. |
 | **Fullscreen passthrough** | Yields to fullscreen apps, excludes shell and `WorkerW` windows, and a manual pause survives a fullscreen app closing. |
 | **Diagnostics** | `--diagnose`, `--capture`, window enumeration, `WorkerW` probing, structured JSON logging. |
@@ -220,7 +220,7 @@ Right-click the tray icon for options:
 - **Next / Previous World** — Cycle the six built-in worlds
 - **Trigger Event** — Fire a random anomaly
 - **Field Notes** — The journal, world lore and undiscovered secrets
-- **Reduced Motion** — Scale ambient animation to 25%
+- **Reduced Motion** — Scale ambient animation to 10%, and follow the Windows setting on first run
 - **Debug Overlay** — FPS, frame time, memory and render scale over the scene
 - **Creator Mode** — Set time and weather, trigger events, capture
 - **About** — Version and credits
@@ -566,7 +566,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs thirty-two steps in order. Eight of them prove a gate still bites, the rest exercise the
+Runs thirty-four steps in order. Ten of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -591,6 +591,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-wiring.mjs --selftest` | Proves that check, including that a stale exemption fails and that a same-named method in another class does not count as a use |
 | `tools/verify-accessibility.mjs` | Walks each of the six accessibility preferences from the settings checkbox through the handler, the host, the event name and the persisted key to a line that actually changes something. Five of them had no control, no effect and no persistence |
 | `tools/verify-accessibility.mjs --selftest` | Proves that check, including a preference that is stored and accepted but never read, and a key present in only one of the renderer's two key lists |
+| `tools/verify-docs.mjs` | Asserts the checkable claims in this file against the code: the reduced-motion percentage against the constant, the hotkey table against the registrations, the section count against the window, the language list against the locale files, and the scaffold table against what is still actually inert |
+| `tools/verify-docs.mjs --selftest` | Proves that check. It exists because this file claimed reduced motion scaled animation to 25% while `motion.ts` set 0.1, in two places, across several features |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |

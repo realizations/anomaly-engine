@@ -74,6 +74,10 @@ jobs:
         run: |
           node tools/verify-accessibility.mjs --selftest
           node tools/verify-accessibility.mjs
+      - name: Documentation (self-test and repository)
+        run: |
+          node tools/verify-docs.mjs --selftest
+          node tools/verify-docs.mjs
 
   # The host and the end-to-end suite must run on Windows: the wallpaper host is
   # a WPF/WebView2 app, and the e2e suite loads the renderer over file://, which
