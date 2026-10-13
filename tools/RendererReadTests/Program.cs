@@ -57,6 +57,36 @@ public static class RendererReadTests
         var good = Read("[{\"code\":\"en\",\"name\":\"English\"},{\"code\":\"de\",\"name\":\"Deutsch\"}]", out var list);
         Expect("a real list is still read", good && list.Count == 2);
         Expect("the entries are in order and intact", good && list[0] == ("en", "English") && list[1] == ("de", "Deutsch"));
+
+        // The shape that actually arrives, and the whole reason for `Unwrap`.
+        //
+        // `ExecuteScriptAsync` returns the JSON-serialised value of the script's last
+        // expression. Every call of the form `JSON.stringify(x)` therefore comes back
+        // twice encoded: the array was stringified into a string, and that string was
+        // then serialised as a JSON string. This is the payload that made the settings
+        // window throw on every open, and it is the case a test written from the
+        // JavaScript side gets wrong -- `page.evaluate` hands back the raw array, so a
+        // probe in a browser shows a perfectly good result and proves nothing about the
+        // host's transport.
+        const string doubleEncoded = "\"[{\\\"code\\\":\\\"en\\\",\\\"name\\\":\\\"English\\\"}," +
+                                     "{\\\"code\\\":\\\"de\\\",\\\"name\\\":\\\"Deutsch\\\"}]\"";
+        Expect("the real double-encoded payload parses as JSON", CanParse(doubleEncoded));
+        Expect("and its root is a String, which is the bug",
+            RootKind(doubleEncoded) == System.Text.Json.JsonValueKind.String);
+
+        var unwrapped = Read(doubleEncoded, out var transported);
+        Expect("a double-encoded list is read after unwrapping", unwrapped && transported.Count == 2);
+        Expect("with the right entries", unwrapped && transported[1] == ("de", "Deutsch"));
+        Expect("unwrapping is idempotent",
+            RendererRead.Unwrap(RendererRead.Unwrap(doubleEncoded)) == RendererRead.Unwrap(doubleEncoded));
+
+        // Unwrapping must not mangle a payload that is already the right shape.
+        Expect("an already-unwrapped payload is left alone",
+            RendererRead.Unwrap("[{\"code\":\"en\"}]") == "[{\"code\":\"en\"}]");
+        Expect("non-JSON is handed back unchanged", RendererRead.Unwrap("{not json") == "{not json");
+        Expect("null is handed back unchanged", RendererRead.Unwrap("null") == "null");
+        Expect("the string \"null\" unwraps to null and is treated as no answer",
+            !Read("\"null\"", out var nullStr) && nullStr.Count == 0);
         Expect("an empty list is an empty read, not a failure", Read("[]", out var empty) && empty.Count == 0);
         Expect("entries missing a name are skipped, not fatal",
             Read("[{\"code\":\"en\"},{\"code\":\"de\",\"name\":\"Deutsch\"}]", out var partial) && partial.Count == 1);
@@ -76,6 +106,25 @@ public static class RendererReadTests
 
     private static bool Read(string? json, out List<(string, string)> items) =>
         Read(json, out items, out _);
+
+    private static bool CanParse(string json)
+    {
+        try { using var _ = System.Text.Json.JsonDocument.Parse(json); return true; }
+        catch { return false; }
+    }
+
+    private static System.Text.Json.JsonValueKind? RootKind(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private static string? ThrowsOnEnumerate(string json)
     {

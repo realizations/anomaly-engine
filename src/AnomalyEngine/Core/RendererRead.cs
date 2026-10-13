@@ -25,6 +25,47 @@ namespace AnomalyEngine.Core;
 public static class RendererRead
 {
     /// <summary>
+/// Unwraps the JSON string encoding that WebView2 puts around every result.
+///
+/// `ExecuteScriptAsync` returns the JSON-serialised value of the script's last
+/// expression. Every call of the form <c>JSON.stringify(x)</c> therefore comes back
+/// *twice* encoded: the array was stringified into a string, and that string was then
+/// serialised as a JSON string. The payload looks like
+/// <c>"[{\"code\":\"en\",...}]"</c> rather than <c>[{"code":"en",...}]</c>.
+///
+/// This is the single most confusing thing about reading from the renderer, and it bit
+/// the settings window: parsing such a payload with <c>JsonDocument</c> yields a String,
+/// not an Array, and enumerating it throws.
+///
+/// Note that most of the codebase got this right by accident rather than by design.
+/// Eight of the ten call sites use <c>JsonNode.Parse(json)?.ToString()</c>, and a
+/// <c>JsonNode</c> holding a string prints that string *unquoted*, so the extra layer
+/// is removed by a coincidence of <c>ToString</c>. The two that used
+/// <c>JsonDocument.Parse</c> were the ones that broke, and one of them crashed the
+/// application. Every read goes through here now rather than through two different
+/// idioms that happen to disagree.
+/// </summary>
+    public static string? Unwrap(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return json;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.String)
+            {
+                return doc.RootElement.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON at all. Handed back unchanged so the caller's own error message
+            // is the useful one, rather than this function's.
+        }
+        return json;
+    }
+
+    /// <summary>
     /// Reads a JSON array of <c>{ code, name }</c> objects.
     ///
     /// Returns false with a reason for anything else -- an error string, a truncated
@@ -38,9 +79,10 @@ public static class RendererRead
         items = new List<(string, string)>();
         reason = "";
 
-        // Checked before parsing: `null`, an empty string and whitespace all mean "the
-        // renderer did not answer", which is a normal state during start-up and not
-        // something to report as an error.
+        json = Unwrap(json);
+
+        // Checked after unwrapping as well as before: a script that returns the *string*
+        // "null" is still "did not answer", not an error.
         if (string.IsNullOrWhiteSpace(json))
         {
             reason = "the renderer returned nothing";

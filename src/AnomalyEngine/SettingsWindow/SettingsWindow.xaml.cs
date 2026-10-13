@@ -814,7 +814,7 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         JsonElement state;
         try
         {
-            state = JsonDocument.Parse(json).RootElement.Clone();
+            state = JsonDocument.Parse(RendererRead.Unwrap(json) ?? "null").RootElement.Clone();
         }
         catch (JsonException)
         {
