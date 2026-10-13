@@ -713,6 +713,7 @@ public class WallpaperHost : IEngineBridge, IDisposable
         "accessibility",
         "audio-reactivity",
         "media-track",
+        "feed-response",
         "state",
     };
 
@@ -841,25 +842,16 @@ public class WallpaperHost : IEngineBridge, IDisposable
     {
         var json = await EvaluateAsync(
             "JSON.stringify(window.__engine ? window.__engine.getAvailableLocales() : [])");
-        if (string.IsNullOrWhiteSpace(json) || json == "null") return new List<(string, string)>();
-        try
+
+        // Never throws. The language box is then empty, which is a cosmetic problem, and
+        // that is strictly better than the window taking the process with it -- which is
+        // exactly what happened when this read enumerated an error string.
+        if (!RendererRead.TryReadCodeNamePairs(json, out var locales, out var reason))
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var outp = new List<(string, string)>();
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                if (item.TryGetProperty("code", out var c) && item.TryGetProperty("name", out var n))
-                {
-                    outp.Add((c.GetString() ?? "", n.GetString() ?? ""));
-                }
-            }
-            return outp;
-        }
-        catch (System.Text.Json.JsonException ex)
-        {
-            _logger.Warn($"Could not read the locale list: {ex.Message}");
+            _logger.Warn($"Could not read the locale list: {reason}");
             return new List<(string, string)>();
         }
+        return locales;
     }
 
     /// <summary>Evaluates an expression in the page and returns its value as JSON.</summary>

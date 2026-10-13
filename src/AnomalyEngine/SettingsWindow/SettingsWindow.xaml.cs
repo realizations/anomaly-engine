@@ -78,10 +78,20 @@ public partial class SettingsWindow : Window
 
         Loaded += async (_, _) =>
         {
-            await ApplyInitialSelection();
-            await LoadLocalesAsync();
-            await LoadMediaAsync();
-            _poll.Tick += (_, _) => _ = RefreshAsync();
+            // Each of these is guarded separately, and the reason is a crash rather than
+            // a style preference: this handler is `async void` in effect, so an exception
+            // from any `await` here is rethrown on the dispatcher, reaches
+            // `EngineApp.OnDispatcherException`, and takes the process down. Opening the
+            // settings window must not be able to end the application, whatever the
+            // renderer does or does not answer.
+            await Guarded("the initial selection", ApplyInitialSelection);
+            await Guarded("the locale list", LoadLocalesAsync);
+            await Guarded("the audio track state", LoadMediaAsync);
+
+            // Started even if the reads above failed. A window showing stale controls and
+            // live readouts is a working window; a window that never starts polling is a
+            // window that looks frozen and cannot be diagnosed.
+            _poll.Tick += (_, _) => _ = Guarded("the settings poll", RefreshAsync);
             _poll.Start();
         };
         Closed += (_, _) =>
@@ -89,6 +99,26 @@ public partial class SettingsWindow : Window
             _closing = true;
             _poll.Stop();
         };
+    }
+
+    /// <summary>
+    /// Runs a read against the renderer and swallows anything it throws.
+    ///
+    /// The status text is set to the reason, because a settings window that silently
+    /// shows defaults for a control the user is about to change is how somebody spends
+    /// an afternoon wondering why their setting did not stick.
+    /// </summary>
+    private async System.Threading.Tasks.Task Guarded(string what, System.Func<System.Threading.Tasks.Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"Could not load {what}: {ex.Message}");
+            if (!_closing) StatusText.Text = $"Could not read {what} from the engine: {ex.Message}";
+        }
     }
 
     private async System.Threading.Tasks.Task ApplyInitialSelection()
