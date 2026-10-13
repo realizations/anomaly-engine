@@ -1,12 +1,19 @@
 name: Release
 
+# Tag a release to build it.
+#
+# Everything the release needs to do is in tools/release.mjs, and this file does not
+# restate it. That is the whole reason the script exists: the previous version of this
+# workflow built releases its own way, with `npm install` where `npm ci` was meant, a
+# framework-dependent publish, and the publish folder uploaded as several hundred loose
+# files rather than an archive. It produced something that looked like a release.
 on:
   push:
     tags:
       - 'v*'
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,32 +28,24 @@ jobs:
         with:
           node-version: 20
 
-      - name: Build Renderer
-        run: |
-          cd src/Engine
-          npm install
-          npm run build
+      # Everything below is one command on purpose. The build, the tests, the gates, the
+      # self-contained publish, the archive and the checksums are what a developer runs
+      # locally with the same script, and the only way to be sure they agree is for there
+      # to be one implementation.
+      #
+      # `--skip-verify` is deliberately not passed. CI is the last place the gate suite
+      # runs against the artifact, and skipping it here would mean the visual,
+      # persistence and per-monitor checks had never seen the build being shipped.
+      - name: Build, verify and package
+        run: node tools/release.mjs
 
-      - name: Build Native Host
-        run: |
-          cd src/AnomalyEngine
-          dotnet build -c Release
-
-      - name: Test
-        run: |
-          cd src/Engine
-          npm test
-
-      - name: Package
-        run: |
-          cd src/AnomalyEngine
-          dotnet publish -c Release -o publish
-
-      - name: Create Release
+      - name: Upload the artifact
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            src/AnomalyEngine/publish/**
+            dist/anomaly-engine-*-win-x64.zip
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

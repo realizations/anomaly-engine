@@ -52,6 +52,8 @@ steps.push(await run('the documentation matches the code', ['verify-docs.mjs']))
 steps.push(await run('world schema self-test', ['verify-world-schema.mjs', '--selftest']));
 steps.push(await run('the CLI validator matches the world schema', ['verify-world-schema.mjs']));
 steps.push(await run('the world validator behaves', ['world-folder.mjs']));
+steps.push(await run('release self-test', ['verify-release.mjs', '--selftest']));
+steps.push(await run('the release does what it claims', ['verify-release.mjs']));
 steps.push(await run('font files parse', ['verify-fonts.mjs']));
 steps.push(await run('seam check still catches full-width steps', ['verify-seam-check.mjs']));
 steps.push(await run('end-to-end (deployed, file://)', ['e2e.mjs']));

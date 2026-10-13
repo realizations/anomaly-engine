@@ -580,14 +580,18 @@ Done:
 - [x] CI — typecheck, lint, unit tests, clean-build check, e2e, durable state
 - [x] Diagnostics and verification tooling, including a measured performance report
 - [x] Checksummed world packages — a world edited between sessions is reported, not silently reloaded
+- [x] Release pipeline — `node tools/release.mjs` builds a self-contained zip with checksums, runs every gate first, and checks that the published renderer matches the digest recorded at build time
 
 Next, in priority order:
 
-- [ ] **Installer and updates** — a self-contained release builds and is verified by
-      `tools/verify-publish.mjs`, but there is no signed installer, no shortcut or
-      start-menu registration, and no auto-update
+- [ ] **Code signing and auto-update** — a self-contained zip with checksums builds and
+      is verified by `tools/release.mjs`, but it is unsigned, so SmartScreen warns on
+      first launch, and there is no shortcut or start-menu registration and no
+      auto-update. See [`docs/release-process.md`](docs/release-process.md)
 - [ ] **ARG event layer** — needs endpoint config, payload validation and rate limiting first
-- [ ] **Audio capture** — inert until desktop audio is actually sampled
+- [ ] **Desktop audio capture** — the engine reacts to a local file; sampling what is
+      playing on the system needs a loopback device and a permission prompt, which a
+      wallpaper should not be asking for
 - [ ] **Naming decision** — see [`docs/NAMING.md`](docs/NAMING.md)
 - [ ] **Art direction decision** — painterly currently wins on all nine conditions, but flat
       and riso are now legitimate and the user has not chosen
@@ -636,6 +640,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/weather-live.mjs` | Walks the whole weather path against the deployed build — model, system, renderer — and proves the reading in the status document is the one being drawn |
 | `tools/debug-overlay-live.mjs` | Toggles the overlay through the host's own route and proves it reports live fps, frame time, weather, moon phase and discovery, rather than its defaults |
 | `tools/audio-reactive-live.mjs` | Generates a 120bpm click track, hands it to the deployed engine over the same channel the host uses, and proves the transients are found, the transport starts, and switching it off actually stops it |
+| `tools/release.mjs` | The whole release: `npm ci`, typecheck, lint, tests, every gate, a self-contained single-file publish, checks that the published renderer matches its build-time digest, then a zip and `SHA256SUMS` |
+| `tools/verify-release.mjs` | Asserts the release process document against the pipeline: that the workflow calls the script rather than restating it, that `npm ci` is used, that the publish is self-contained, that an archive and checksums exist, and that `dist/` is ignored |
 | `tools/visual-snapshot.mjs` | Deterministic frames for proving a refactor changed no pixels; `--compare` diffs two capture directories |
 | `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
