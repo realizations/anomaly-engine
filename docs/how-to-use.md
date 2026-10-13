@@ -287,27 +287,56 @@ The world contains secrets that are not documented.
 The `livingwall` command-line tool provides additional control.
 
 ```bash
-# List installed worlds
+# List installed worlds, marking any that fail validation.
+# Exit code 2 means something in the folder is broken.
 livingwall list
 
-# Install a world
+# Install a world from a .json definition, a folder, or a .world package.
+# The world is validated before it is copied, and stored under its own id.
+livingwall world install path/to/world.json
+livingwall world install path/to/worlds/
 livingwall world install path/to/world.world
 
-# Remove a world
+# Remove a world by id
 livingwall world remove my-world
 
-# Validate a world package
-livingwall world validate path/to/world.world
+# Validate a world and be told which field is wrong.
+# The same validator the engine uses, so passing here means it will load.
+livingwall world validate path/to/world.json
 
-# Trigger an event manually
+# Fire a random anomaly. Starts the engine if it is not running.
 livingwall event trigger meteor-shower
 
-# Take a screenshot
+# Capture the desktop to a PNG
 livingwall screenshot
+livingwall screenshot path/to/capture.png
 
-# Enable debug mode
+# Start the engine with the debug overlay already open
 livingwall debug
 ```
+
+### The worlds folder
+
+`livingwall world install` writes to `%APPDATA%\AnomalyEngine\worlds`, and the engine
+reads that folder at start-up and re-reads it whenever a file changes — so a world can be
+dropped in without restarting. A world that fails validation is reported in the log and
+skipped; the rest still load.
+
+Each world is one JSON file named after its own `id`. The file name matters after
+installation: `world remove` takes an id, so a world saved as `MyWorld.json` would be
+impossible to remove by name.
+
+The validator is the engine's, in `src/AnomalyEngine/Core/WorldFolder.cs`, rather than a
+copy in the CLI. An earlier version kept its own and checked a `manifest.json` schema
+that no world has, so it rejected every world that would actually load.
+`tools/verify-world-schema.mjs` asserts the C# validator and the TypeScript
+`WorldDefinition` agree — including the id pattern, where a stricter rule in the CLI
+would mean `world validate` refusing worlds the engine accepts.
+
+`livingwall debug`, `livingwall screenshot` and `livingwall event trigger` start the
+engine rather than messaging a running instance. There is no named pipe between the CLI
+and a running tray process, and adding one for a command whose whole job is "make one
+anomaly happen now" is the wrong trade.
 
 ## Troubleshooting
 

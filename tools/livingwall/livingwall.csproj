@@ -10,4 +10,16 @@
     <Version>0.1.0</Version>
   </PropertyGroup>
 
+  <!--
+    References the engine assembly rather than reimplementing the world schema.
+
+    `world validate` used to check a manifest.json with an entryScene field that no
+    world has, while missing the terrain field that every world does. The validator now
+    lives in `Core/WorldFolder.cs`, next to the loader that has to agree with it, and the
+    CLI calls the same one.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AnomalyEngine\AnomalyEngine.csproj" />
+  </ItemGroup>
+
 </Project>

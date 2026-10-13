@@ -566,7 +566,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs thirty-four steps in order. Ten of them prove a gate still bites, the rest exercise the
+Runs thirty-seven steps in order. Thirteen of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -593,6 +593,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-accessibility.mjs --selftest` | Proves that check, including a preference that is stored and accepted but never read, and a key present in only one of the renderer's two key lists |
 | `tools/verify-docs.mjs` | Asserts the checkable claims in this file against the code: the reduced-motion percentage against the constant, the hotkey table against the registrations, the section count against the window, the language list against the locale files, and the scaffold table against what is still actually inert |
 | `tools/verify-docs.mjs --selftest` | Proves that check. It exists because this file claimed reduced motion scaled animation to 25% while `motion.ts` set 0.1, in two places, across several features |
+| `tools/verify-world-schema.mjs` | Keeps the C# world validator, the `livingwall` CLI and the TypeScript `WorldDefinition` in agreement — required fields, the biome list, and the id pattern, where a stricter rule in the CLI would refuse worlds the engine accepts |
+| `tools/world-folder.mjs` | Runs the world validator against real fixtures on disk: valid worlds, broken files, a folder with one bad world among good ones, and the 200-world ceiling |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |

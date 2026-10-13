@@ -78,6 +78,12 @@ jobs:
         run: |
           node tools/verify-docs.mjs --selftest
           node tools/verify-docs.mjs
+      - name: World schema (self-test and repository)
+        run: |
+          node tools/verify-world-schema.mjs --selftest
+          node tools/verify-world-schema.mjs
+      - name: World validator
+        run: node tools/world-folder.mjs
 
   # The host and the end-to-end suite must run on Windows: the wallpaper host is
   # a WPF/WebView2 app, and the e2e suite loads the renderer over file://, which

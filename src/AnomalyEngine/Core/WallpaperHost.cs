@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -336,6 +337,11 @@ public class WallpaperHost : IEngineBridge, IDisposable
         _logger.Info("Renderer loaded.");
         AttachToWorkerW();
 
+        // Worlds dropped in a folder are registered here rather than at construction,
+        // because this is the first moment there is a renderer to register them with.
+        LoadWorldFolder("startup");
+        StartWatchingWorldFolder();
+
         // Hand the renderer its saved state as soon as the page exists, so a
         // restored world and style apply on the very first frame.
         if (_stateStore != null)
@@ -343,6 +349,90 @@ public class WallpaperHost : IEngineBridge, IDisposable
             var json = _stateStore.StateJson;
             if (json.Length > 2) PushState(json);
         }
+    }
+
+    /// <summary>
+    /// Registers every valid world in the worlds folder with the renderer.
+    /// </summary>
+    private void LoadWorldFolder(string reason)
+    {
+        var (worlds, problems) = WorldFolder.Load(WorldFolder.DefaultDirectory);
+
+        foreach (var problem in problems)
+        {
+            _logger.Warn($"World folder ({reason}): {problem}");
+        }
+
+        if (worlds.Count == 0)
+        {
+            if (problems.Count == 0) _logger.Debug("World folder: none installed.");
+            return;
+        }
+
+        // The same channel the settings window's import box uses. Registering the whole
+        // folder again is safe: the registry replaces by id, so a re-read after an edit
+        // updates the world rather than adding a second copy of it.
+        ImportWorlds(WorldFolder.ToArrayJson(worlds));
+        _logger.Info($"World folder ({reason}): registered {worlds.Count} world(s).");
+    }
+
+    /// <summary>
+    /// Re-reads the folder when a file changes.
+    ///
+    /// Debounced, because saving a world from an editor writes it more than once and
+    /// without a debounce that is several renderer round trips per save. The watcher is
+    /// disposed with the host; leaving it running would keep the process alive after
+    /// exit, which for a tray app that is never closed normally is a slow leak that
+    /// only shows up on sign-out.
+    /// </summary>
+    private void StartWatchingWorldFolder()
+    {
+        try
+        {
+            var directory = WorldFolder.DefaultDirectory;
+            Directory.CreateDirectory(directory);
+            _worldWatcher = new FileSystemWatcher(directory, "*.json")
+            {
+                // Only content, not the directory timestamp: creating and deleting a
+                // world both change it, and neither is worth a reload.
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            _worldWatcher.Changed += OnWorldFolderChanged;
+            _worldWatcher.Created += OnWorldFolderChanged;
+            _worldWatcher.Deleted += OnWorldFolderChanged;
+        }
+        catch (Exception ex)
+        {
+            // Watching is a convenience. The folder still loads at startup, so failing
+            // here means "install a world and restart", not "worlds are broken".
+            _logger.Warn($"Could not watch the worlds folder: {ex.Message}");
+        }
+    }
+
+    private FileSystemWatcher? _worldWatcher;
+    private long _worldReloadDue;
+    private readonly DispatcherTimer _worldReloadTimer = new();
+
+    private void OnWorldFolderChanged(object sender, FileSystemEventArgs e)
+    {
+        // Set the due time rather than reloading inline: the event fires several times
+        // per save, and each reload is a JSON parse per world plus a renderer round trip.
+        _worldReloadDue = Environment.TickCount64 + 400;
+
+        if (!_worldReloadTimer.IsEnabled)
+        {
+            _worldReloadTimer.Interval = TimeSpan.FromMilliseconds(150);
+            _worldReloadTimer.Tick += OnWorldReloadTimerTick;
+            _worldReloadTimer.Start();
+        }
+    }
+
+    private void OnWorldReloadTimerTick(object? sender, EventArgs e)
+    {
+        if (Environment.TickCount64 < _worldReloadDue) return;
+        _worldReloadTimer.Stop();
+        LoadWorldFolder("changed");
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -484,6 +574,20 @@ public class WallpaperHost : IEngineBridge, IDisposable
         _logger.Info("Stopping wallpaper host...");
         _userPaused = true;
         _scriptPaused = true;
+
+        // The watcher outlives the WebView unless it is stopped explicitly, and a live
+        // FileSystemWatcher keeps a handle open on the folder for the life of the
+        // process.
+        _worldReloadTimer.Stop();
+        if (_worldWatcher is not null)
+        {
+            _worldWatcher.Changed -= OnWorldFolderChanged;
+            _worldWatcher.Created -= OnWorldFolderChanged;
+            _worldWatcher.Deleted -= OnWorldFolderChanged;
+            _worldWatcher.EnableRaisingEvents = false;
+            _worldWatcher.Dispose();
+            _worldWatcher = null;
+        }
 
         if (_webView != null)
         {

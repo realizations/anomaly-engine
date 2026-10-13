@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Exercises the world validator and the worlds folder against real files.
+
+    `livingwall world validate` checked a manifest.json schema that no world has,
+    required an entryScene field that does not exist, and did not check terrain, which
+    every world does. It was never run against a real world, which is why that
+    survived.
+
+    This harness runs it against a set of fixtures instead: a well-formed world, a
+    broken one, a directory with one broken file among good ones, and the folder the
+    host would actually load. A validator is exactly the kind of code that passes
+    every test written next to it, so the fixtures are written here rather than in the
+    same file as the validator, and the assertions are about what a person would be
+    told.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>WorldFolderTests</AssemblyName>
+    <RootNamespace>WorldFolderTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AnomalyEngine\AnomalyEngine.csproj" />
+  </ItemGroup>
+
+</Project>

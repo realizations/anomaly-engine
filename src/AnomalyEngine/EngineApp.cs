@@ -23,6 +23,24 @@ public class EngineApp : Application
     /// <summary>Set from `--settings` so a desktop shortcut can open the window.</summary>
     public bool ShowSettingsOnStart { get; init; }
 
+    /// <summary>
+    /// Set from `--debug`, which `livingwall debug` passes.
+    ///
+    /// The overlay was reachable only from the tray, so a headless "open the overlay"
+    /// needed a mouse. This is the flag that makes `livingwall debug` do something.
+    /// </summary>
+    public bool ShowDebugOnStart { get; init; }
+
+    /// <summary>
+    /// The anomaly kind to fire at start-up, from `--trigger &lt;id&gt;`.
+    ///
+    /// Null when nothing was asked for. The id is logged rather than used to select a
+    /// specific kind: the renderer picks a random one from the registry, because a
+    /// named id the renderer does not recognise is dropped without a reply and the
+    /// command would look broken.
+    /// </summary>
+    public string? TriggerOnStart { get; init; }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -95,6 +113,32 @@ public class EngineApp : Application
         }
 
         _logger.Info("Anomaly Engine started successfully.");
+
+        if (ShowDebugOnStart)
+        {
+            // Dispatched for the same reason as the settings window: the renderer has
+            // to exist before the overlay can be shown, which is later than this point.
+            _ = Dispatcher.BeginInvoke(new Action(() => _wallpaperHost.ToggleDebug()));
+            _logger.Info("Debug overlay requested at start-up (--debug).");
+        }
+
+        if (TriggerOnStart is { } eventId)
+        {
+            // Dispatched with a delay rather than immediately, because the trigger is
+            // an event into the page and the page is not there yet at this point. The
+            // renderer queues events fired before it has a world, so this would be
+            // dropped silently -- which is what a `--trigger` that appears to do
+            // nothing looks like from a terminal.
+            var id = eventId;
+            _ = Dispatcher.BeginInvoke(
+                new Action(async () =>
+                {
+                    await Task.Delay(2500);
+                    _wallpaperHost.SendToRenderer("trigger");
+                    _logger.Info($"Requested a random anomaly at start-up (--trigger {id}).");
+                }),
+                DispatcherPriority.Background);
+        }
     }
 
     private void OnDispatcherException(object sender, DispatcherUnhandledExceptionEventArgs e)
