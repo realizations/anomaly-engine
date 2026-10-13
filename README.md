@@ -103,6 +103,7 @@ so than ship a feature table that overstates the project.
 | **Procedural world** | Ridges, conifers, power lines, road, radio tower, observatory and stars all generated from seeded noise. Zero third-party art. |
 | **Worlds as data** | Six shipped worlds as ~40 line objects, plus one interior built by a separate scene constructor rather than the terrain pipeline. Biome-aware ground, structures placed by data, no art pipeline needed to add one. |
 | **Real local time** | Sky, sun position, moon phase and colour grading follow the system clock and a real latitude/longitude. |
+| **Real astronomy** | Sun and moon from a Meeus ephemeris, accurate to a fraction of a degree. The moon's phase, illumination and rise and set times are computed rather than guessed — and it returns *no* sunrise above the Arctic Circle in midsummer, which is the truth rather than a bug. |
 | **Weather** | A local model seeded by latitude and longitude, so the sky is a function of where you are and when it is — never a random draw. Temperature follows the real latitude gradient and season, precipitation is decided by a freezing level rather than a coin flip, and a front crosses during the day so weather arrives rather than appearing. No API key and no network. |
 | **Anomaly layer** | Six anomalies with rarity, cooldowns and durations, fired through the event bus and written to the journal. |
 | **Field notes** | The ARG surface. World premise, observations and progress, from the tray or `Ctrl+Alt+F`. Every anomaly is paired with a plausible denial. |
@@ -381,7 +382,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               416 unit tests
+    tests/               442 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -586,7 +587,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 416 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 442 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

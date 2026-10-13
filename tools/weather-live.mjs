@@ -103,6 +103,26 @@ const particleState = await page.evaluate(() => window.__engine.getParticles().g
 check(typeof particleState === 'number' && Number.isFinite(particleState),
   `particle count is not a number (${particleState})`);
 
+// --- the ephemeris is reaching the status document ---------------------------
+// `AstronomySystem.onUpdate` had no subscribers for the entire life of the project, so
+// the system recomputed the sky every minute and discarded it. This asserts the
+// reading survives the trip, and that the moon phase is a number and not the old
+// `abs(cos(...))` which is 1 at new moon.
+const sky = await page.evaluate(() => window.__engine.getStatus().sky);
+check(sky !== null, 'getStatus().sky is null, so the ephemeris reading was discarded');
+if (sky) {
+  for (const key of ['sunAltitude', 'moonAltitude', 'moonPhase', 'moonIllumination']) {
+    check(Number.isFinite(sky[key]), `sky.${key} is not finite (${sky[key]})`);
+  }
+  check(sky.moonPhase >= 0 && sky.moonPhase < 1, `moonPhase ${sky.moonPhase} is out of range`);
+  check(sky.moonIllumination >= 0 && sky.moonIllumination <= 1,
+    `moonIllumination ${sky.moonIllumination} is out of range`);
+  // Sunrise and sunset are null only inside the polar circles, and the default
+  // location is not one of them.
+  check(typeof sky.sunrise === 'string', 'no sunrise time was produced');
+  check(typeof sky.sunset === 'string', 'no sunset time was produced');
+}
+
 console.log(
   weather
     ? `      condition=${weather.condition} temp=${weather.temperature}C humidity=${weather.humidity} ` +
@@ -110,6 +130,13 @@ console.log(
       `regime=${weather.regime} source=${weather.source}`
     : '      (no weather)'
 );
+if (sky) {
+  console.log(
+    `      sunAlt=${Math.round(sky.sunAltitude)}deg moonAlt=${Math.round(sky.moonAltitude)}deg ` +
+      `phase=${sky.moonPhase.toFixed(3)} lit=${sky.moonIllumination.toFixed(2)} ` +
+      `sunrise=${sky.sunrise} sunset=${sky.sunset}`
+  );
+}
 
 if (problems.length || errors.length) {
   console.error('FAIL  weather did not reach the renderer:');
@@ -120,4 +147,4 @@ if (problems.length || errors.length) {
 }
 
 await browser.close();
-console.log('PASS  the weather model reaches the renderer, and every forced condition redraws');
+console.log('PASS  weather and the ephemeris both reach the renderer, and every forced condition redraws');

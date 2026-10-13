@@ -15,7 +15,7 @@ import { Persistence } from './platform/Persistence.js';
 import { buildAwaySummary, summaryToTerminalLines } from './platform/AwaySummary.js';
 import { WeatherSystem, type WeatherData } from './systems/WeatherSystem.js';
 import { DEFAULT_LOCATION, type Location } from './systems/LocalWeather.js';
-import { AstronomySystem } from './systems/AstronomySystem.js';
+import { AstronomySystem, type AstronomyData } from './systems/AstronomySystem.js';
 import { PerformanceSystem } from './systems/PerformanceSystem.js';
 import { AnomalySystem } from './anomalies/AnomalyRegistry.js';
 import { BUILT_IN_ANOMALIES } from './anomalies/builtin.js';
@@ -252,6 +252,19 @@ class Engine {
     this._random.start();
     this._anomalies.start();
     this._astronomy.start();
+    // `onUpdate` had no subscribers for the whole life of this file, so the system
+    // recomputed the sky once a minute and threw every reading away. It is what tells
+    // the debug overlay and the status document what time it is and how bright the moon
+    // is, and both of those come from the ephemeris rather than from the wall clock.
+    this._astronomy.onUpdate((d) => {
+      this._sky = d;
+      this._bridge.sendLog(`sky:${d.moonPhase > 0.45 && d.moonPhase < 0.55 ? 'full' : 'phase'}`, {
+        moonPhase: d.moonPhase,
+        moonIllumination: d.moonIllumination,
+        sunrise: d.sunrise?.toISOString() ?? null,
+        sunset: d.sunset?.toISOString() ?? null,
+      });
+    });
     // WeatherSystem was never started, so the renderer never received live weather and
     // the world stayed permanently "clear". It is started, and it no longer needs a
     // provider: `WeatherSystem` falls back to the local model, which is what the
@@ -1067,6 +1080,18 @@ class Engine {
     secretsFound: number;
     secretsTotal: number;
     anomalyKinds: number;
+    /** The ephemeris reading: sun and moon positions, phase, and rise and set times. */
+    sky: {
+      sunAltitude: number;
+      moonAltitude: number;
+      moonPhase: number;
+      moonIllumination: number;
+      sunrise: string | null;
+      sunset: string | null;
+      moonrise: string | null;
+      moonset: string | null;
+      isNight: boolean;
+    } | null;
     /** The weather being rendered, and where it was evaluated. Null before the first tick. */
     weather: {
       condition: string;
@@ -1099,6 +1124,22 @@ class Engine {
       secretsFound: this._secrets.getDiscovered().length,
       secretsTotal: this._secrets.getProgress().total,
       anomalyKinds: this._anomalies.getDefinitions().length,
+      sky: this._sky
+        ? {
+            sunAltitude: this._sky.sunAltitude,
+            moonAltitude: this._sky.moonAltitude,
+            moonPhase: this._sky.moonPhase,
+            moonIllumination: this._sky.moonIllumination,
+            // ISO strings rather than epoch numbers: this crosses into a C# status
+            // document and into a WPF window, and a date that reads as a date is worth
+            // more there than one that reads as a number.
+            sunrise: this._sky.sunrise?.toISOString() ?? null,
+            sunset: this._sky.sunset?.toISOString() ?? null,
+            moonrise: this._sky.moonrise?.toISOString() ?? null,
+            moonset: this._sky.moonset?.toISOString() ?? null,
+            isNight: this._sky.isNight,
+          }
+        : null,
       weather: w
         ? {
             condition: w.condition,
@@ -1116,6 +1157,14 @@ class Engine {
   }
 
   private _lastRegime: string | null = null;
+
+  /** The most recent ephemeris reading, or null before the first tick. */
+  private _sky: AstronomyData | null = null;
+
+  /** The sky: sun, moon, and the times each rises and sets. Null before the first tick. */
+  getSky(): AstronomyData | null {
+    return this._sky;
+  }
 
   /** Turns render phase profiling on or off. Off by default: it is a
    *  diagnostic, and this process is expected to sit idle for hours. */
