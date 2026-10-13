@@ -103,7 +103,7 @@ so than ship a feature table that overstates the project.
 | **Procedural world** | Ridges, conifers, power lines, road, radio tower, observatory and stars all generated from seeded noise. Zero third-party art. |
 | **Worlds as data** | Six shipped worlds as ~40 line objects, plus one interior built by a separate scene constructor rather than the terrain pipeline. Biome-aware ground, structures placed by data, no art pipeline needed to add one. |
 | **Real local time** | Sky, sun position, moon phase and colour grading follow the system clock and a real latitude/longitude. |
-| **Weather** | Six conditions driving cloud cover, wind-aligned precipitation, lightning and fog density. |
+| **Weather** | A local model seeded by latitude and longitude, so the sky is a function of where you are and when it is — never a random draw. Temperature follows the real latitude gradient and season, precipitation is decided by a freezing level rather than a coin flip, and a front crosses during the day so weather arrives rather than appearing. No API key and no network. |
 | **Anomaly layer** | Six anomalies with rarity, cooldowns and durations, fired through the event bus and written to the journal. |
 | **Field notes** | The ARG surface. World premise, observations and progress, from the tray or `Ctrl+Alt+F`. Every anomaly is paired with a plausible denial. |
 | **Durable state** | World, style, reduced motion, journal and secrets persist to a JSON document in `%APPDATA%` via the native host. A corrupt save cannot stop the engine starting. |
@@ -381,7 +381,7 @@ src/
       platform/          Persistence, field notes, debug, creator mode, i18n
       integrations/      GitHub, RSS and remote event adapters (unconfigured, and
                          listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               393 unit tests
+    tests/               416 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -539,7 +539,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs twenty-six steps in order. Six of them prove a gate still bites, the rest exercise the
+Runs twenty-seven steps in order. Six of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -564,6 +564,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/visual-cases.mjs` | Twenty named states, compared against `docs/visual-baseline.json`: luminance, tonal spread, seam count and direction distinctness |
 | `tools/visual-baseline.mjs` | Proves the three directions stay distinct from each other rather than converging into one image, measured on a coarse luminance signature |
 | `tools/story-beats.mjs` | Proves all seven story beats measurably change the pixels they are supposed to, each measured in the region its effect lives in |
+| `tools/weather-live.mjs` | Walks the whole weather path against the deployed build — model, system, renderer — and proves the reading in the status document is the one being drawn |
 | `tools/visual-snapshot.mjs` | Deterministic frames for proving a refactor changed no pixels; `--compare` diffs two capture directories |
 | `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
@@ -585,7 +586,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 393 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 416 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

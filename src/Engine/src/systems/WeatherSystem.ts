@@ -1,3 +1,5 @@
+import { simulateWeather, type SimulatedWeather } from './LocalWeather.js';
+
 export type WeatherCondition = 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
 
 export interface WeatherData {
@@ -10,11 +12,42 @@ export interface WeatherData {
   visibility: number;
   uvIndex: number;
   timestamp: number;
+  /**
+   * The synoptic regime, where the source has one.
+   *
+   * Optional because a network provider has no such concept -- it reports what is, not
+   * which phase of a pressure system produced it. Present on local readings, and read
+   * by the debug overlay and the settings status document.
+   */
+  regime?: 'high' | 'low' | 'front';
 }
 
 export interface WeatherProvider {
   name: string;
   fetchWeather(lat: number, lon: number): Promise<WeatherData>;
+}
+
+/**
+ * Projects the local model onto the provider-shaped record.
+ *
+ * Two fields are not directly comparable and are mapped rather than copied:
+ * `windSpeed` is metres per second in the real world and a 0..1 fraction in the
+ * renderer's own units, and `humidity` is already 0..1 here. The copy is explicit
+ * about which is which so nobody "fixes" the scale later.
+ */
+export function localToWeatherData(w: SimulatedWeather): WeatherData {
+  return {
+    condition: w.condition,
+    temperature: w.temperature,
+    humidity: w.humidity,
+    windSpeed: w.windSpeed * 12,
+    windDirection: w.windDirection,
+    pressure: w.pressure,
+    visibility: w.visibility,
+    uvIndex: w.uvIndex,
+    timestamp: w.timestamp,
+    regime: w.regime,
+  };
 }
 
 export class OpenWeatherMapProvider implements WeatherProvider {
@@ -64,6 +97,7 @@ export class WeatherSystem {
   private _timer: number | null = null;
   private _listeners: ((weather: WeatherData) => void)[] = [];
   private _errorListeners: ((error: Error) => void)[] = [];
+  private _location: { lat: number; lon: number } | null = null;
 
   constructor(updateIntervalSeconds = 600) {
     this._updateInterval = updateIntervalSeconds;
@@ -71,11 +105,27 @@ export class WeatherSystem {
 
   setProvider(provider: WeatherProvider): void {
     this._provider = provider;
+    // A provider arriving after `start` has to be used immediately, or the engine sits
+    // on the default weather until the next tick -- which is ten minutes of nothing.
+    if (this._location) void this._fetchWeather(this._location.lat, this._location.lon);
+  }
+
+  getProvider(): WeatherProvider | null {
+    return this._provider;
   }
 
   start(lat: number, lon: number): void {
-    this._fetchWeather(lat, lon);
-    this._timer = window.setInterval(() => this._fetchWeather(lat, lon), this._updateInterval * 1000);
+    this._location = { lat, lon };
+    void this._fetchWeather(lat, lon);
+    this._timer = window.setInterval(
+      () => void this._fetchWeather(lat, lon),
+      this._updateInterval * 1000
+    );
+  }
+
+  /** Where the model is being evaluated. Null before `start`. */
+  getLocation(): { lat: number; lon: number } | null {
+    return this._location;
   }
 
   stop(): void {
@@ -83,17 +133,41 @@ export class WeatherSystem {
       clearInterval(this._timer);
       this._timer = null;
     }
+    this._location = null;
   }
 
+  /**
+   * Produces the weather, from a provider if there is one and the local model if not.
+   *
+   * This used to `return` when no provider was set, which is the whole reason the
+   * desktop was permanently clear: the system was constructed and started every boot,
+   * and did nothing at all, and nothing anywhere recorded that it was doing nothing.
+   *
+   * The local model is not a fallback in the usual sense -- it is the default, and it is
+   * what the settings window, `docs/architecture.md` and `docs/how-to-use.md` have
+   * always described. A provider, if one is ever configured, takes precedence.
+   */
   private async _fetchWeather(lat: number, lon: number): Promise<void> {
-    if (!this._provider) return;
     try {
-      const weather = await this._provider.fetchWeather(lat, lon);
-      this._currentWeather = weather;
-      this._listeners.forEach(fn => fn(weather));
+      let data: WeatherData;
+      if (this._provider) {
+        data = await this._provider.fetchWeather(lat, lon);
+      } else {
+        data = localToWeatherData(simulateWeather({ lat, lon }, new Date()));
+      }
+      this._currentWeather = data;
+      this._listeners.forEach((fn) => fn(data));
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      this._errorListeners.forEach(fn => fn(error));
+      // A provider that fails does not leave the desktop without weather. The local
+      // model is always available and cannot fail, so a fetch error degrades to it
+      // rather than to a blank sky.
+      if (this._provider) {
+        this._currentWeather = localToWeatherData(simulateWeather({ lat, lon }, new Date()));
+        this._currentWeather.temperature = Number.NaN;
+        this._listeners.forEach((fn) => fn(this._currentWeather!));
+      }
+      this._errorListeners.forEach((fn) => fn(error));
     }
   }
 

@@ -13,7 +13,8 @@ import type { AnomalyKind } from './renderer/WorldRenderer.js';
 import { NativeBridge } from './platform/NativeBridge.js';
 import { Persistence } from './platform/Persistence.js';
 import { buildAwaySummary, summaryToTerminalLines } from './platform/AwaySummary.js';
-import { WeatherSystem } from './systems/WeatherSystem.js';
+import { WeatherSystem, type WeatherData } from './systems/WeatherSystem.js';
+import { DEFAULT_LOCATION, type Location } from './systems/LocalWeather.js';
 import { AstronomySystem } from './systems/AstronomySystem.js';
 import { PerformanceSystem } from './systems/PerformanceSystem.js';
 import { AnomalySystem } from './anomalies/AnomalyRegistry.js';
@@ -22,7 +23,7 @@ import { flavorFor } from './anomalies/worldFlavor.js';
 import { JournalSystem, type JournalEntry } from './systems/JournalSystem.js';
 import { MomentSystem } from './systems/MomentSystem.js';
 import { SecretSystem } from './systems/SecretSystem.js';
-import { ParticleSystem } from './systems/ParticleSystem.js';
+import { ParticleSystem, type ParticleEffect } from './systems/ParticleSystem.js';
 import { AudioSystem } from './systems/AudioSystem.js';
 import { ScreenshotSystem } from './platform/ScreenshotSystem.js';
 import { DebugOverlay } from './platform/DebugOverlay.js';
@@ -113,7 +114,7 @@ class Engine {
     this._network = new NetworkSource();
     this._bridge = new NativeBridge();
     this._weather = new WeatherSystem();
-    this._astronomy = new AstronomySystem(42.3, -122.7);
+    this._astronomy = new AstronomySystem(weatherLocation.lat, weatherLocation.lon);
     this._performance = new PerformanceSystem();
     this._anomalies = new AnomalySystem();
     this._journal = new JournalSystem();
@@ -251,9 +252,11 @@ class Engine {
     this._random.start();
     this._anomalies.start();
     this._astronomy.start();
-    // WeatherSystem was never started, so the renderer never received live
-    // weather and the world stayed permanently "clear".
-    this._weather.start(42.3, -122.7);
+    // WeatherSystem was never started, so the renderer never received live weather and
+    // the world stayed permanently "clear". It is started, and it no longer needs a
+    // provider: `WeatherSystem` falls back to the local model, which is what the
+    // settings window and the documentation have always described.
+    this._weather.start(weatherLocation.lat, weatherLocation.lon);
 
     this._bus.emit({
       id: 'engine_start',
@@ -426,19 +429,28 @@ class Engine {
   }
 
   private _setupEventHandlers(): void {
+    // Weather arrives every ten minutes from either a provider or the local model.
+    //
+    // This handler used to discard most of what it was given: it hardcoded `intensity`
+    // to 0.2 or 0.6 from the condition alone, threw away temperature, humidity,
+    // pressure, visibility and uvIndex, and produced a wind direction with `Math.sign`,
+    // which turns 270 degrees into 1 and 90 degrees into 1 -- so the wind blew the same
+    // way regardless of which way it was coming from. The model computes all of it.
     this._weather.onUpdate((w) => {
-      this._renderer.setWeather({
-        condition: w.condition,
-        intensity: w.condition === 'clear' ? 0.2 : 0.6,
-        windSpeed: Math.min(1, w.windSpeed / 12),
-        windDirection: Math.sign(w.windDirection) || 0.3,
-      });
+      this._applyWeather(w);
+
       this._bus.emit({
         id: `weather_${w.condition}_${Date.now()}`,
         type: `weather.${w.condition}`,
         timestamp: Date.now(),
         source: 'weather',
-        payload: { temperature: w.temperature, windSpeed: w.windSpeed },
+        payload: {
+          temperature: w.temperature,
+          windSpeed: w.windSpeed,
+          humidity: w.humidity,
+          pressure: w.pressure,
+          visibility: w.visibility,
+        },
         priority: 'normal',
         rarity: 'common',
         cooldown: 0,
@@ -447,11 +459,20 @@ class Engine {
         seed: Date.now(),
         metadata: {},
       });
+
+      // Precipitation and drifting fog are drawn by the particle layer, which is a
+      // separate system from the renderer. Previously only 'fireflies' was ever
+      // started, so rain, snow, leaves and fog were reachable types with no way to ask
+      // for them.
+      this._syncWeatherParticles(w);
     });
 
     this._bus.subscribe('random.meteor', () => {
       this._renderer.triggerShootingStar();
       this._pushAnomaly('meteor', 3.2, 1);
+      // A trail of sparks at the strike point, not just the flash. The particle type
+      // existed and had no producer, which is the same gap as the weather particles.
+      this._burstParticles('meteor');
     });
 
     this._bus.subscribe('time.midnight', () => {
@@ -831,6 +852,118 @@ class Engine {
   getI18n(): I18n { return this._i18n; }
 
   /**
+   * Pushes a weather reading into the renderer, scaled to what it expects.
+   *
+   * The renderer wants three 0..1 fractions and a direction it can rotate by. Two
+   * conversions happen here and are deliberately explicit, because guessing either one
+   * is how a 270-degree wind ends up blowing from the east:
+   *
+   *   - `windSpeed` arrives in metres per second. Twelve is a storm.
+   *   - `windDirection` arrives in degrees, which is already the unit the renderer
+   *     wants, so it is normalised into 0..1 rather than passed raw.
+   */
+  private _applyWeather(w: WeatherData): void {
+    this._renderer.setWeather({
+      condition: w.condition,
+      // A clear sky is not a zero. Intensity is "how strongly the condition shows",
+      // and a cloudless sky shows its condition very strongly.
+      intensity: w.condition === 'clear' ? 0 : clamp01(0.25 + w.condition.length / 20),
+      windSpeed: clamp01(w.windSpeed / 12),
+      windDirection: ((w.windDirection % 360) + 360) % 360 / 360,
+    });
+    this._lastWeather = w;
+    // The synoptic regime is a local-model concept; a provider has no equivalent, so
+    // it is only recorded when the local model produced the reading.
+    const simulated = w.regime;
+    this._lastRegime = typeof simulated === 'string' ? simulated : null;
+  }
+
+  private _lastWeather: WeatherData | null = null;
+
+  /**
+   * Starts, or stops, the particles the current weather calls for.
+   *
+   * Only one effect can be active at a time, so this is a small state machine rather
+   * than a set of flags. Precipitation wins over fog, because rain in front of fog is
+   * what you would see; leaves are a separate seasonal layer and are left to the
+   * anomalies rather than the weather, so this never fights them for the slot.
+   */
+  private _syncWeatherParticles(w: WeatherData): void {
+    const intensity = w.condition === 'clear' ? 0 : clamp01(w.windSpeed / 12);
+    const want =
+      w.condition === 'rain' || w.condition === 'storm' ? 'rain'
+      : w.condition === 'snow' ? 'snow'
+      : w.condition === 'fog' ? 'fog'
+      : null;
+
+    if (want === this._weatherParticle) {
+      // Already in this state. The count still follows the intensity, so a storm that
+      // strengthens gets denser rather than looking identical to a shower.
+      if (want) this._particles.setMaxParticles(particleBudget(want, intensity));
+      return;
+    }
+    this._weatherParticle = want;
+    if (want) {
+      this._particles.start(want);
+      this._particles.setMaxParticles(particleBudget(want, intensity));
+    } else {
+      // `stop` leaves existing particles alive so they can finish falling; `clear`
+      // would make rain vanish mid-air on the frame the sky clears.
+      this._particles.stop();
+    }
+  }
+
+  /**
+   * Drifting leaves, for the worlds and months that have them.
+   *
+   * The only remaining particle type with no producer. Leaves are a property of the
+   * place and the season rather than of the weather, so they are keyed on the biome
+   * and the month, and they run only when the weather has not already claimed the slot
+   * -- a fine day under a deciduous canopy is exactly when they should be moving, and a
+   * day when it is raining is not.
+   */
+  private _applySeasonalParticles(): void {
+    if (this._weatherParticle) return;
+    const biome = this._worlds.getActive()?.biome;
+    if (biome !== 'temperate-forest') return;
+
+    const month = this._effectiveDate().getMonth();
+    // Northern-hemisphere autumn; the shipped temperate world is in the northern one,
+    // and a world placed in the south would need the same inversion the weather model
+    // applies to its seasons.
+    const autumnal = month >= 8 && month <= 10;
+    if (!autumnal) {
+      if (this._weatherParticle === 'leaves') this._particles.stop();
+      this._weatherParticle = null;
+      return;
+    }
+
+    this._weatherParticle = 'leaves';
+    this._particles.start('leaves');
+    this._particles.setMaxParticles(particleBudget('leaves', 0.6));
+  }
+
+  private _weatherParticle: ParticleEffect | null = null;
+
+  /**
+   * Adds particles for a moment without claiming the weather's slot.
+   *
+   * `_syncWeatherParticles` owns the single active effect because weather is continuous
+   * and precipitation should not be interrupted. An anomaly is the opposite: it is
+   * brief and specific, and stopping the rain to show it would be worse than overlaying
+   * it. So a burst is additive, which is why `ParticleSystem.burst` exists as a
+   * separate entry point rather than the caller juggling `start`.
+   */
+  private _burstParticles(effect: ParticleEffect, count = 30): void {
+    this._particles.burst(effect, count);
+  }
+
+  /** The most recent weather, for the debug overlay and the settings status document. */
+  getLastWeather(): WeatherData | null {
+    return this._lastWeather;
+  }
+
+  /**
    * Switches the interface language and rebuilds everything that renders text.
    *
    * Returns whether the locale was one we ship, so a caller -- and a test -- can tell a
@@ -934,10 +1067,23 @@ class Engine {
     secretsFound: number;
     secretsTotal: number;
     anomalyKinds: number;
+    /** The weather being rendered, and where it was evaluated. Null before the first tick. */
+    weather: {
+      condition: string;
+      temperature: number;
+      humidity: number;
+      windSpeed: number;
+      pressure: number;
+      visibility: number;
+      regime: string;
+      /** Whether a provider supplied this reading or the local model did. */
+      source: 'provider' | 'local';
+    } | null;
     /** Per-phase render timings in ms, present only while profiling is on. */
     phases?: Record<string, number> | undefined;
   } {
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+    const w = this._lastWeather;
     return {
       fps: this._fps,
       frameMs: Math.round(this._lastFrameTime * 100) / 100,
@@ -953,9 +1099,23 @@ class Engine {
       secretsFound: this._secrets.getDiscovered().length,
       secretsTotal: this._secrets.getProgress().total,
       anomalyKinds: this._anomalies.getDefinitions().length,
+      weather: w
+        ? {
+            condition: w.condition,
+            temperature: Math.round(w.temperature * 10) / 10,
+            humidity: Math.round(w.humidity * 100) / 100,
+            windSpeed: Math.round(w.windSpeed * 10) / 10,
+            pressure: Math.round(w.pressure),
+            visibility: Math.round(w.visibility),
+            regime: this._lastRegime ?? 'unknown',
+            source: this._weather.getProvider() ? 'provider' : 'local',
+          }
+        : null,
       phases: this._profiling ? this._renderer.getPhaseTimings() : undefined,
     };
   }
+
+  private _lastRegime: string | null = null;
 
   /** Turns render phase profiling on or off. Off by default: it is a
    *  diagnostic, and this process is expected to sit idle for hours. */
@@ -1279,6 +1439,7 @@ class Engine {
    * pointing at a building that is no longer in the frame.
    */
   private _rebuildZones(): void {
+    this._applySeasonalParticles();
     for (const z of this._interaction.getZones()) this._interaction.unregisterZone(z.id);
     const surfaces = this._renderer.getInteractionSurfaces(this._effectiveDate());
     for (const desc of describeZones(surfaces, this._i18n.translator())) {
@@ -1430,6 +1591,38 @@ class Engine {
 
   /** The hour the scene is drawn at, when creator mode has pinned one. */
   private _simDate: Date | null = null;
+}
+
+/**
+ * Where the weather is evaluated.
+ *
+ * `DEFAULT_LOCATION` rather than anything derived from the machine. A wallpaper that
+ * approximates your position from an IP lookup, or reads it from a system API, is
+ * disclosing something nobody asked it to, and this project has no telemetry and no
+ * accounts. The value is a named constant so it is obviously a choice rather than an
+ * oversight, and the same point is given to the user in the settings window.
+ */
+const weatherLocation: Location = DEFAULT_LOCATION;
+
+/**
+ * How many particles a weather condition is worth.
+ *
+ * Exported because the number is a design decision and belongs somewhere it can be
+ * tested, not buried in a method that is only reached when the sky happens to rain.
+ * A light shower is a few hundred; a storm is a few thousand, and the ceiling is
+ * deliberately modest because each particle is a filled circle on the compositor.
+ */
+export function particleBudget(effect: ParticleEffect, intensity: number): number {
+  const t = clamp01(intensity);
+  switch (effect) {
+    case 'rain': return Math.round(200 + t * 900);
+    case 'snow': return Math.round(150 + t * 500);
+    case 'fog': return Math.round(20 + t * 60);
+    case 'fireflies': return 40;
+    case 'leaves': return Math.round(20 + t * 60);
+    case 'meteor': return 4;
+    default: return 100;
+  }
 }
 
 /**

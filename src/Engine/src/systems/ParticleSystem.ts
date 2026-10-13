@@ -36,6 +36,32 @@ export class ParticleSystem {
     this._effect = null;
   }
 
+  /**
+   * Emits `count` particles of `effect` once, without taking over emission.
+   *
+   * Separate from `start` because the two answer different questions. `start` is a
+   * continuous state -- "it is raining now" -- and taking that slot away from the
+   * weather to show a four-second meteor shower would be wrong. `burst` is an event:
+   * it adds particles that live their short lives and then the previous emitter carries
+   * on exactly as it was.
+   *
+   * Previously every effect was reachable only through `start`, so there was no way to
+   * produce a one-off and the only effect ever started in the whole engine was
+   * 'fireflies'.
+   */
+  burst(effect: ParticleEffect, count = 30): void {
+    const previous = this._effect;
+    this._effect = effect;
+    const room = Math.max(0, this._maxParticles - this._particles.length);
+    for (let i = 0; i < Math.min(count, room); i++) {
+      this._particles.push(this._createParticle());
+    }
+    // Restored in the same tick: `_createParticle` reads `_effect`, and leaving it
+    // changed would silently retarget the next emission from whichever system
+    // happened to be running.
+    this._effect = previous;
+  }
+
   clear(): void {
     this._particles = [];
   }
