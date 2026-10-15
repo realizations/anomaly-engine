@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Exercises FeedRules, the pure edits the settings window makes to a feed list.
+
+    These run without a desktop and without a browser because the operations that are
+    easy to get quietly wrong, such as a rule added with no effect, a duplicate that
+    would fire the same headline twice, or a removal that takes the wrong entry, live in
+    Core rather than in the WPF window, so they can be checked from a console. The
+    window's job is only to move values in and out of these functions.
+
+    No network and no listener: this harness is about the rule list, not the transport.
+    The transport is EventFeedTests.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>FeedRulesTests</AssemblyName>
+    <RootNamespace>FeedRulesTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AnomalyEngine\AnomalyEngine.csproj" />
+  </ItemGroup>
+
+</Project>

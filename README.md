@@ -107,6 +107,7 @@ so than ship a feature table that overstates the project.
 | **Weather** | A local model seeded by latitude and longitude, so the sky is a function of where you are and when it is — never a random draw. Temperature follows the real latitude gradient and season, precipitation is decided by a freezing level rather than a coin flip, and a front crosses during the day so weather arrives rather than appearing. No API key and no network. |
 | **Anomaly layer** | Six anomalies with rarity, cooldowns and durations, fired through the event bus and written to the journal. |
 | **Field notes** | The ARG surface. World premise, observations and progress, from the tray or `Ctrl+Alt+F`. Every anomaly is paired with a plausible denial. |
+| **Event feeds** | RSS, Atom and JSON feeds read by the *host*, turned into anomalies only by rules you write. Settings → Integrations adds one, maps words in a headline onto one of the six registered effects, tests a headline without firing it, and tries a document from disk. A feed does nothing until a rule matches, and can never cause anything else. Off by default. |
 | **Durable state** | World, style, reduced motion, journal and secrets persist to a JSON document in `%APPDATA%` via the native host. A corrupt save cannot stop the engine starting. |
 | **Multi-monitor** | Every display is composed separately, so a mixed aspect-ratio setup gets correct framing on each rather than one crop of a wide panorama. Follows hot-plug, and each display can be given its own world. |
 | **Dynamic quality** | The scene renders to an offscreen buffer and blits up. Render scale adapts to hold a frame budget. |
@@ -124,7 +125,6 @@ so than ship a feature table that overstates the project.
 
 | Feature | What's missing |
 |---------|----------------|
-| **ARG event sources** | RSS, Atom and JSON feeds. A feed is read by the *host*, never by the page, because the page's CSP sets `connect-src 'none'` and that is the property rather than the obstacle. A feed causes nothing until you write a rule mapping words in a headline onto one of the six registered effects, and it can never cause anything else. Off by default. See [Event feeds](#event-feeds). |
 | **World interaction** | Hover, click and triple-click work, and two of the six zones lead to an easter egg. The Konami code listens for `keydown` on a window the host never focuses, so it only fires under `npm run dev`. |
 | **Desktop audio capture** | The engine reacts to an audio file you choose, and never to what is playing on the system. Capturing desktop audio needs a loopback device and a permission granted through a picker, and a wallpaper is the last thing that should be asking for either. `MediaReactivitySystem` has no capture path at all. |
 | **Distribution** | No installer, no code signing, no auto-update. |
@@ -259,7 +259,7 @@ The settings window has ten sections:
 - **Accessibility** — Contrast, sound, keyboard control, focus outlines, text size
 - **Field notes** — Journal, world lore, discovered secrets and progress
 - **Displays** — Per-display worlds, and which display each one is using
-- **Integrations** — Weather, GitHub, RSS, remote event feed
+- **Integrations** — Event feeds, weather, language, audio reactivity
 - **About** — Version, credits, license
 
 Secrets and journal progress live in **Field notes** rather than in a settings page of their
@@ -324,6 +324,31 @@ misbehaves on request:
 Unknown fields in a JSON feed are discarded rather than merged, so a document cannot
 smuggle a value into the engine by being shaped interestingly.
 
+#### Writing a rule
+
+Settings → Integrations is where a rule is written. Each feed is a card that shows its
+type, how often it is checked, how many hosts it is allowed to reach, and whether it is
+polling — and the **Poll this feed** box actually starts and stops it. A rule is the
+words to match plus one of the six registered effects, chosen from a dropdown read from
+the engine's own registry. The picker cannot offer an effect the renderer cannot draw,
+because it does not hold its own list to offer from.
+
+Two controls let you check a rule before it can ever fire:
+
+- **Try a headline**, on each feed, asks the engine's own matcher which rule a sample
+  headline would select. It triggers nothing, saves nothing, and does not touch the
+  feed's enabled flag.
+- **Try a document…** parses an XML or JSON file on this machine against every rule you
+  have configured and reports what would fire. This is the offline path — no feed, no
+  server, no request — and it is why the button is a tester rather than "add a file":
+  only the host fetches, and only over https, so a local path can never become a
+  configured feed.
+
+Each card also carries a health line, from what the engine actually observed: when the
+feed was last checked, how many items the last document held, how many matched your rules,
+and how many caused an effect — or the last failure with the last success beside it. A feed
+that is merely quiet and a feed that is broken do not look the same.
+
 ### Audio reactivity
 
 Settings → Integrations picks an audio file on this machine. The engine decodes it locally,
@@ -380,6 +405,19 @@ Anomalies are rare, strange events. Some examples:
 - A shadow walks behind the trees
 
 When you observe an anomaly, it's recorded in your journal. The journal persists across sessions.
+
+#### The archive
+
+Settings → Events lists every effect the engine can draw, read from its registry rather than
+written down here: name, description, how long it lasts, and where it can fire. Because it
+is generated, it cannot describe an effect the engine does not ship, or omit one it does.
+
+Each entry has a **Show in the world** button. It plays that effect once so you can see what
+a rule would cause. It is never written to the journal, never saved, and expires on its own;
+an effect that does not fit the current world is refused with the reason instead of being
+substituted, so you learn what the effect actually needs. This is the one control that
+reaches the live world, and it only ever runs because you pressed it — the engine's own
+events stay rare and unscheduled.
 
 ### Secrets
 
@@ -473,9 +511,9 @@ src/
       systems/           Weather, astronomy, journal, secrets, particles, audio
       anomalies/         Anomaly registry with rarity and cooldowns
       platform/          Persistence, field notes, debug, creator mode, i18n
-      integrations/      GitHub, RSS and remote event adapters (unconfigured, and
-                         listed in tools/verify-dead-code.mjs so that stays honest)
-    tests/               550 unit tests
+      integrations/      Event feed client and mapper (the host fetches; the mapper
+                         decides what a document means, and rules select the effect)
+    tests/               596 unit tests
 
 docs/                    Documentation, including the world format spec
 tools/                   Verification, showcase and diagnostic scripts
@@ -637,7 +675,7 @@ See [issues](https://github.com/realizations/anomaly-engine/issues) for planned 
 node tools/verify.mjs
 ```
 
-Runs forty-five steps in order. Twenty-two of them prove a gate still bites, the rest exercise the
+Runs forty-six steps in order. Twenty-two of them prove a gate still bites, the rest exercise the
 deployed build **loaded over `file://`** — the exact condition the native host uses. Serving
 the renderer over `http://localhost` in tests hides module and CORS failures, which is
 precisely how a real bug shipped once already: the host loads `index.html` from disk, where
@@ -646,7 +684,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | Tool | Purpose |
 |------|---------|
 | `tools/verify.mjs` | Everything below, in order |
-| `tools/e2e.mjs` | 63 end-to-end checks on the deployed `file://` build |
+| `tools/e2e.mjs` | 69 end-to-end checks on the deployed `file://` build |
 | `tools/per-monitor.mjs` | Proves every display is composed independently, across five layouts |
 | `tools/per-display-worlds.mjs` | Proves each display can show its own world, by checking the two screens render differently |
 | `tools/verify-persistence.mjs` | Launches the real host and checks state round-trips, plus that a corrupt save still starts |
@@ -666,6 +704,8 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/verify-docs.mjs --selftest` | Proves that check. It exists because this file claimed reduced motion scaled animation to 25% while `motion.ts` set 0.1, in two places, across several features |
 | `tools/verify-world-schema.mjs` | Keeps the C# world validator, the `livingwall` CLI and the TypeScript `WorldDefinition` in agreement — required fields, the biome list, and the id pattern, where a stricter rule in the CLI would refuse worlds the engine accepts |
 | `tools/world-folder.mjs` | Runs the world validator against real fixtures on disk: valid worlds, broken files, a folder with one bad world among good ones, and the 200-world ceiling |
+| `tools/feed-rules.mjs` | Runs the feed-rule editing tests: a rule added with no effect, a duplicate, a removal that takes the wrong entry and an enable toggle that lands on the wrong feed are all refused or applied exactly once |
+| `tools/settings-feed-ui.mjs` | Drives the real settings window against a stub bridge: waits for the feed cards, clicks "Add rule" and reads back the `setFeeds(...)` the window sent, then opens the effect archive and previews one — the only check that proves these controls are wired to something |
 | `tools/verify-no-network.mjs` | Asserts the renderer still cannot reach the network: `connect-src 'none'` is intact, no reachable module calls `fetch`/`WebSocket`/`XMLHttpRequest`, the renderer asks for feeds by id rather than by URL, and every effect a feed can cause is one the renderer can draw |
 | `tools/event-feed.mjs` | Points the real host fetcher at a loopback listener that redirects, lies about its length and streams without end, and proves the allow-list, the size cap and the poll floor hold |
 | `tools/verify-seam-check.mjs` | Proves the horizontal-seam detector still catches a full-width step, and still ignores a localised one |
@@ -698,7 +738,7 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/column.mjs` | Samples a vertical pixel column, for diagnosing banding |
 | `tools/capture-ui.mjs` | Screenshots the field-notes panel |
 
-`npm test` runs 550 unit tests across the event bus, scheduler, entities, particles,
+`npm test` runs 596 unit tests across the event bus, scheduler, entities, particles,
 day/night grading, noise, world format, persistence, journal, secrets, moments, the
 motion model, the locale set, the anomaly registry and its world-fit rules, the
 liminal world profile, the return summary, the world digest, an audit that every

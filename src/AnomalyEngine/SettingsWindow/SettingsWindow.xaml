@@ -153,6 +153,105 @@
             rendered as default grey Windows controls against a dark phosphor UI.
             This template brings them in line with the buttons.
         -->
+        <!--
+            Text boxes, which were the one control family the window never themed.
+
+            Three of them carry the whole feed story: the URL you paste, the words a
+            rule matches on, and the headline you try against your rules. All three
+            were rendering as default white Windows boxes inside a dark interface,
+            which put the brightest element on the page exactly where the user is
+            meant to be looking.
+
+            A ControlTemplate is required for the same reason the ComboBox needs one:
+            setting Background on the style does nothing without a template to consume
+            it, so the default template paints over it in system colours.
+
+            PART_ContentHost is what makes this still behave like a text box: it is
+            where the caret, the selection highlight and the IME live. A template
+            without it renders a convincing box that cannot be typed into, which is a
+            worse bug than the default chrome it replaced.
+        -->
+        <Style TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}"/>
+            <!-- Selection has to be legible against a dark field. The system default
+                 is a near-invisible grey-blue. -->
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentDimBrush}"/>
+            <Setter Property="SelectionOpacity" Value="0.6"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="IBeam"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5"
+                                SnapsToDevicePixels="True">
+                            <!--
+                                A Border takes a single child, so the hint and the
+                                content host share a grid rather than the hint
+                                replacing the editor.
+                            -->
+                            <Grid>
+                                <!--
+                                    A hint when the field is empty. Kept faint on
+                                    purpose: it is guidance, not a value, and it must
+                                    never be mistaken for something already typed.
+                                -->
+                                <TextBlock x:Name="Hint"
+                                           Margin="{TemplateBinding Padding}"
+                                           Text="{TemplateBinding Tag}"
+                                           Foreground="{StaticResource FaintBrush}"
+                                           IsHitTestVisible="False"
+                                           Visibility="Collapsed"
+                                           VerticalAlignment="Center"/>
+                                <ScrollViewer x:Name="PART_ContentHost"
+                                              Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center"
+                                              Focusable="False"
+                                              HorizontalScrollBarVisibility="Hidden"
+                                              VerticalScrollBarVisibility="Hidden"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!--
+                                The hint shows only while the field is empty AND not
+                                focused: a placeholder sitting under a live caret reads
+                                as content, and showing it under typed text reads as a
+                                second value. Written as one MultiTrigger rather than a
+                                pair of single triggers that fight each other, which is
+                                what it was, and which left the hint permanently hidden.
+                            -->
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="Text" Value=""/>
+                                    <Condition Property="IsFocused" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Hint" Property="Visibility" Value="Visible"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentDimBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="ComboBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
@@ -345,7 +444,21 @@
         </Style>
     </Window.Resources>
 
-    <Grid>
+    <!--
+        The background lives here, not only on the Window.
+
+        A Window paints its own Background, but this Grid is the root *content*, and
+        content has to be able to stand on its own. The settings-page audit renders
+        this element directly rather than the Window, because a Window that has never
+        been shown has no native handle and rasterises to a blank white image with no
+        error anywhere. With the fill living only on the Window, every screenshot of
+        the settings window came out as a white page with near-white headings on it,
+        which is not what anyone using the application sees.
+
+        Same colour as the Window's own Background, so the running product is
+        unchanged and the captures become true.
+    -->
+    <Grid Background="{StaticResource BgBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="220"/>
             <ColumnDefinition Width="*"/>
@@ -543,6 +656,18 @@
                         <TextBlock x:Name="MotionReducedNote" Style="{StaticResource Note}" Margin="0,6,0,0"
                                    Visibility="Collapsed"
                                    Text="Windows reduce-motion is on, so this is capped low regardless of the setting."/>
+                        <!--
+                            Distinct from the note above, and the difference matters.
+                            That one says the operating system has asked for calm. This
+                            one says your slider position is not the one being used, and
+                            by how much. Without it the slider looks broken rather than
+                            constrained, which is the impression you get when a control
+                            quietly discards what you did to it.
+                        -->
+                        <TextBlock x:Name="MotionCappedNote" Style="{StaticResource Note}"
+                                   Margin="0,4,0,0" Visibility="Collapsed"
+                                   Foreground="{StaticResource WarnBrush}"
+                                   Text="Reduced motion is capping the scene below this setting."/>
                     </StackPanel>
 
                     <!-- ======================= ACCESSIBILITY ======================= -->
@@ -632,10 +757,18 @@
                     <!-- =========================== EVENTS =========================== -->
                     <StackPanel x:Name="EventsSection" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource Heading}" Text="REGISTERED ANOMALIES"/>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,0,0,10"
+                                   Text="Every effect the engine can draw and a feed can select, read from the engine's own registry. Map a headline onto one from the Integrations page."/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <TextBlock x:Name="AnomalyCountText" Text="" Foreground="{StaticResource AccentBrush}"/>
                                 <TextBlock x:Name="AnomalyListText" Text="" Style="{StaticResource Note}" Margin="0,8,0,0"/>
+                                <!--
+                                    Populated at runtime from the registry, so it cannot
+                                    describe an effect the engine does not ship, and
+                                    cannot omit one it does.
+                                -->
+                                <StackPanel x:Name="EffectReferencePanel" Margin="0,16,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -645,6 +778,8 @@
                         </WrapPanel>
                         <TextBlock Style="{StaticResource Note}" Margin="0,6,0,0"
                                    Text="Anomalies carry rarity and cooldowns, and are scoped to biomes and structures: an event that needs an observatory will not fire in a world without one, and the engine substitutes one that fits rather than showing nothing."/>
+                        <TextBlock Style="{StaticResource Note}" Margin="0,10,0,0"
+                                   Text="Show in the world plays one effect once so you can see what a rule would cause. It is never recorded to the journal, never written to disk, and expires on its own. The engine's own events stay rare and unscheduled; this only runs because you asked it to."/>
                     </StackPanel>
 
                     <!-- ========================= FIELD NOTES ========================= -->
@@ -733,30 +868,26 @@
                         <TextBlock x:Name="FeedEmptyNote" Style="{StaticResource Note}"
                                 Margin="0,12,0,0" Text="No feeds configured."/>
 
-                        <ItemsControl x:Name="FeedList" Margin="0,12,0,0">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="14">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Url}" FontSize="12"
-                                                       TextWrapping="Wrap" Foreground="#e9e7e1"/>
-                                            <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
-                                                       Text="{Binding Summary}"/>
-                                            <CheckBox Margin="0,8,0,0" Content="Poll this feed"
-                                                      IsChecked="{Binding Enabled, Mode=TwoWay}"/>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <!--
+                            The cards are built in code rather than bound, because each
+                            one now carries working controls: a rule list with removes, an
+                            effect picker fed by the renderer's registry, an enable toggle
+                            that actually writes, and a tester that answers "would this
+                            headline match". A data template with four click handlers in
+                            it would be harder to keep correct than the construction, and
+                            the closures there already hold the feed's own id.
+                        -->
+                        <ItemsControl x:Name="FeedList" Margin="0,12,0,0"/>
 
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <TextBox x:Name="FeedUrlBox" Width="360" VerticalAlignment="Center"
+                                     Tag="https://example.com/feed.xml"
                                      ToolTip="An https URL. Plain http is accepted on localhost only."/>
                             <Button x:Name="AddFeedUrlButton" Content="Add URL" Padding="14,6" Margin="10,0,0,0"
                                     Click="AddFeedUrl_Click" VerticalAlignment="Center"/>
-                            <Button x:Name="AddFeedButton" Content="Add a file..." Padding="14,6" Margin="10,0,0,0"
-                                    Click="AddFeed_Click" VerticalAlignment="Center"/>
+                            <Button x:Name="TryDocumentButton" Content="Try a document..." Padding="14,6" Margin="10,0,0,0"
+                                    Click="TryDocument_Click" VerticalAlignment="Center"
+                                    ToolTip="Test your rules against a document on this machine. Nothing is fetched and nothing is triggered."/>
                             <Button x:Name="ClearFeedsButton" Content="Remove all" Padding="14,6"
                                     Margin="10,0,0,0" Click="ClearFeeds_Click" VerticalAlignment="Center"/>
                         </StackPanel>

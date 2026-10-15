@@ -35,13 +35,17 @@ export interface WeatherState {
   windDirection: number;
 }
 
-export type AnomalyKind =
-  | 'second-moon'
-  | 'red-moon'
-  | 'forest-watcher'
-  | 'observatory-signal'
-  | 'meteor'
-  | 'lights-out';
+/**
+ * Re-exported rather than declared.
+ *
+ * The renderer used to own this union and the feed mapper mirrored it, which meant the
+ * security boundary rested on two lists agreeing. It now comes from the effect registry
+ * in `anomalies/effects.ts`, so an effect the renderer can draw and an effect a feed can
+ * cause are the same list by construction. Re-exported here because this module is
+ * where the renderer consumes it, and twenty call sites import it from here already.
+ */
+export type { AnomalyKind } from '../anomalies/effects.js';
+import type { AnomalyKind } from '../anomalies/effects.js';
 
 export interface AnomalyVisual {
   type: AnomalyKind;

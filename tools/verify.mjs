@@ -53,8 +53,11 @@ steps.push(await run('world schema self-test', ['verify-world-schema.mjs', '--se
 steps.push(await run('the CLI validator matches the world schema', ['verify-world-schema.mjs']));
 steps.push(await run('the world validator behaves', ['world-folder.mjs']));
 steps.push(await run('a renderer read failure cannot crash the settings window', ['renderer-read.mjs']));
+steps.push(await run('feed rules are edited correctly', ['feed-rules.mjs']));
 steps.push(await run('no-network self-test', ['verify-no-network.mjs', '--selftest']));
 steps.push(await run('the renderer cannot reach the network', ['verify-no-network.mjs']));
+steps.push(await run('status contract self-test', ['verify-status-contract.mjs', '--selftest']));
+steps.push(await run('the settings window and the renderer agree on the status document', ['verify-status-contract.mjs']));
 steps.push(await run('the feed fetcher holds its rules', ['event-feed.mjs']));
 steps.push(await run('release self-test', ['verify-release.mjs', '--selftest']));
 steps.push(await run('the release does what it claims', ['verify-release.mjs']));
@@ -74,6 +77,7 @@ steps.push(await run('motion model present, oscillators routed', ['motion-oscill
 steps.push(await run('flicker is bounded', ['flicker.mjs']));
 steps.push(await run('settings window renders every page', ['settings-shot.mjs']));
 steps.push(await run('settings page audit rejects a mis-wired window', ['settings-shot.mjs', '--selftest']));
+steps.push(await run('the feed rule editor works through the real window', ['settings-feed-ui.mjs']));
 steps.push(await run('no UI-thread blocking in settings', ['verify-settings-blocking.mjs']));
 steps.push(await run('settings poll leaves the UI thread responsive', ['settings-heartbeat.mjs']));
 steps.push(await run('published build is complete', ['verify-publish.mjs']));

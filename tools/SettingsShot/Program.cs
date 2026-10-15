@@ -31,6 +31,7 @@
 ///   dotnet run --project tools/SettingsShot -c Release -- <outdir> [with-host]
 /// </remarks>
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -62,6 +63,7 @@ var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)
         return mode switch
         {
             "--heartbeat" => RunHeartbeatMode(),
+            "--feeds" => RunFeedsMode(),
             _ => RunCaptureMode(outDir),
         };
     }
@@ -102,12 +104,31 @@ var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)
         // at all, even when it is never shown.
         _ = new Application();
 
+        // A null host, deliberately.
+        //
+        // The loaders all return immediately without one, so the captures show the
+        // window's own layout and chrome rather than a mock's contents. That is the
+        // honest thing for this tool to render: a capture filled with stub data would
+        // be a picture of the stub, not of the product, and the two would drift apart
+        // without anyone noticing.
+        //
+        // The window's loaders therefore never run here, so the feed list and the effect
+        // archive render empty in these images. That is a known limit of the captures
+        // and it is stated rather than hidden: showing the window so its loaders run
+        // makes the window the layout root, and a hosted visual ignores a manual Measure
+        // and Arrange, so the capture came out at the window's own size with the product
+        // in one corner and the frame half empty.
+        //
+        // What proves those two pages actually work is the feed-editor gate, which shows
+        // this same window through a real bridge and asserts the cards, the rules, the
+        // effect archive and the rule editor. Between them, a screenshot and a gate.
         var window = LoadSettingsWindow(null);
         if (window is null)
         {
             Console.Error.WriteLine("Could not construct SettingsWindow.");
             return 1;
         }
+
         if (!CapturePages(window, outDir, out var captured))
         {
             return 1;
@@ -117,11 +138,22 @@ var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)
     }
 
     /// <summary>A status document shaped like the renderer's, so the poll does real work.</summary>
-    private static string StubStatusJson() =>
-        "{\"fps\":60,\"frameMs\":4.2,\"memoryMB\":18,\"renderScale\":1,\"style\":\"painterly\"," +
-        "\"worldId\":\"stub-world\",\"worldName\":\"Stub World\",\"fpsLimit\":60," +
-        "\"reducedMotion\":false,\"paused\":false,\"journalCount\":2,\"secretsFound\":1," +
-        "\"secretsTotal\":7,\"anomalyKinds\":6,\"displays\":1}";
+    private static string StubStatusJson()
+    {
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        // The feed health block is what the Integrations card's health line reads. A stub
+        // that omitted it would let the card render "Not checked yet" and pass, which is
+        // the state a broken reader is in too.
+        return "{\"fps\":60,\"frameMs\":4.2,\"memoryMB\":18,\"renderScale\":1,\"style\":\"painterly\"," +
+               "\"worldId\":\"stub-world\",\"worldName\":\"Stub World\",\"fpsLimit\":60," +
+               "\"reducedMotion\":false,\"paused\":false,\"journalCount\":2,\"secretsFound\":1," +
+               "\"secretsTotal\":7,\"anomalyKinds\":6,\"displays\":1," +
+               "\"feeds\":{\"active\":true,\"configured\":2,\"enabled\":1,\"fired\":1,\"lastError\":null," +
+               "\"lastPolled\":{},\"health\":{" +
+                 $"\"feed1\":{{\"lastPolled\":{nowMs},\"lastOk\":{nowMs - 240000},\"lastError\":null,\"items\":12,\"matched\":3,\"fired\":1}}," +
+                 "\"feed2\":{\"lastPolled\":0,\"lastOk\":0,\"lastError\":\"HTTP 503\",\"items\":0,\"matched\":0,\"fired\":0}" +
+               "}}";
+    }
 
     /// <summary>
     /// Renders every navigation section to its own PNG.
@@ -331,6 +363,249 @@ var mode = args.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)
 
         // ButtonBase.OnClick is protected and parameterless; it raises the Click
         // event the window's own handler is attached to.
+        RaiseClick(button);
+    }
+
+    /// <summary>
+    /// Drives the feed rule editor through the real window, against the stub bridge.
+    ///
+    /// The page-capture mode cannot reach this: a window that is never shown never fires
+    /// `Loaded`, so the feed list is never filled and the rule editor is never constructed.
+    /// That is fine for checking layout and useless for checking a control that only
+    /// exists once real data has arrived. So this mode shows the window, waits for the
+    /// cards to be built from the engine's answer, clicks "Add rule" on the first feed, and
+    /// reads back the `setFeeds(...)` the window sent.
+    ///
+    /// It is the only check in the repository that proves the whole path -- registry to
+    /// picker, rules to cards, a click to a push -- rather than one end of it.
+    /// </summary>
+    private static int RunFeedsMode()
+    {
+        _ = new Application();
+        var stub = new MarshallingStubBridge(Dispatcher.CurrentDispatcher, StubStatusJson());
+        var window = LoadSettingsWindow(stub);
+        if (window is null)
+        {
+            Console.Error.WriteLine("Could not construct SettingsWindow.");
+            return 1;
+        }
+
+        var feedList = Field<ItemsControl>(window, "FeedList");
+        if (feedList is null)
+        {
+            Console.Error.WriteLine("FAIL  the settings window has no feed list.");
+            return 1;
+        }
+
+        var phase = 0;
+        var ok = false;
+        var failure = "";
+        var referenceRows = 0;
+        const int BudgetMs = 15000;
+        var start = Environment.TickCount64;
+
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(50),
+        };
+        timer.Tick += (_, _) =>
+        {
+            if (Environment.TickCount64 - start > BudgetMs)
+            {
+                failure = "timed out waiting for the feed editor to reach its expected state";
+                Dispatcher.ExitAllFrames();
+                return;
+            }
+
+            switch (phase)
+            {
+                case 0:
+                    // Filled by LoadFeedsAsync once the window is loaded.
+                    if (feedList.Items.Count == 0) return;
+                    if (feedList.Items.Count != 2)
+                    {
+                        failure = $"expected 2 feed cards, found {feedList.Items.Count}";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    phase = 1;
+                    return;
+
+                case 1:
+                    if (feedList.Items[0] is not DependencyObject card)
+                    {
+                        failure = "the first feed card is not a visual element";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    // Force a layout pass: the visual tree a template builds is only there
+                    // once it has been arranged, and this window is never composited.
+                    if (window.Content is FrameworkElement content) content.UpdateLayout();
+
+                    var addButton = FindButton(card, "Add rule");
+                    if (addButton is null)
+                    {
+                        failure = "the first feed card has no Add rule button";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    var row = VisualTreeHelper.GetParent(addButton) as Panel;
+                    var matchBox = row?.Children.OfType<TextBox>().FirstOrDefault();
+                    var picker = row?.Children.OfType<ComboBox>().FirstOrDefault();
+                    if (matchBox is null || picker is null)
+                    {
+                        failure = "the add-rule row is missing its match box or effect picker";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    if (picker.Items.Count == 0)
+                    {
+                        failure = "the effect picker is empty, so the registry never reached the window";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+
+                    foreach (ComboBoxItem item in picker.Items)
+                    {
+                        if ((item.Tag as string) == "meteor") { picker.SelectedItem = item; break; }
+                    }
+                    matchBox.Text = "release";
+                    RaiseClick(addButton);
+                    phase = 2;
+                    return;
+
+                case 2:
+                    // Wait for the push that carries the new rule.
+                    var last = stub.SetFeedExpressions.LastOrDefault();
+                    if (last is null || !last.Contains("\"match\":\"release\"")) return;
+                    if (!last.Contains("\"anomaly\":\"meteor\""))
+                    {
+                        failure = "the pushed rule names the wrong effect";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+
+                    // The rule editor is wired. Now the archive: show the Events page so
+                    // its code-built rows are laid out, then check it actually rendered.
+                    SelectPage(window, "NavEvents");
+                    if (window.Content is FrameworkElement eventsPane) eventsPane.UpdateLayout();
+                    var panel = Field<StackPanel>(window, "EffectReferencePanel");
+                    if (panel is null || panel.Children.Count == 0)
+                    {
+                        failure = "the effect reference rendered no rows";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    referenceRows = panel.Children.Count;
+                    phase = 3;
+                    return;
+
+                case 3:
+                    if (window.Content is FrameworkElement archivePane) archivePane.UpdateLayout();
+                    var show = FindButton(window.Content as DependencyObject ?? window, "Show in the world");
+                    if (show is null)
+                    {
+                        failure = "the effect reference has no Show in the world button";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    RaiseClick(show);
+                    phase = 4;
+                    return;
+
+                case 4:
+                    var preview = stub.PreviewExpressions.LastOrDefault();
+                    if (preview is null) return;
+                    if (!preview.Contains("second-moon"))
+                    {
+                        failure = "the preview asked for an effect that is not the one shown";
+                        Dispatcher.ExitAllFrames();
+                        return;
+                    }
+                    ok = true;
+                    Dispatcher.ExitAllFrames();
+                    return;
+            }
+        };
+
+        // The dispatcher blocks if the window deadlocks, in which case the timer above can
+        // never fire. A watchdog on its own thread reports that instead of hanging.
+        using var finished = new ManualResetEventSlim(false);
+        var watchdog = new Thread(() =>
+        {
+            if (finished.Wait(BudgetMs + 10000)) return;
+            Console.Out.Flush();
+            Console.Error.WriteLine("FAIL  the feed editor run never finished; the UI thread is stuck.");
+            Environment.Exit(3);
+        })
+        { IsBackground = true, Name = "feeds-watchdog" };
+        watchdog.Start();
+
+        try
+        {
+            timer.Start();
+            window.ShowInTaskbar = false;
+// Shown, but parked off-screen rather than minimised.
+        //
+        // Minimised attaches the presentation source (which is what makes Loaded fire
+        // and the loaders run) but also hands the content a tiny client area, so the
+        // capture came back as a 980x680 bitmap with the product crammed into the top
+        // corner and the rest of the frame empty. Off-screen: the handle exists, nothing
+        // appears on the desktop, and the layout is a real one.
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = -32000;
+        window.Top = -32000;
+        window.Show();
+            Dispatcher.Run();
+            timer.Stop();
+            window.Close();
+        }
+        finally
+        {
+            finished.Set();
+        }
+
+        if (!ok)
+        {
+            Console.Error.WriteLine($"FAIL  feed editor: {failure}");
+            return 1;
+        }
+
+        Console.WriteLine("PASS  the feed editor renders its configured feeds, with the registry's effects");
+        Console.WriteLine("PASS  adding a rule through the window pushes the new rule to the engine");
+        Console.WriteLine($"PASS  the effect archive rendered {referenceRows} rows and previewed one on request");
+        return 0;
+    }
+
+    /// <summary>Reads a private control off the window by its x:Name field.</summary>
+    private static T? Field<T>(object window, string name) where T : class
+    {
+        var field = window.GetType().GetField(
+            name,
+            System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Public);
+        return field?.GetValue(window) as T;
+    }
+
+    /// <summary>Breadth-first search for a button by its content, in the visual tree.</summary>
+    private static Button? FindButton(DependencyObject root, string content)
+    {
+        var queue = new Queue<DependencyObject>();
+        queue.Enqueue(root);
+        while (queue.Count > 0)
+        {
+            var node = queue.Dequeue();
+            if (node is Button b && b.Content as string == content) return b;
+            var count = VisualTreeHelper.GetChildrenCount(node);
+            for (var i = 0; i < count; i++) queue.Enqueue(VisualTreeHelper.GetChild(node, i));
+        }
+        return null;
+    }
+
+    /// <summary>Raises a button's Click the way a person would, through its own handler.</summary>
+    private static void RaiseClick(Button button)
+    {
         var raise = button.GetType().GetMethod(
             "OnClick",
             System.Reflection.BindingFlags.Instance

@@ -133,6 +133,95 @@ public static class RendererRead
     }
 
     /// <summary>
+    /// Reads a single JSON object from a renderer answer, unwrapping first.
+    ///
+    /// The object counterpart of <see cref="TryReadCodeNamePairs"/>, for the calls that
+    /// answer with one object -- the status document, a mapping test -- rather than a
+    /// list. Returns false with a reason for anything else, and never throws, so a
+    /// script error or a shape the renderer did not mean to send cannot reach a caller as
+    /// an exception on the UI thread.
+    ///
+    /// This exists so the unwrap-and-check boundary is one function rather than a private
+    /// helper on the window. The settings window calls it; `RendererReadTests` tests it;
+    /// neither is the only place that knows how a payload is shaped.
+    /// </summary>
+    public static bool TryReadObject(string? json, out JsonElement element, out string reason)
+    {
+        element = default;
+        reason = "";
+
+        var text = Unwrap(json);
+        if (string.IsNullOrWhiteSpace(text) || text == "null")
+        {
+            reason = "the renderer returned nothing";
+            return false;
+        }
+
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(text);
+        }
+        catch (JsonException ex)
+        {
+            reason = $"the payload is not valid JSON: {ex.Message}";
+            return false;
+        }
+
+        using (doc)
+        {
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                // A String here is a script error, and it is worth naming in the reason
+                // because it is the only place the actual cause appears.
+                reason =
+                    $"the renderer returned {doc.RootElement.ValueKind} where an object was " +
+                    $"expected. Payload: {Truncate(text)}";
+                return false;
+            }
+
+            // A script error does not always arrive as a String: WebView2 returns the
+            // failure text as a JSON-encoded value, and when that value is an object it
+            // parses cleanly as one. Without this, a caller reading `fps` out of a page
+            // that threw would get zero and a working-looking panel rather than "the
+            // engine did not answer". `name`, `message` and `stack` together are the
+            // error shape and not something a real status document carries.
+            if (LooksLikeScriptError(doc.RootElement))
+            {
+                reason = $"the renderer answered with an error object. Payload: {Truncate(text)}";
+                return false;
+            }
+
+            // Cloned, so the element outlives the document it was parsed from.
+            element = doc.RootElement.Clone();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether an object is the shape WebView2 returns when the evaluated script throws.
+    /// </summary>
+    private static bool LooksLikeScriptError(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return false;
+        if (!element.TryGetProperty("message", out var message) ||
+            message.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+        // A stack trace is conclusive. Without one, the JavaScript error constructor
+        // names are, and none of them is a field a status, mapping-test or preview
+        // document carries.
+        if (element.TryGetProperty("stack", out _)) return true;
+        var name = element.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+            ? n.GetString()
+            : null;
+        return name is "Error" or "TypeError" or "ReferenceError" or "SyntaxError"
+            or "RangeError" or "URIError" or "EvalError";
+    }
+
+    /// <summary>
     /// Truncates a payload for a log line.
     ///
     /// A renderer error carries a stack trace, and an error message long enough to scroll

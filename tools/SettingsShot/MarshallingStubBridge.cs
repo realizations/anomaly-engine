@@ -77,6 +77,48 @@ internal sealed class MarshallingStubBridge : IEngineBridge
         }
         if (expression.Contains("getDisplayWorlds()")) return "{}";
         if (expression.Contains("getChangedWorlds()")) return "[]";
+
+        // A feed push. The window sends the whole feed list, rules and all, as the
+        // argument to `setFeeds(...)`, so recording the expression is enough for a test
+        // to see what the editor actually wrote -- there is no other channel it could
+        // have left by, because the rules never go to the host.
+        if (expression.Contains("window.__engine.setFeeds("))
+        {
+            SetFeedExpressions.Add(expression);
+            return "null";
+        }
+
+        // A preview request. Answered as a plausible success so the caller's own parsing
+        // runs; the test reads the recorded expression, not this answer.
+        if (expression.Contains("window.__engine.previewEffect("))
+        {
+            PreviewExpressions.Add(expression);
+            return "{\"ok\":true,\"fired\":\"second-moon\",\"needsLandscape\":null}";
+        }
+
+        // The effect registry and a sample feed, so the integrations page renders the rule
+        // editor rather than the empty state. A stub that returned null here would let the
+        // page audit pass while the new controls were never constructed at all, which is
+        // the failure the accessibility stub was fixed for.
+        //
+        // The payloads are single-encoded arrays, not the double-encoded strings WebView2
+        // really returns. `RendererRead.Unwrap` handles both, which is the point of
+        // routing every read through it.
+        if (expression.Contains("getEffects()"))
+        {
+            return "[{\"id\":\"second-moon\",\"name\":\"Second Moon\",\"description\":\"A second moon rises low on the horizon.\",\"family\":\"sky\",\"durationSeconds\":8}," +
+                   "{\"id\":\"meteor\",\"name\":\"Meteor\",\"description\":\"Something crosses the sky quickly.\",\"family\":\"sky\",\"durationSeconds\":4}," +
+                   "{\"id\":\"observatory-signal\",\"name\":\"Observatory Signal\",\"description\":\"The observatory dish turns on its own.\",\"family\":\"signal\",\"durationSeconds\":30,\"needsLandscape\":\"A world with an observatory\"}," +
+                   "{\"id\":\"lights-out\",\"name\":\"Lights Out\",\"description\":\"Every light in the valley goes off at once.\",\"family\":\"behaviour\",\"durationSeconds\":10,\"needsLandscape\":\"A valley, a coast or a settlement\"}]";
+        }
+        if (expression.Contains("getFeeds()"))
+        {
+            return "[{\"id\":\"feed1\",\"url\":\"https://example.invalid/feed.xml\",\"kind\":\"rss\"," +
+                   "\"intervalSeconds\":3600,\"enabled\":true,\"allowedHosts\":[\"example.invalid\"]," +
+                   "\"rules\":[{\"match\":\"maintenance\",\"anomaly\":\"observatory-signal\"}]}," +
+                   "{\"id\":\"feed2\",\"url\":\"https://example.invalid/events.json\",\"kind\":\"json\"," +
+                   "\"intervalSeconds\":7200,\"enabled\":false,\"allowedHosts\":[\"example.invalid\"],\"rules\":[]}]";
+        }
         return "null";
     }
 
@@ -131,6 +173,25 @@ internal sealed class MarshallingStubBridge : IEngineBridge
     // stub: a stub that swallows them means the integrations page renders correctly
     // whether or not it is wired to anything.
     public List<string> FeedPushes { get; } = new List<string>();
+
+    /// <summary>
+    /// Every `setFeeds(...)` the window sent, verbatim.
+    ///
+    /// The rules never reach the host -- only the renderer interprets them -- so this is
+    /// the only place a test can observe what the rule editor actually wrote. That it is
+    /// also how the assertion is written is the point: it checks the value that crossed
+    /// the boundary, not a private field that might have crossed it.
+    /// </summary>
+    public List<string> SetFeedExpressions { get; } = new List<string>();
+
+    /// <summary>
+    /// Every `previewEffect(...)` the window sent.
+    ///
+    /// The archive's "Show in the world" button is the one control that reaches the live
+    /// world, so the thing worth watching is not that it rendered but that pressing it
+    /// sent the request. This is where that is observed.
+    /// </summary>
+    public List<string> PreviewExpressions { get; } = new List<string>();
 
     public void SetFeeds(IReadOnlyList<EventFeedFetcher.FeedSpec> feeds)
     {

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   mapFeed,
+  mapItems,
+  parseItems,
+  matchHeadline,
+  previewDocument,
+  MAX_PREVIEW_MATCHES,
   parseFeed,
   parseJsonFeed,
   decodeEntities,
@@ -260,6 +265,146 @@ describe('mapFeed', () => {
     const signals = mapFeed(body, 'json', RULES);
     expect(signals).toHaveLength(1);
     expect(signals[0].anomaly).toBe('observatory-signal');
+  });
+});
+
+describe('parseItems and mapItems', () => {
+  // The two halves of `mapFeed`, split so a caller that needs a count as well as an
+  // answer parses once. These assert they are the same halves rather than a second way
+  // of doing the same thing.
+
+  it('parses each format through the right parser', () => {
+    expect(parseItems('rss', RSS)).toHaveLength(2);
+    expect(parseItems('json', '{"items":[{"title":"T","id":"1"}]}')).toHaveLength(1);
+    expect(parseItems('rss', '')).toEqual([]);
+  });
+
+  it('mapping the parsed items is the same as mapping the document', () => {
+    expect(mapItems(parseItems('rss', RSS), RULES)).toEqual(mapFeed(RSS, 'rss', RULES));
+    expect(mapItems(parseItems('json', '{"items":[]}'), RULES)).toEqual(
+      mapFeed('{"items":[]}', 'json', RULES)
+    );
+  });
+
+  it('maps nothing with no rules, which is the state a new feed is in', () => {
+    expect(mapItems(parseItems('rss', RSS), [])).toEqual([]);
+  });
+
+  it('maps nothing from no items', () => {
+    expect(mapItems([], RULES)).toEqual([]);
+    expect(mapItems(undefined as never, RULES)).toEqual([]);
+  });
+});
+
+describe('matchHeadline', () => {
+  // The mapping tester in the settings window calls exactly this function, so these are
+  // the guarantees that make it a preview rather than a second opinion: whatever it
+  // answers is what the poll loop will do.
+
+  it('returns the rule a headline matches', () => {
+    expect(matchHeadline('Server maintenance scheduled', RULES)?.anomaly).toBe('observatory-signal');
+  });
+
+  it('returns null when nothing matches', () => {
+    expect(matchHeadline('Nothing to see here', RULES)).toBeNull();
+  });
+
+  it('matches a substring case-insensitively, because feeds are inconsistent', () => {
+    expect(matchHeadline('MAINTENANCE', RULES)?.match).toBe('maintenance');
+  });
+
+  it('returns the first matching rule, so order is how a user overrides', () => {
+    const rule = matchHeadline('server release', [
+      { match: 'server', anomaly: 'lights-out' },
+      { match: 'release', anomaly: 'meteor' },
+    ]);
+    expect(rule?.anomaly).toBe('lights-out');
+  });
+
+  it('refuses a rule naming an effect that is not registered', () => {
+    expect(matchHeadline('maintenance', [{ match: 'maintenance', anomaly: 'nope' as never }])).toBeNull();
+  });
+
+  it('refuses an empty, whitespace-only or non-string match', () => {
+    expect(matchHeadline('anything', [{ match: '   ', anomaly: 'meteor' }])).toBeNull();
+    expect(matchHeadline('anything', [{ match: 42 as never, anomaly: 'meteor' }])).toBeNull();
+  });
+
+  it('returns null for an empty rule list and for a non-string headline', () => {
+    expect(matchHeadline('maintenance', [])).toBeNull();
+    expect(matchHeadline(undefined as never, RULES)).toBeNull();
+  });
+});
+
+describe('previewDocument', () => {
+  // The offline document tester in the settings window. It answers "what would this file
+  // cause", so it must use the same parse and the same matching as a real poll.
+
+  const feeds = [{ id: 'feed-1', rules: RULES }];
+
+  it('counts the items in a document even when no rule matches', () => {
+    const result = previewDocument('rss', RSS, []);
+    expect(result.items).toBe(2);
+    expect(result.matches).toEqual([]);
+  });
+
+  it('reports a match with its feed, effect, words and title', () => {
+    const result = previewDocument('rss', RSS, feeds);
+    expect(result.items).toBe(2);
+    expect(result.matches[0]).toEqual({
+      feedId: 'feed-1',
+      match: 'maintenance',
+      anomaly: 'observatory-signal',
+      title: 'Server maintenance scheduled',
+    });
+  });
+
+  it('takes the effect from the rule, never from the document', () => {
+    const hostile = '<rss><channel><item><title>lights-out</title><guid>g</guid></item></channel></rss>';
+    // No rule matches "lights-out", so the effect word in the document causes nothing.
+    expect(previewDocument('rss', hostile, feeds).matches).toEqual([]);
+    const mapped = previewDocument('rss', hostile, [
+      { id: 'f', rules: [{ match: 'lights-out', anomaly: 'red-moon' }] },
+    ]);
+    expect(mapped.matches[0].anomaly).toBe('red-moon');
+  });
+
+  it('tests every feed, so a rule on any of them can be checked', () => {
+    const result = previewDocument('rss', RSS, [
+      { id: 'a', rules: [{ match: 'release', anomaly: 'meteor' }] },
+      { id: 'b', rules: [{ match: 'maintenance', anomaly: 'lights-out' }] },
+    ]);
+    expect(result.matches.map((m) => m.feedId)).toEqual(['a', 'b']);
+  });
+
+  it('refuses a rule naming an effect that is not registered', () => {
+    const result = previewDocument('rss', RSS, [
+      { id: 'a', rules: [{ match: 'maintenance', anomaly: 'nope' as never }] },
+    ]);
+    expect(result.matches).toEqual([]);
+  });
+
+  it('caps the matches it reports, so a large document stays a summary', () => {
+    const many = `<rss><channel>${Array.from(
+      { length: 60 },
+      (_, i) => `<item><title>maintenance ${i}</title><guid>g${i}</guid></item>`
+    ).join('')}</channel></rss>`;
+    const result = previewDocument('rss', many, feeds);
+    expect(result.matches).toHaveLength(MAX_PREVIEW_MATCHES);
+    expect(result.items).toBe(60);
+  });
+
+  it('returns nothing for an empty or non-string body', () => {
+    expect(previewDocument('rss', '', feeds)).toEqual({ items: 0, matches: [] });
+    expect(previewDocument('rss', '   ', feeds)).toEqual({ items: 0, matches: [] });
+    expect(previewDocument('rss', undefined as never, feeds)).toEqual({ items: 0, matches: [] });
+  });
+
+  it('reads a JSON document through the same path', () => {
+    const body = '{"items":[{"title":"Planned maintenance tonight","id":"j1"}]}';
+    const result = previewDocument('json', body, feeds);
+    expect(result.items).toBe(1);
+    expect(result.matches[0].anomaly).toBe('observatory-signal');
   });
 });
 

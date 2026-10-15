@@ -1,4 +1,36 @@
-import type { AnomalyKind } from '../renderer/WorldRenderer.js';
+import type { AnomalyKind } from '../anomalies/effects.js';
+import { isAnomalyKind } from '../anomalies/effects.js';
+
+/**
+ * Turns a feed document into signals the engine can act on.
+ *
+ * Everything here is a pure function over a string. That is the whole design, and it is
+ * a change of approach from what it replaces: `GitHubSource`, `RSSSource` and
+ * `RemoteEventSource` each held their own `fetch`, their own timer and their own parser,
+ * none of them could be constructed in a test without a network or a DOM, and the
+ * content security policy blocks `fetch` from the page anyway -- so all three were
+ * unreachable code and three exemptions in the dead-code gate. They have been deleted.
+ *
+ * The host fetches; this file decides what a fetched document *means*. Splitting it that
+ * way is also what makes the security property checkable: the renderer has no network
+ * access at all, so everything it learns arrives as text over a channel it cannot write
+ * to, and the only thing it will do with that text is match it against rules the user
+ * wrote.
+ */
+
+/**
+ * The effects a feed may cause come from the one registry, not from a copy kept here.
+ *
+ * This module used to declare its own `ANOMALY_KINDS` array, described as "mirrored from
+ * the renderer's union", and the only thing keeping the two honest was a gate that
+ * compared them by regex. One registry is strictly better than a gate: a mirror can
+ * drift and be caught, a derivation cannot drift at all.
+ *
+ * `isAnomalyKind` is re-exported so existing importers and the settings window have one
+ * function to ask, rather than each importing the registry directly and forming a habit
+ * that slowly unpicks the mapper's own boundary.
+ */
+export { isAnomalyKind };
 
 /**
  * Turns a feed document into signals the engine can act on.
@@ -52,21 +84,6 @@ export interface RemoteSignal {
   title: string;
   /** Milliseconds since the epoch, from the document where it has one. */
   at: number;
-}
-
-/** The six effects, mirrored from the renderer's union. */
-const ANOMALY_KINDS: readonly AnomalyKind[] = [
-  'second-moon',
-  'red-moon',
-  'forest-watcher',
-  'observatory-signal',
-  'meteor',
-  'lights-out',
-];
-
-/** Whether a string names a registered effect. Exported for the settings window's check. */
-export function isAnomalyKind(value: string): value is AnomalyKind {
-  return (ANOMALY_KINDS as readonly string[]).includes(value);
 }
 
 /** Ceiling on signals from one document. A feed cannot flood the scheduler. */
@@ -205,30 +222,64 @@ export function parseJsonFeed(body: string): FeedItem[] {
   return items;
 }
 
+/**
+ * Parses a document into items, dispatching on the declared format.
+ *
+ * Exists so that the format question is answered in one place. Three callers need it
+ * now -- the poll loop, the offline document tester, and the feed client's own health
+ * bookkeeping -- and three copies of `kind === 'json' ? json : xml` is three places a
+ * third format would have to be added.
+ */
+export function parseItems(kind: FeedKind, body: string): FeedItem[] {
+  return kind === 'json' ? parseJsonFeed(body) : parseFeed(body);
+}
+
 /* ------------------------------------------------------------------- mapping -- */
 
 /**
- * Applies the user's rules to a parsed feed.
+ * The one place a headline is tested against a rule.
+ *
+ * Shared by the poll loop and by the settings window's mapping tester, which is the
+ * reason it is a function rather than two loops. A tester that answered a different
+ * question from the one the engine actually asks would be worse than no tester: it
+ * would confirm a mapping and then not fire it.
+ *
+ * A rule is *usable* only if it names an effect in the registry. This is checked here as
+ * well as on the way in, so both callers refuse the same rules -- and a rule naming an
+ * effect the renderer cannot draw matches nothing rather than falling through to the
+ * next rule. The matching is a case-insensitive substring, which is the documented
+ * semantics and the thing the rule editor describes in words.
+ */
+export function matchHeadline(headline: string, rules: FeedRule[]): FeedRule | null {
+  if (!Array.isArray(rules) || rules.length === 0) return null;
+  if (typeof headline !== 'string') return null;
+
+  const haystack = headline.toLowerCase();
+  for (const rule of rules) {
+    if (typeof rule?.match !== 'string' || rule.match.trim().length === 0) continue;
+    if (!isAnomalyKind(rule.anomaly)) continue;
+    if (haystack.includes(rule.match.toLowerCase())) return rule;
+  }
+  return null;
+}
+
+/**
+ * Applies the user's rules to items that have already been parsed.
  *
  * The property that matters, and the reason this function is written the way it is:
  * **the anomaly comes from the rule, never from the document.** A feed whose title is
  * "lights-out" does not cause a lights-out; it causes whatever the user mapped the
  * string "lights-out" to, which may be nothing at all. That is the difference between a
  * feed and a remote control.
+ *
+ * Split from parsing so an item list can be mapped once and also counted, rather than
+ * parsed twice to answer "what does it mean" and "how much of it was there".
  */
-export function mapFeed(body: string, kind: FeedKind, rules: FeedRule[]): RemoteSignal[] {
-  const usable = rules.filter(
-    (rule): rule is FeedRule =>
-      typeof rule?.match === 'string' &&
-      rule.match.trim().length > 0 &&
-      isAnomalyKind(rule.anomaly)
-  );
+export function mapItems(items: FeedItem[], rules: FeedRule[]): RemoteSignal[] {
   // No usable rules means no signals, which is the state a feed is in until somebody
   // says what it should do. A feed that fires something the moment it is added is a
   // feed nobody can predict.
-  if (usable.length === 0) return [];
-
-  const items = kind === 'json' ? parseJsonFeed(body) : parseFeed(body);
+  if (!Array.isArray(items) || !Array.isArray(rules) || rules.length === 0) return [];
 
   const signals: RemoteSignal[] = [];
   const seen = new Set<string>();
@@ -236,8 +287,7 @@ export function mapFeed(body: string, kind: FeedKind, rules: FeedRule[]): Remote
   for (const item of items) {
     if (signals.length >= MAX_SIGNALS_PER_FETCH) break;
 
-    const haystack = item.title.toLowerCase();
-    const rule = usable.find((r) => haystack.includes(r.match.toLowerCase()));
+    const rule = matchHeadline(item.title, rules);
     if (!rule) continue;
 
     // The fingerprint is derived from the item's own identity. Two polls of the same
@@ -256,6 +306,59 @@ export function mapFeed(body: string, kind: FeedKind, rules: FeedRule[]): Remote
   }
 
   return signals;
+}
+
+/** Parses a document and applies the user's rules to it. The poll loop's whole job. */
+export function mapFeed(body: string, kind: FeedKind, rules: FeedRule[]): RemoteSignal[] {
+  return mapItems(parseItems(kind, body), rules);
+}
+
+/** Ceiling on preview matches, so trying a large document stays a summary. */
+export const MAX_PREVIEW_MATCHES = 12;
+
+/** One rule that a document would have triggered, and the words that matched. */
+export interface PreviewMatch {
+  feedId: string;
+  match: string;
+  anomaly: AnomalyKind;
+  title: string;
+}
+
+/**
+ * What a document would cause, against every configured feed's rules, without firing.
+ *
+ * The offline half of the feature. No feed, no request, no host involvement past the file
+ * dialog: the document is parsed by the same functions the poll loop uses and matched by
+ * the same `matchHeadline`, so what this reports is what a real poll of a feed with those
+ * rules would do. It is a way to check a rule before pointing the engine at a server, not
+ * a second opinion about what the server would send.
+ *
+ * A feed that is disabled is still tested, because the question a preview answers is
+ * "would my rules match this", and a user tuning a rule has usually not enabled the feed
+ * yet -- enabling a feed you have not checked is the thing this exists to prevent.
+ */
+export function previewDocument(
+  kind: FeedKind,
+  body: string,
+  feeds: ReadonlyArray<{ id: string; rules: FeedRule[] }>
+): { items: number; matches: PreviewMatch[] } {
+  if (typeof body !== 'string' || body.trim().length === 0) return { items: 0, matches: [] };
+
+  const items = parseItems(kind, body);
+  if (!Array.isArray(feeds) || feeds.length === 0) return { items: items.length, matches: [] };
+
+  const matches: PreviewMatch[] = [];
+
+  for (const feed of feeds) {
+    for (const item of items) {
+      if (matches.length >= MAX_PREVIEW_MATCHES) return { items: items.length, matches };
+      const rule = matchHeadline(item.title, feed.rules);
+      if (!rule || !isAnomalyKind(rule.anomaly)) continue;
+      matches.push({ feedId: feed.id, match: rule.match, anomaly: rule.anomaly, title: item.title });
+    }
+  }
+
+  return { items: items.length, matches };
 }
 
 /**

@@ -87,6 +87,7 @@ function reachableModules(absolutePaths, sources) {
 export function networkProblems(files) {
   const f = files ?? {
     CSP: read('src', 'Engine', 'renderer', 'index.html'),
+    REGISTRY: read('src', 'Engine', 'src', 'anomalies', 'effects.ts'),
     MAPPER: read('src', 'Engine', 'src', 'integrations', 'FeedMapper.ts'),
     TYPES: read('src', 'Engine', 'src', 'renderer', 'WorldRenderer.ts'),
     CLIENT: read('src', 'Engine', 'src', 'integrations', 'EventFeedClient.ts'),
@@ -159,31 +160,44 @@ export function networkProblems(files) {
     problems.push('EventFeedClient references a url outside its type; the host owns URLs.');
   }
 
-  // 4. Every effect a feed can cause is registered. The mapper has its own copy of the
-  //    six names, and a copy is a place for the two to drift.
-  const registered = /export type AnomalyKind =\s*([\s\S]*?);/.exec(f.TYPES)?.[1] ?? '';
-  const registeredNames = [...registered.matchAll(/'([a-z-]+)'/g)].map((m) => m[1]).sort();
-  const mapperKinds = /const ANOMALY_KINDS: readonly AnomalyKind\[\] = \[([\s\S]*?)\];/
-    .exec(f.MAPPER)?.[1] ?? '';
-  const mapperNames = [...mapperKinds.matchAll(/'([a-z-]+)'/g)].map((m) => m[1]).sort();
+  // 4. There is exactly one effect registry, and the two modules that used to keep their
+  //    own copy now derive from it.
+  //
+  //    The boundary is "a feed can only cause an effect the renderer can draw". It used to
+  //    be kept by two literal lists agreeing -- one in `WorldRenderer`, one mirrored in
+  //    `FeedMapper` -- and a mirrored list can drift while a derived one cannot. The lists
+  //    are gone, so the gate asserts the derivation instead: the registry exists, neither
+  //    module has grown its own list again, and the mapper still validates against it.
+  //
+  //    This check used to read the mirrored lists by regex and compare them. That version
+  //    is what let the drift risk be described as "caught" while the actual property -- one
+  //    source of truth -- was never asserted at all.
+  const registryBody = /export const EFFECT_IDS\s*=\s*\[([\s\S]*?)\]\s*as const/
+    .exec(f.REGISTRY)?.[1] ?? '';
+  const registryNames = [...registryBody.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]);
 
-  if (!registeredNames.length) problems.push('could not read AnomalyKind out of the renderer.');
-  if (!mapperNames.length) problems.push('could not read the mapper\'s effect list.');
-  if (registeredNames.length && mapperNames.length) {
-    const onlyRenderer = registeredNames.filter((n) => !mapperNames.includes(n));
-    const onlyMapper = mapperNames.filter((n) => !registeredNames.includes(n));
-    if (onlyRenderer.length) {
-      problems.push(
-        `the renderer can draw ${onlyRenderer.join(', ')} but a feed cannot cause it. Either ` +
-          'that is deliberate and should be written down, or the two lists have drifted.'
-      );
-    }
-    if (onlyMapper.length) {
-      problems.push(
-        `a feed can cause ${onlyMapper.join(', ')}, which the renderer does not have. ` +
-          'That is the whole security boundary: an effect the engine cannot draw.'
-      );
-    }
+  if (registryNames.length === 0) {
+    problems.push('could not read the effect registry (EFFECT_IDS) out of anomalies/effects.ts.');
+  }
+
+  if (/\bexport\s+type\s+AnomalyKind\s*=/.test(f.TYPES)) {
+    problems.push(
+      'WorldRenderer.ts declares its own AnomalyKind union again. It must derive from the ' +
+        'effect registry, or the renderer and the mapper can drift apart while both look fine.'
+    );
+  }
+  if (!/AnomalyKind[\s\S]{0,200}?from\s*'\.\.\/anomalies\/effects\.js'/.test(f.TYPES)) {
+    problems.push('WorldRenderer.ts does not take AnomalyKind from the effect registry.');
+  }
+
+  if (/\b(?:const|let|var)\s+ANOMALY_KINDS\b/.test(f.MAPPER) || /\bexport\s+type\s+AnomalyKind\s*=/.test(f.MAPPER)) {
+    problems.push(
+      'FeedMapper.ts keeps its own effect list again. It must derive from the registry: a ' +
+        'second list is a second answer to "what can a feed cause".'
+    );
+  }
+  if (!/isAnomalyKind[\s\S]{0,200}?from\s*'\.\.\/anomalies\/effects\.js'/.test(f.MAPPER)) {
+    problems.push('FeedMapper.ts does not validate effects against the registry (isAnomalyKind).');
   }
 
   // 5. The host is the only thing holding a URL, and it enforces the allow-list.
@@ -213,6 +227,7 @@ if (process.argv.includes('--selftest')) {
   }));
   const base = {
     CSP: read('src', 'Engine', 'renderer', 'index.html'),
+    REGISTRY: read('src', 'Engine', 'src', 'anomalies', 'effects.ts'),
     MAPPER: read('src', 'Engine', 'src', 'integrations', 'FeedMapper.ts'),
     TYPES: read('src', 'Engine', 'src', 'renderer', 'WorldRenderer.ts'),
     CLIENT: read('src', 'Engine', 'src', 'integrations', 'EventFeedClient.ts'),
@@ -278,14 +293,35 @@ if (process.argv.includes('--selftest')) {
     MAIN: base.MAIN.replace('this._bridge.send(\'feed:request\', { feedId });', 'this._bridge.send(\'feed:request\', { url });'),
   }, true);
 
-  record('an effect the renderer cannot draw is caught', {
+  record('an empty effect registry is caught', {
     ...base,
-    MAPPER: base.MAPPER.replace("'lights-out',", "'lights-out', 'ghost-signal',"),
+    REGISTRY: base.REGISTRY.replace('EFFECT_IDS = [', 'EFFECT_IDS_X = ['),
   }, true);
 
-  record('an effect the renderer can draw but feeds cannot is reported', {
+  record('a renderer that re-declares its own union is caught', {
     ...base,
-    MAPPER: base.MAPPER.replace("  'lights-out',\n", ''),
+    TYPES: base.TYPES.replace(
+      "export type { AnomalyKind } from '../anomalies/effects.js';",
+      "export type AnomalyKind = 'second-moon' | 'ghost-signal';"
+    ),
+  }, true);
+
+  record('a renderer that stops taking AnomalyKind from the registry is caught', {
+    ...base,
+    TYPES: base.TYPES.replace(/from '\.\.\/anomalies\/effects\.js'/g, "from './elsewhere.js'"),
+  }, true);
+
+  record('a mapper that keeps its own effect list is caught', {
+    ...base,
+    MAPPER: base.MAPPER.replace(
+      'import { isAnomalyKind }',
+      "const ANOMALY_KINDS = ['lights-out'];\nimport { isAnomalyKind }"
+    ),
+  }, true);
+
+  record('a mapper that stops validating against the registry is caught', {
+    ...base,
+    MAPPER: base.MAPPER.replace(/from '\.\.\/anomalies\/effects\.js'/g, "from './elsewhere.js'"),
   }, true);
 
   record('auto-redirect being re-enabled is caught', {

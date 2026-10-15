@@ -98,6 +98,41 @@ public static class RendererReadTests
         Read("\"" + new string('x', 5000) + "\"", out _, out var truncated);
         Expect("a huge payload is truncated in the reason", truncated.Length < 500, $"len {truncated.Length}");
 
+        // The settings window's other reads return *objects* rather than lists, and it is
+        // now `Unwrap` that normalises them -- the fleet of `JsonNode.Parse(json)?.ToString()`
+        // call sites is gone. Those only produced the right string because a JsonNode
+        // holding a string prints it unquoted, which is a coincidence rather than a
+        // contract. These lock in that the explicit boundary handles the object payloads
+        // the same double-encoded way, so the change cannot have swapped one accident for
+        // another.
+        Expect("an already-plain object is left alone",
+            RendererRead.Unwrap("{\"fps\":60}") == "{\"fps\":60}");
+
+        const string doubleEncodedObject = "\"{\\\"fps\\\":60,\\\"style\\\":\\\"painterly\\\"}\"";
+        var unwrappedObject = RendererRead.Unwrap(doubleEncodedObject);
+        Expect("a double-encoded object unwraps to the object text",
+            unwrappedObject == "{\"fps\":60,\"style\":\"painterly\"}");
+        Expect("and that text deserialises, which is what the window actually needs",
+            DeserialisesToFps(unwrappedObject, 60));
+
+        // TryReadObject: the object-shaped reads (status, a mapping test, a document
+        // preview) share one boundary now instead of a private helper per caller.
+        Expect("an object is read", ReadObject("{\"a\":1}", out _));
+        Expect("a double-encoded object is read", ReadObject(doubleEncodedObject, out _));
+        Expect("an array where an object was expected is refused",
+            !ReadObject("[1,2]", out var whyArray) && whyArray.Contains("Array"));
+        // A script error is the interesting case: it arrives as an object, so a reader
+        // that only checks the root kind would accept it and report defaults. It is
+        // refused by its shape, and the reason names it.
+        Expect("an object-shaped script error is refused and named",
+            !ReadObject(ScriptError, out var whyScript) && whyScript.Contains("error"));
+        Expect("a quoted script error is refused too", !ReadObject(QuotedError, out _));
+        Expect("null is refused", !ReadObject("null", out _));
+        Expect("the string \"null\" is refused", !ReadObject("\"null\"", out _));
+        Expect("empty is refused", !ReadObject("", out _));
+        Expect("a number is refused", !ReadObject("42", out _));
+        Expect("malformed JSON is refused", !ReadObject("{not json", out _));
+
         return _failed;
     }
 
@@ -106,6 +141,26 @@ public static class RendererReadTests
 
     private static bool Read(string? json, out List<(string, string)> items) =>
         Read(json, out items, out _);
+
+    private static bool ReadObject(string? json, out string reason) =>
+        RendererRead.TryReadObject(json, out _, out reason);
+
+    private static bool DeserialisesToFps(string? json, int expected)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            // The real payload mixes types, so read it the way the window does: a
+            // dictionary of JsonElement with each field narrowed on demand.
+            var map = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(json);
+            return map is not null && map.TryGetValue("fps", out var fps)
+                && fps.TryGetInt32(out var n) && n == expected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static bool CanParse(string json)
     {

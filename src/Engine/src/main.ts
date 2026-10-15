@@ -9,7 +9,8 @@ import { ClockSource } from './events/ClockSource.js';
 import { RandomSource } from './events/RandomSource.js';
 import { NetworkSource } from './events/NetworkSource.js';
 import { WorldRenderer } from './renderer/WorldRenderer.js';
-import type { AnomalyKind } from './renderer/WorldRenderer.js';
+import type { AnomalyKind, EffectInfo } from './anomalies/effects.js';
+import { REGISTERED_EFFECTS, isAnomalyKind, effectInfo, effectName } from './anomalies/effects.js';
 import { NativeBridge } from './platform/NativeBridge.js';
 import { Persistence, reconcileFeeds, type PersistedFeed } from './platform/Persistence.js';
 import { buildAwaySummary, summaryToTerminalLines } from './platform/AwaySummary.js';
@@ -37,6 +38,13 @@ import { EasterEggSystem } from './systems/EasterEggSystem.js';
 import { InteractionSystem } from './platform/InteractionSystem.js';
 import { MediaReactivitySystem } from './systems/MediaReactivity.js';
 import { EventFeedClient, type FeedClientState } from './integrations/EventFeedClient.js';
+import {
+  matchHeadline,
+  previewDocument as computeDocumentPreview,
+  type FeedRule,
+  type FeedKind,
+  type PreviewMatch,
+} from './integrations/FeedMapper.js';
 import { BenchmarkSystem } from './systems/BenchmarkSystem.js';
 import { WINDOW_EVENTS } from './core/windowEvents.js';
 import { describeZones } from './systems/landmarkZones.js';
@@ -385,9 +393,29 @@ const firstWorld = this._worlds.getAll()[0];
     this._bridge.sendLog('direction:set', { direction });
   }
 
-  /** Motion level, 0..1. */
+  /** Motion level, 0..1, as actually applied after the reduced-motion cap. */
   getMotionIntensity(): number {
     return this._renderer.getMotionIntensity();
+  }
+
+  /**
+   * The motion level the user asked for, before the reduced-motion cap.
+   *
+   * Reported separately from `getMotionIntensity` because the two genuinely differ,
+   * and conflating them is what made the settings slider unusable.
+   *
+   * The cap in `_applyMotionPreference` clamps the *applied* level to
+   * `REDUCED_MOTION_INTENSITY`. So with reduce-motion on, the applied value reads back
+   * as 0.1 no matter what the user set, and a settings window that mirrors the applied
+   * value shows them a slider that refuses to move -- which is exactly what it was
+   * doing: dragging to 70 was undone within a poll interval, and the only visible
+   * result was the label reading "still".
+   *
+   * A control must show what was chosen and explain what is being done with it. That
+   * is this value and the pair of them.
+   */
+  getRequestedMotionIntensity(): number {
+    return this._persistence?.get().motionIntensity ?? DEFAULT_MOTION_INTENSITY;
   }
 
   /** Sets the motion level and remembers it. */
@@ -651,6 +679,70 @@ const firstWorld = this._worlds.getAll()[0];
   /** Feeds, for the settings window. */
   getFeeds(): PersistedFeed[] {
     return this._persistence.get().eventFeeds;
+  }
+
+  /**
+   * Every registered effect, for the settings window's rule editor.
+   *
+   * The window asks the engine for this rather than carrying its own list, for the same
+   * reason `FeedMapper` derives its effects from the registry: a second list is a second
+   * authority, and the picker is the one a user can actually reach. Copies are returned
+   * so a caller cannot mutate the registry by holding onto the array.
+   */
+  getEffects(): EffectInfo[] {
+    return REGISTERED_EFFECTS.map((e) => ({ ...e }));
+  }
+
+  /**
+   * Which rule a sample headline would select, without firing anything.
+   *
+   * The safe half of the settings window's rule editor. It answers the engine's own
+   * question -- `matchHeadline` is the very function the poll loop uses -- so a mapping
+   * this says will fire is a mapping that fires. Nothing is triggered, nothing is
+   * persisted and no request is made: it is a pure read of rules the user already wrote.
+   */
+  testHeadline(
+    feedId: string,
+    headline: string
+  ): { matched: boolean; anomaly: AnomalyKind | null; effectName: string; match: string } {
+    const feed = this._persistence.get().eventFeeds.find((f) => f.id === feedId);
+    const rules: FeedRule[] = (feed?.rules ?? []).map((r) => ({
+      match: r.match,
+      anomaly: r.anomaly as AnomalyKind,
+    }));
+    const rule = matchHeadline(headline, rules);
+    if (!rule || !isAnomalyKind(rule.anomaly)) {
+      return { matched: false, anomaly: null, effectName: '', match: '' };
+    }
+    return {
+      matched: true,
+      anomaly: rule.anomaly,
+      effectName: effectName(rule.anomaly),
+      match: rule.match,
+    };
+  }
+
+  /**
+   * Parses a document the user chose and reports what their rules would do with it.
+   *
+   * The offline half of the feature: no feed, no request, and no host involvement past
+   * the file dialog. The parsing and matching happen in `previewDocument`, the same pure
+   * functions the poll loop uses, so a rule that previews as firing is a rule that fires.
+   * Only the effect's display name is added here.
+   */
+  previewDocument(
+    kind: FeedKind,
+    body: string
+  ): { items: number; matches: Array<PreviewMatch & { effectName: string }> } {
+    const feeds = this._persistence.get().eventFeeds.map((f) => ({
+      id: f.id,
+      rules: f.rules.map((r) => ({ match: r.match, anomaly: r.anomaly as AnomalyKind })),
+    }));
+    const { items, matches } = computeDocumentPreview(kind, body, feeds);
+    return {
+      items,
+      matches: matches.map((m) => ({ ...m, effectName: effectName(m.anomaly) })),
+    };
   }
 
   /**
@@ -1520,6 +1612,10 @@ const firstWorld = this._worlds.getAll()[0];
     worldName: string;
     fpsLimit: number;
     reducedMotion: boolean;
+    /** The motion level the user chose, 0..1, before the reduced-motion cap. */
+    motionIntensity: number;
+    /** The motion level actually applied, 0..1. Lower when reduced motion caps it. */
+    motionEffective: number;
     /**
      * All five remaining accessibility preferences.
      *
@@ -1594,6 +1690,13 @@ const firstWorld = this._worlds.getAll()[0];
       worldName: this._worlds.getActive()?.name ?? 'Unknown',
       fpsLimit: this._fpsLimit,
       reducedMotion: this._accessibility.getConfig().reducedMotion,
+      /**
+       * Both motion levels, because the settings window has to be able to tell a user
+       * what they chose apart from what the scene is doing with it. Reporting only the
+       * applied one is what left the slider pinned at zero.
+       */
+      motionIntensity: this.getRequestedMotionIntensity(),
+      motionEffective: this._renderer.getMotionIntensity(),
       accessibility: this._accessibility.getConfig(),
       uiScale: this._accessibility.getUiScale(),
       muted: this._audio.isMuted(),
@@ -1948,23 +2051,80 @@ const firstWorld = this._worlds.getAll()[0];
     this._renderer.triggerSurreal();
   }
 
-  forceAnomaly(type: string): void {
-    const durations: Record<string, number> = {
+/**
+   * Fires one effect on demand, for inspection and for the screenshot gates.
+   *
+   * Refuses an unregistered id rather than casting it. This used to take any string and
+   * hand it to the renderer as an `AnomalyKind`, which meant the one place a user or a
+   * test can reach could draw an effect that is not in the registry -- the same class of
+   * hole as a feed inventing an effect, just harder to reach. Now the registry decides,
+   * and an unknown id is a no-op.
+   *
+   * The durations are deliberately *not* the registry's. A real anomaly that lasts
+   * eight seconds is gone before a screenshot is taken, so inspection runs them long
+   * enough to see. Two are the same as the registry's because they were already long
+   * enough to be useful.
+   */
+  forceAnomaly(type: string): boolean {
+    if (!isAnomalyKind(type)) {
+      this._bridge.sendLog('anomaly:rejected', { id: type });
+      return false;
+    }
+    const observe: Record<AnomalyKind, number> = {
       'second-moon': 30,
       'red-moon': 30,
-      'forest-watcher': 30,
+      meteor: 4,
       'observatory-signal': 30,
-      'meteor': 4,
+      'forest-watcher': 30,
       'lights-out': 10,
     };
-    this._pushAnomaly(type as AnomalyKind, durations[type] ?? 10, 1);
+    this._pushAnomaly(type, observe[type] ?? 10, 1);
     if (type === 'meteor') this._renderer.triggerShootingStar();
     if (type === 'lights-out') this._renderer.triggerLightning();
 
     // Record it, so a manually triggered anomaly is as traceable as a
     // scheduled one. Uses the registry's name and rarity when known.
     const def = this._anomalies.getDefinitions().find((d) => d.id === type);
-    this._recordAnomaly(type, def?.name ?? type, def?.rarity ?? 'rare');
+    this._recordAnomaly(type, def?.name ?? effectName(type), def?.rarity ?? 'rare');
+    return true;
+  }
+
+  /**
+   * Plays one registered effect in the world, without recording it.
+   *
+   * The explicit half of "preview". The rule editor's tester answers "would this match"
+   * and touches nothing; this answers "what does it look like", and is only ever reached
+   * because somebody pressed a button -- which is the difference between a preview and the
+   * engine deciding to surprise you. It deliberately skips `_recordAnomaly`: no journal
+   * entry, no secret observed, nothing written to the state file. The effect still expires
+   * on its own, the way a real one does.
+   *
+   * Refused rather than substituted when the effect does not fit the current world, and the
+   * caller is told what it needs. Substitution is right for the scheduler, which must keep
+   * the scene alive, and wrong here: a user who asks to see a forest watcher and is shown a
+   * meteor has been taught the wrong thing about the rule they are writing.
+   */
+  previewEffect(id: string): { ok: boolean; fired: AnomalyKind | null; needsLandscape: string | null } {
+    if (!isAnomalyKind(id)) {
+      this._bridge.sendLog('preview:rejected', { id });
+      return { ok: false, fired: null, needsLandscape: null };
+    }
+
+    const world = this._renderer.getWorld();
+    const def = this._anomalies.getDefinitions().find((d) => d.id === id);
+    if (!def || !this._anomalies.fitsWorld(def, world)) {
+      return { ok: false, fired: null, needsLandscape: effectInfo(id).needsLandscape ?? null };
+    }
+
+    this._pushAnomaly(id, effectInfo(id).durationSeconds, 1);
+    // The two effects whose visual is a one-off renderer call rather than the anomaly
+    // layer itself. `forceAnomaly` nudges the same two, and a preview that skipped them
+    // would show a meteor as nothing at all.
+    if (id === 'meteor') this._renderer.triggerShootingStar();
+    if (id === 'lights-out') this._renderer.triggerLightning();
+
+    this._bridge.sendLog('preview:effect', { id, world: world.id });
+    return { ok: true, fired: id, needsLandscape: null };
   }
 
   /** Re-applies saved preferences after the host pushes its state document. */

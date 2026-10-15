@@ -112,7 +112,6 @@ export const EXEMPT = {
   AnomalySystem: {
     unregister: 'Definitions are registered once at startup and live for the session. There is no dynamic-unregister path.',
     canTrigger: 'An internal predicate used by chooseForWorld; the gate cannot see intra-file use.',
-    fitsWorld: 'Same: called inside this file by chooseForWorld.',
     markPrerequisiteMet: 'No anomaly declares prerequisites today, so nothing ever has one to mark met. docs/creating-events.md says so.',
     getActiveAnomaly: 'The engine tracks the active anomaly itself, to draw it.',
     onEnd: 'Nothing needs to observe an anomaly ending; the journal entry is written when it starts.',

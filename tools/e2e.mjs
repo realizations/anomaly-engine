@@ -619,6 +619,52 @@ check('accepting the edit clears the report',
   (await page.evaluate(() => window.__engine.getChangedWorlds())).length === 0,
   JSON.stringify(await page.evaluate(() => window.__engine.getChangedWorlds())));
 
+// --- the effect registry, and the reads the feed editor is built on ---
+//
+// These run on the deployed file:// build, which is the only place they can be checked:
+// the settings window talks to exactly this surface over the bridge, so a method that
+// exists in TypeScript but is not on `window.__engine` is a control that does nothing.
+// Left until the end of the run because previewEffect plays an effect in the live scene.
+const effects = await page.evaluate(() => window.__engine.getEffects());
+check('the effect registry is exposed with names and durations',
+  effects.length === 6 &&
+    effects.every((e) =>
+      typeof e.id === 'string' &&
+      typeof e.name === 'string' &&
+      typeof e.description === 'string' &&
+      typeof e.durationSeconds === 'number' &&
+      e.durationSeconds > 0
+    ),
+  `${effects.length} effects`);
+
+const previewed = await page.evaluate(() => window.__engine.previewEffect('second-moon'));
+check('previewing a registered effect reports what it played', previewed.ok === true, JSON.stringify(previewed));
+check('previewing an unregistered effect is refused rather than guessed',
+  (await page.evaluate(() => window.__engine.previewEffect('not-an-effect'))).ok === false);
+
+// A preview must be visual only. The journal is the one durable record of an anomaly, and
+// `forceAnomaly` writes to it, so the difference between a preview and a trigger is exactly
+// this count.
+const journalBefore = await page.evaluate(() => window.__engine.getStatus().journalCount);
+await page.evaluate(() => window.__engine.previewEffect('meteor'));
+await page.waitForTimeout(300);
+const journalAfter = await page.evaluate(() => window.__engine.getStatus().journalCount);
+check('a preview is not written to the journal', journalAfter === journalBefore,
+  `${journalBefore} -> ${journalAfter}`);
+
+// A mapping test against a feed that does not exist must answer, not throw: that is the
+// state a fresh install is in, and it is the first thing a user would hit.
+const tested = await page.evaluate(() => window.__engine.testHeadline('no-such-feed', 'anything at all'));
+check('testing a headline with no feed configured answers rather than throwing',
+  tested.matched === false && typeof tested.effectName === 'string', JSON.stringify(tested));
+
+const doc = await page.evaluate(() => window.__engine.previewDocument(
+  'rss',
+  '<?xml version="1.0"?><rss><channel><item><title>hello</title><guid>1</guid></item></channel></rss>'
+));
+check('the offline document tester counts items with no rules configured',
+  doc.items === 1 && Array.isArray(doc.matches) && doc.matches.length === 0, JSON.stringify(doc));
+
 // The favicon has to survive the whole chain: generated into the directory Vite
 // actually copies, referenced relatively so it resolves over file://, and present
 // in the deployed output. Each of those has been wrong at least once and the

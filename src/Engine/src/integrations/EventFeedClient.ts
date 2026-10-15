@@ -1,4 +1,11 @@
-import { mapFeed, unseen, type FeedKind, type FeedRule, type RemoteSignal } from './FeedMapper.js';
+import {
+  mapItems,
+  parseItems,
+  unseen,
+  type FeedKind,
+  type FeedRule,
+  type RemoteSignal,
+} from './FeedMapper.js';
 
 /**
  * Polls configured feeds and turns what comes back into anomalies.
@@ -40,6 +47,32 @@ export interface FeedClientState {
   lastError: string | null;
   /** When each feed was last asked for, so the panel can show it. */
   lastPolled: Record<string, number>;
+  /** Per-feed health, so a card can say what happened rather than only that it exists. */
+  health: Record<string, FeedHealth>;
+}
+
+/**
+ * What one feed has actually done, as opposed to how it is configured.
+ *
+ * Every field is something the engine observed, never something it inferred. A feed that
+ * has answered with nothing for an hour and a feed that has never been asked look
+ * identical in the config, and telling them apart is the whole point of a health line:
+ * "it is silent" and "it is broken" should not look the same to the person who has to
+ * decide which one it is.
+ */
+export interface FeedHealth {
+  /** Milliseconds since the epoch the host was last asked, or null. */
+  lastPolled: number | null;
+  /** Milliseconds since the epoch of the last successful answer, or null. */
+  lastOk: number | null;
+  /** The last failure, cleared by the next success. */
+  lastError: string | null;
+  /** Items the last successful document contained. */
+  items: number;
+  /** Signals those items matched, before deduplication. */
+  matched: number;
+  /** Signals that were new and therefore actually fired. */
+  fired: number;
 }
 
 /**
@@ -70,6 +103,7 @@ export class EventFeedClient {
 
   private _firedFeeds = new Set<string>();
   private _lastPolled: Record<string, number> = {};
+  private _health: Record<string, FeedHealth> = {};
   private _lastError: string | null = null;
 
   /**
@@ -111,6 +145,14 @@ export class EventFeedClient {
     }));
     this._seen.clear();
     this._firedFeeds.clear();
+
+    // Health is pruned rather than cleared. Every rule edit goes through here, so
+    // clearing it would wipe the "last checked" line each time the user typed in the
+    // editor -- the one moment they most want to see it. A feed that is gone loses its
+    // entry; a feed that is still configured keeps its history.
+    const ids = new Set(this._feeds.map((f) => f.id));
+    for (const id of Object.keys(this._health)) if (!ids.has(id)) delete this._health[id];
+    for (const id of Object.keys(this._lastPolled)) if (!ids.has(id)) delete this._lastPolled[id];
   }
 
   start(): void {
@@ -139,6 +181,7 @@ export class EventFeedClient {
       const last = this._lastPolled[feed.id] ?? 0;
       if (now - last < feed.intervalSeconds * 1000) continue;
       this._lastPolled[feed.id] = now;
+      this._recordHealth(feed.id, { lastPolled: now });
       due.push(feed.id);
     }
 
@@ -157,18 +200,30 @@ export class EventFeedClient {
   receive(feedId: string, body: string | null, error?: string | null): RemoteSignal[] {
     if (error) {
       this._lastError = `${feedId}: ${error}`;
+      this._recordHealth(feedId, { lastError: error, items: 0, matched: 0, fired: 0 });
       return [];
     }
 
     const feed = this._feeds.find((f) => f.id === feedId);
     if (!feed) return [];
-    if (!body) return [];
+    if (!body) {
+      this._lastError = `${feedId}: the host returned no document`;
+      this._recordHealth(feedId, { lastError: 'the host returned no document', items: 0, matched: 0, fired: 0 });
+      return [];
+    }
 
+    // Parsed once and mapped from the result, rather than mapped and parsed again to
+    // count. `mapFeed` is the same two steps in one call; the split is what lets the
+    // health line report "twelve items, none matched" instead of only "checked".
+    let items;
     let signals: RemoteSignal[];
     try {
-      signals = mapFeed(body, feed.kind, feed.rules);
+      items = parseItems(feed.kind, body);
+      signals = mapItems(items, feed.rules);
     } catch (e) {
-      this._lastError = `${feedId}: ${e instanceof Error ? e.message : String(e)}`;
+      const message = e instanceof Error ? e.message : String(e);
+      this._lastError = `${feedId}: ${message}`;
+      this._recordHealth(feedId, { lastError: message, items: 0, matched: 0, fired: 0 });
       return [];
     }
 
@@ -178,7 +233,34 @@ export class EventFeedClient {
     // caller forgot to look at, and cannot fire it twice.
     const fresh = unseen(signals, this._seen);
     if (fresh.length > 0) this._firedFeeds.add(feedId);
+    this._recordHealth(feedId, {
+      lastOk: this._now(),
+      lastError: null,
+      items: items.length,
+      matched: signals.length,
+      fired: fresh.length,
+    });
     return fresh;
+  }
+
+  /**
+   * Merges one observation into a feed's health, keeping whatever is not being replaced.
+   *
+   * A success clears the error but must not clear the last-poll timestamp, and a failure
+   * must not clear the last-success timestamp: "last worked 3 minutes ago, failing since"
+   * is exactly the pair that tells a user their server changed.
+   */
+  private _recordHealth(feedId: string, patch: Partial<FeedHealth>): void {
+    const prev = this._health[feedId];
+    this._health[feedId] = {
+      lastPolled: prev?.lastPolled ?? this._lastPolled[feedId] ?? null,
+      lastOk: prev?.lastOk ?? null,
+      lastError: prev?.lastError ?? null,
+      items: prev?.items ?? 0,
+      matched: prev?.matched ?? 0,
+      fired: prev?.fired ?? 0,
+      ...patch,
+    };
   }
 
   getState(): FeedClientState {
@@ -189,12 +271,17 @@ export class EventFeedClient {
       fired: this._firedFeeds.size,
       lastError: this._lastError,
       lastPolled: { ...this._lastPolled },
+      // Copies, so a caller holding the status document cannot mutate the map a later
+      // poll reads from. The status document is polled once a second.
+      health: Object.fromEntries(Object.entries(this._health).map(([id, h]) => [id, { ...h }])),
     };
   }
 
   dispose(): void {
     this._seen.clear();
     this._firedFeeds.clear();
+    this._health = {};
+    this._lastPolled = {};
     this._feeds = [];
     this._active = false;
   }

@@ -88,6 +88,7 @@ public partial class SettingsWindow : Window
             await Guarded("the locale list", LoadLocalesAsync);
             await Guarded("the audio track state", LoadMediaAsync);
             await Guarded("the feed list", LoadFeedsAsync);
+            await Guarded("the effect reference", LoadEffectsAsync);
 
             // Started even if the reads above failed. A window showing stale controls and
             // live readouts is a working window; a window that never starts polling is a
@@ -390,7 +391,12 @@ public partial class SettingsWindow : Window
     {
         var json = await _host!.EvaluateAsync("JSON.stringify(window.__engine.getWorldDetails())");
         if (string.IsNullOrWhiteSpace(json)) return;
-        var parsed = JsonNode.Parse(json)?.ToString();
+        // `RendererRead.Unwrap`, not `JsonNode.Parse(json)?.ToString()`. The latter only
+        // produces the right string because a JsonNode holding a string prints it
+        // unquoted; that is a coincidence of `ToString`, not a documented contract, and
+        // the two call sites that used `JsonDocument.Parse` instead are exactly the two
+        // that crashed the window. The boundary is explicit now.
+        var parsed = RendererRead.Unwrap(json);
         if (parsed is null) return;
         var worlds = JsonSerializer.Deserialize<List<WorldRow>>(parsed);
         if (worlds is null) return;
@@ -421,7 +427,7 @@ public partial class SettingsWindow : Window
             // for why blocking here deadlocks the UI thread.
             var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getChangedWorlds())");
             if (_closing || string.IsNullOrWhiteSpace(json)) return;
-            var changed = JsonSerializer.Deserialize<List<string>>(JsonNode.Parse(json)?.ToString() ?? "[]");
+            var changed = JsonSerializer.Deserialize<List<string>>(RendererRead.Unwrap(json) ?? "[]");
             if (changed is null || changed.Count == 0) return;
 
             var names = changed
@@ -718,9 +724,28 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
     /// </summary>
     private void RefreshMotionControls(EngineStatus? status)
     {
-        if (status is not null) MotionSlider.Value = Math.Round(status.Value.MotionIntensity * 100);
-        MotionReducedNote.Visibility = status?.ReducedMotion == true ? Visibility.Visible : Visibility.Collapsed;
+        // Never during a drag. The poll runs once a second; a slider that is being
+        // dragged is showing the user's thumb, and writing to it mid-drag makes the
+        // thumb fight the track. The value arrives on the very next poll once released.
+        if (status is not null && !_motionDragging)
+        {
+            // The *requested* level, not the applied one. The settings window used to
+            // read a `motionIntensity` that the status document never carried, so this
+            // evaluated to zero on every poll and the slider was dragged back to "still"
+            // within a second of every adjustment. A control that discards your input
+            // silently reads as a broken product, and this is what it was.
+            MotionSlider.Value = Math.Round(status.Value.MotionIntensity * 100);
+        }
         UpdateMotionLabels();
+
+        // Explain the cap rather than applying it invisibly. With reduce-motion on the
+        // scene runs below what the slider says, and saying so is the difference between
+        // "the app ignores me" and "the app is doing this on purpose, and here is why".
+        if (status is null) return;
+        var capped = status.Value.MotionEffective + 0.005 < status.Value.MotionIntensity;
+        MotionReducedNote.Visibility =
+            status.Value.ReducedMotion ? Visibility.Visible : Visibility.Collapsed;
+        MotionCappedNote.Visibility = capped ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateMotionLabels()
@@ -804,33 +829,59 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
     /* ------------------------------ event feeds ------------------------------ */
 
     /// <summary>
-    /// One row in the feed list.
+    /// One registered effect, as the rule editor holds it.
     ///
-    /// A record rather than the engine's own type because the window does not need the
-    /// whole shape to display a line, and binding to something with a dozen fields is how
-    /// a list control starts showing things it was not asked to show.
+    /// Read from the renderer's registry rather than written down here. The six ids are
+    /// the security boundary -- a feed may only cause one of them -- and a second copy in
+    /// the window would be a second answer to "what can this feed do", with the window's
+    /// answer being the one a user can actually click. `Landscape` is the effect's own
+    /// note about where it makes sense, shown so a user does not map a forest effect onto
+    /// a desert and then spend an evening wondering why it never fires.
     /// </summary>
-    private sealed record FeedRow
-    {
-        public string Url { get; init; } = "";
-        public string Summary { get; init; } = "";
-        public bool Enabled { get; set; }
-        public string Id { get; init; } = "";
-    }
+    private sealed record EffectChoice(
+        string Id,
+        string Name,
+        string Description,
+        string Family,
+        double DurationSeconds,
+        string Landscape);
 
-    private List<FeedRow> _feeds = new();
+    private List<EffectChoice> _effects = new();
 
     /// <summary>
-    /// Fills the feed list from the renderer's own state.
+    /// Health line per feed card, keyed by feed id.
     ///
-    /// Read from the engine rather than kept by the window, for the same reason as every
-    /// other control here: a feed configured in a previous session, or on the tray, has
-    /// to appear without the window having opinions about it.
+    /// The cards are rebuilt only when the feed list changes, so the health line is
+    /// written into controls that already exist rather than by rebuilding the card: one
+    /// that rebuilt once a second would throw away focus and any half-typed rule.
     /// </summary>
-    private async System.Threading.Tasks.Task LoadFeedsAsync()
+    private readonly Dictionary<string, TextBlock> _feedHealthText = new();
+
+    /// <summary>"30 minutes", "2 minutes", "an hour" -- for the feed's own line.</summary>
+    private static string DescribeInterval(int seconds)
     {
-        if (_host is null || _closing) return;
-        var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getFeeds())");
+        if (seconds % 3600 == 0) return seconds == 3600 ? "an hour" : $"{seconds / 3600} hours";
+        if (seconds % 60 == 0) return seconds == 60 ? "a minute" : $"{seconds / 60} minutes";
+        return $"{seconds} seconds";
+    }
+
+    private List<string> _effectIds() => _effects.Select(e => e.Id).ToList();
+
+    private List<(string Id, string Name)> _effectNames() => _effects.Select(e => (e.Id, e.Name)).ToList();
+
+    private string EffectName(string id) => _effects.FirstOrDefault(e => e.Id == id)?.Name ?? id;
+
+    /// <summary>
+    /// Reads the effect registry once, for every picker on the page.
+    ///
+    /// Cached for the life of the window because the registry is static: it cannot change
+    /// while the window is open, and re-reading it on each rebuild would be a round trip
+    /// per keystroke-like refresh for an answer that never moves.
+    /// </summary>
+    private async System.Threading.Tasks.Task EnsureEffectsAsync()
+    {
+        if (_effects.Count > 0 || _host is null || _closing) return;
+        var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getEffects())");
         if (_closing || string.IsNullOrWhiteSpace(json) || json == "null") return;
 
         JsonElement list;
@@ -844,37 +895,62 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         }
         if (list.ValueKind != JsonValueKind.Array) return;
 
+        var read = new List<EffectChoice>();
+        foreach (var e in list.EnumerateArray())
+        {
+            if (e.ValueKind != JsonValueKind.Object) continue;
+            var id = e.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
+            var name = e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            var desc = e.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
+            var landscape = e.TryGetProperty("needsLandscape", out var l) && l.ValueKind == JsonValueKind.String
+                ? l.GetString() ?? ""
+                : "";
+            var family = e.TryGetProperty("family", out var f) && f.ValueKind == JsonValueKind.String
+                ? f.GetString() ?? ""
+                : "";
+            var duration = e.TryGetProperty("durationSeconds", out var ds) && ds.TryGetDouble(out var dsv)
+                ? dsv
+                : 0;
+            if (id.Length == 0 || name.Length == 0) continue;
+            read.Add(new EffectChoice(id, name, desc, family, duration, landscape));
+        }
+        _effects = read;
+    }
+
+    /// <summary>
+    /// Fills the feed list from the renderer's own state.
+    ///
+    /// Read from the engine rather than kept by the window, for the same reason as every
+    /// other control here: a feed configured in a previous session, or on the tray, has
+    /// to appear without the window having opinions about it.
+    ///
+    /// The cards are built in code rather than bound to a record, because each one carries
+    /// working controls -- a rule list with removes, an effect picker, a mapping tester --
+    /// and a data template with four click handlers in it is harder to keep correct than
+    /// four lines of construction whose closures already hold the feed's id.
+    /// </summary>
+    private async System.Threading.Tasks.Task LoadFeedsAsync()
+    {
+        if (_host is null || _closing) return;
+        await EnsureEffectsAsync();
+        if (_closing) return;
+
+        var feeds = await ReadFeedsAsync();
+        if (_closing) return;
+
         _loading = true;
         try
         {
-            var rows = new List<FeedRow>();
-            foreach (var f in list.EnumerateArray())
+            FeedList.Items.Clear();
+            _feedHealthText.Clear();
+            foreach (var node in feeds)
             {
-                if (f.ValueKind != JsonValueKind.Object) continue;
-                var id = f.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
-                var url = f.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                var enabled = f.TryGetProperty("enabled", out var e) &&
-                              e.ValueKind == JsonValueKind.True;
-                var rules = f.TryGetProperty("rules", out var r) ? r.GetArrayLength() : 0;
-                var hosts = f.TryGetProperty("allowedHosts", out var h) ? h.GetArrayLength() : 0;
-
-                rows.Add(new FeedRow
-                {
-                    Id = id,
-                    Url = url,
-                    Enabled = enabled,
-                    Summary = rules == 0
-                        ? "No rules yet, so this feed cannot cause anything."
-                        : $"{rules} rule(s), {hosts} allowed host(s).",
-                });
+                if (node is JsonObject feed) FeedList.Items.Add(BuildFeedCard(feed));
             }
-
-            _feeds = rows;
-            FeedList.ItemsSource = _feeds;
-            FeedEmptyNote.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            FeedStatusText.Text = rows.Count == 0
+            FeedEmptyNote.Visibility = feeds.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            FeedStatusText.Text = feeds.Count == 0
                 ? ""
-                : $"{rows.Count} feed(s), {rows.Count(f => f.Enabled)} enabled.";
+                : $"{feeds.Count} feed(s), {feeds.Count(IsFeedEnabled)} enabled. A feed only causes something when a rule matches.";
         }
         finally
         {
@@ -882,18 +958,99 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         }
     }
 
-    private async void AddFeed_Click(object sender, RoutedEventArgs e)
+    private static bool IsFeedEnabled(JsonNode? node) =>
+        node is JsonObject o && o["enabled"]?.GetValue<bool>() == true;
+
+    /// <summary>
+    /// Tries a document on disk against the rules already configured.
+    ///
+    /// This replaces an "add a file" button that could not work: a feed is fetched by the
+    /// host over https, so a local path could never become one -- the https-only check
+    /// refused it and the button reported the refusal, which is a control that looks
+    /// broken because it is. What a local file can do is answer "would my rules match
+    /// this", with no feed, no server and no request, which is the question somebody
+    /// writing a rule is actually asking. The document never becomes a configured feed.
+    /// </summary>
+    private async void TryDocument_Click(object sender, RoutedEventArgs e)
     {
         if (_host is null) return;
 
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Choose a feed document",
+            Title = "Choose a feed document to try",
             Filter = "Feed documents|*.xml;*.rss;*.atom;*.json|All files|*.*",
         };
         if (dialog.ShowDialog() != true) return;
 
-        await AddFeedAsync(dialog.FileName);
+        // The same ceiling the host puts on a fetched document, for the same reason: one
+        // large file should not become one large expression across the bridge.
+        const long MaxBytes = 256 * 1024;
+        long size;
+        try
+        {
+            size = new FileInfo(dialog.FileName).Length;
+        }
+        catch (Exception ex)
+        {
+            FeedStatusText.Text = $"Could not read that file: {ex.Message}";
+            return;
+        }
+        if (size > MaxBytes)
+        {
+            FeedStatusText.Text = "That file is larger than the 256KB a fetched feed is capped at, so it was not read.";
+            return;
+        }
+
+        string text;
+        try
+        {
+            text = File.ReadAllText(dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            FeedStatusText.Text = $"Could not read that file: {ex.Message}";
+            return;
+        }
+
+        var kind = dialog.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? "json" : "rss";
+        FeedStatusText.Text = "Reading the document...";
+
+        var json = await _host.EvaluateAsync(
+            $"JSON.stringify(window.__engine.previewDocument(\"{kind}\", {JsonSerializer.Serialize(text)}))");
+        if (_closing) return;
+
+        if (!RendererRead.TryReadObject(json, out var doc, out _))
+        {
+            FeedStatusText.Text = "The engine did not answer.";
+            return;
+        }
+
+        var items = doc.TryGetProperty("items", out var it) && it.TryGetInt32(out var n) ? n : 0;
+        var lines = new List<string>();
+        if (doc.TryGetProperty("matches", out var ms) && ms.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var match in ms.EnumerateArray())
+            {
+                var name = match.TryGetProperty("effectName", out var en) ? en.GetString() ?? "" : "";
+                var title = match.TryGetProperty("title", out var ti) ? ti.GetString() ?? "" : "";
+                lines.Add($"  \u201c{title}\u201d  \u2192  {name}");
+            }
+        }
+
+        if (items == 0)
+        {
+            FeedStatusText.Text = "That did not parse as a feed. It should be RSS, Atom, or the documented JSON shape.";
+        }
+        else if (lines.Count == 0)
+        {
+            FeedStatusText.Text = $"Read {items} item{(items == 1 ? "" : "s")}. None of your rules match any of them.";
+        }
+        else
+        {
+            FeedStatusText.Text =
+                $"Read {items} item{(items == 1 ? "" : "s")}. {lines.Count} would cause an effect:" +
+                Environment.NewLine + string.Join(Environment.NewLine, lines);
+        }
     }
 
     /// <summary>
@@ -1054,6 +1211,500 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         _host.SetFeeds(specs);
     }
 
+    /* ---------------------------- effect reference --------------------------- */
+
+    /// <summary>
+    /// The archive: every registered effect, described from the registry the renderer
+    /// reports rather than from a list kept here.
+    ///
+    /// Because it is generated, it cannot describe an effect the engine does not ship, and
+    /// it cannot omit one it does. That is the property the README's feature tables keep
+    /// failing: a hand-written list is a claim about the code that nothing checks.
+    /// </summary>
+    private async System.Threading.Tasks.Task LoadEffectsAsync()
+    {
+        if (_host is null || _closing) return;
+        await EnsureEffectsAsync();
+        if (_closing) return;
+
+        EffectReferencePanel.Children.Clear();
+        foreach (var effect in _effects) EffectReferencePanel.Children.Add(BuildEffectRow(effect));
+    }
+
+    private FrameworkElement BuildEffectRow(EffectChoice effect)
+    {
+        var wrap = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+
+        var title = new StackPanel { Orientation = Orientation.Horizontal };
+        title.Children.Add(new TextBlock
+        {
+            Text = effect.Name,
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("AccentBrush"),
+        });
+        title.Children.Add(new TextBlock
+        {
+            Text = $"   {effect.Family}  ·  {effect.DurationSeconds:0}s",
+            FontSize = 11,
+            Foreground = (Brush)FindResource("FaintBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        wrap.Children.Add(title);
+
+        wrap.Children.Add(new TextBlock
+        {
+            Text = effect.Description,
+            FontSize = 12,
+            Foreground = (Brush)FindResource("TextBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 18,
+            Margin = new Thickness(0, 3, 0, 0),
+        });
+
+        if (effect.Landscape.Length > 0)
+        {
+            wrap.Children.Add(new TextBlock
+            {
+                Text = $"Only fires in {effect.Landscape.ToLowerInvariant()}.",
+                FontSize = 11,
+                Foreground = (Brush)FindResource("DimBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 3, 0, 0),
+            });
+        }
+
+        var result = new TextBlock
+        {
+            Style = (Style)FindResource("Note"),
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        var show = new Button
+        {
+            Content = "Show in the world",
+            Padding = new Thickness(12, 5, 12, 5),
+            MinHeight = 30,
+            Margin = new Thickness(0, 8, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        var id = effect.Id;
+        show.Click += async (_, _) => await PreviewEffectAsync(id, result);
+        wrap.Children.Add(show);
+        wrap.Children.Add(result);
+
+        return wrap;
+    }
+
+    /// <summary>
+    /// Plays one effect once, in the world behind the desktop, without recording it.
+    ///
+    /// This is the explicit half of "preview", and it is a button rather than something
+    /// the engine does, which is the whole difference from an anomaly. The non-firing half
+    /// is the rule editor's tester; this one answers "what does it look like", and the copy
+    /// says so before it happens. An effect that does not fit the current world is refused
+    /// with the reason rather than substituted, because a user who asks to see a forest
+    /// watcher and is shown a meteor has been taught the wrong thing.
+    /// </summary>
+    private async System.Threading.Tasks.Task PreviewEffectAsync(string id, TextBlock result)
+    {
+        if (_host is null) return;
+        result.Text = "Playing it once in the world...";
+
+        var json = await _host.EvaluateAsync(
+            $"JSON.stringify(window.__engine.previewEffect({JsonSerializer.Serialize(id)}))");
+        if (_closing) return;
+
+        if (!RendererRead.TryReadObject(json, out var doc, out _))
+        {
+            result.Text = "The engine did not answer.";
+            return;
+        }
+
+        var ok = doc.TryGetProperty("ok", out var o) && o.ValueKind == JsonValueKind.True;
+        if (ok)
+        {
+            result.Text = "Playing now, for a few seconds. Nothing was recorded to the journal.";
+            return;
+        }
+
+        var needs = doc.TryGetProperty("needsLandscape", out var n) && n.ValueKind == JsonValueKind.String
+            ? n.GetString() ?? ""
+            : "";
+        result.Text = needs.Length > 0
+            ? $"Not in this world: it only fires in {needs.ToLowerInvariant()}. Switch world to see it."
+            : "That effect is not available right now.";
+    }
+
+    /* ------------------------------ rule editing ----------------------------- */
+
+    /// <summary>
+    /// One feed as a card, with the controls that change it.
+    ///
+    /// Every control here writes through `FeedRules` and then pushes the whole list back
+    /// to the engine, which revalidates it. That is deliberate: the window is not the
+    /// authority on what a rule may be, so it does not keep a private copy it could drift
+    /// from. The card is rebuilt from the engine's own answer after each change, so what
+    /// is on screen is always what the engine actually holds.
+    /// </summary>
+    private Border BuildFeedCard(JsonObject feed)
+    {
+        var id = feed["id"]?.GetValue<string>() ?? "";
+        var url = feed["url"]?.GetValue<string>() ?? "";
+        var kind = feed["kind"]?.GetValue<string>() ?? "rss";
+        var enabled = feed["enabled"]?.GetValue<bool>() ?? false;
+        var interval = feed["intervalSeconds"]?.GetValue<int>() ?? 3600;
+        var hosts = feed["allowedHosts"] is JsonArray hs ? hs.Count : 0;
+        var rules = FeedRules.RulesOf(feed);
+
+        var body = new StackPanel();
+
+        body.Children.Add(new TextBlock
+        {
+            Text = url,
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = (Brush)FindResource("TextBrush"),
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = $"{kind.ToUpperInvariant()}  \u00b7  checked every {DescribeInterval(interval)}  \u00b7  " +
+                   $"{hosts} allowed host{(hosts == 1 ? "" : "s")}",
+            FontSize = 11,
+            Foreground = (Brush)FindResource("DimBrush"),
+            Margin = new Thickness(0, 3, 0, 0),
+        });
+
+        var poll = new CheckBox
+        {
+            // The label carries the state as well as the tick, so the meaning does not
+            // depend on colour or on noticing a small checkmark.
+            Content = "Poll this feed",
+            IsChecked = enabled,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        poll.Checked += async (_, _) => await SetFeedEnabledAsync(id, true);
+        poll.Unchecked += async (_, _) => await SetFeedEnabledAsync(id, false);
+        body.Children.Add(poll);
+
+        // What this feed has actually done, as opposed to how it is configured. Filled in
+        // by the one-second status poll, so it stays current without rebuilding the card.
+        var health = new TextBlock
+        {
+            Text = "Not checked yet.",
+            FontSize = 11,
+            Foreground = (Brush)FindResource("DimBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        _feedHealthText[id] = health;
+        body.Children.Add(health);
+
+        body.Children.Add(new TextBlock
+        {
+            Text = rules.Count == 0 ? "RULES  (none yet)" : $"RULES  ({rules.Count})",
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("AccentBrush"),
+            Margin = new Thickness(0, 16, 0, 6),
+        });
+
+        if (rules.Count == 0)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "This feed is silent until a rule maps words in a headline onto one of the six effects. Add one below.",
+                FontSize = 12,
+                Foreground = (Brush)FindResource("FaintBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18,
+            });
+        }
+        else
+        {
+            for (var i = 0; i < rules.Count; i++)
+            {
+                body.Children.Add(BuildRuleRow(id, rules[i].Match, rules[i].Anomaly, i));
+            }
+        }
+
+        body.Children.Add(BuildAddRuleRow(id));
+        body.Children.Add(BuildTesterRow(id));
+
+        var remove = new Button
+        {
+            Content = "Remove this feed",
+            Padding = new Thickness(12, 5, 12, 5),
+            MinHeight = 30,
+            Margin = new Thickness(0, 14, 0, 0),
+        };
+        remove.Click += async (_, _) => await RemoveFeedAsync(id, url);
+        body.Children.Add(remove);
+
+        return new Border
+        {
+            Background = (Brush)FindResource("CardBrush"),
+            // A polled feed gets the accent rail as well as the tick, so "which of these
+            // is live" is answerable at a glance without relying on one small control.
+            BorderBrush = (Brush)FindResource(enabled ? "AccentDimBrush" : "LineBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(16),
+            Margin = new Thickness(0, 0, 0, 12),
+            Child = body,
+        };
+    }
+
+    private FrameworkElement BuildRuleRow(string feedId, string match, string anomaly, int index)
+    {
+        var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var label = new TextBlock
+        {
+            Text = FeedRules.Describe(match, anomaly, _effectNames()),
+            FontSize = 12,
+            Foreground = (Brush)FindResource("TextBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 12, 0),
+        };
+        var remove = new Button
+        {
+            Content = "Remove",
+            Padding = new Thickness(10, 4, 10, 4),
+            MinHeight = 28,
+            Margin = new Thickness(0),
+        };
+        remove.Click += async (_, _) => await RemoveRuleAsync(feedId, index);
+
+        Grid.SetColumn(remove, 1);
+        row.Children.Add(label);
+        row.Children.Add(remove);
+        return row;
+    }
+
+    private FrameworkElement BuildAddRuleRow(string feedId)
+    {
+        var wrap = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var match = new TextBox
+        {
+            Width = 220,
+            VerticalAlignment = VerticalAlignment.Center,
+            // Rendered as the field's hint by the TextBox template. Doubles as the
+            // example: most people need to be told that a phrase, not a regular
+            // expression, goes here.
+            Tag = "words in a headline, e.g. aurora",
+            ToolTip = "Words to look for in a headline. The match is a case-insensitive substring, the same rule the poll loop uses.",
+        };
+        var picker = new ComboBox
+        {
+            Width = 190,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        foreach (var effect in _effects)
+        {
+            picker.Items.Add(new ComboBoxItem { Content = effect.Name, Tag = effect.Id });
+        }
+        if (picker.Items.Count > 0) picker.SelectedIndex = 0;
+
+        var add = new Button
+        {
+            Content = "Add rule",
+            Padding = new Thickness(12, 5, 12, 5),
+            MinHeight = 30,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        // What the selected effect actually does, so a user picks from understanding
+        // rather than from the name alone. It updates with the picker because the choice
+        // is the thing being explained.
+        var hint = new TextBlock
+        {
+            Style = (Style)FindResource("Note"),
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        void DescribeChosen()
+        {
+            var chosen = (picker.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+            var effect = _effects.FirstOrDefault(e => e.Id == chosen);
+            if (effect is null) { hint.Text = ""; return; }
+            hint.Text = effect.Landscape.Length > 0
+                ? $"{effect.Description}  Only fires in {effect.Landscape.ToLowerInvariant()}."
+                : effect.Description;
+        }
+        picker.SelectionChanged += (_, _) => DescribeChosen();
+        DescribeChosen();
+
+        add.Click += async (_, _) => await AddRuleAsync(feedId, match, picker);
+
+        row.Children.Add(match);
+        row.Children.Add(picker);
+        row.Children.Add(add);
+        wrap.Children.Add(row);
+        wrap.Children.Add(hint);
+        return wrap;
+    }
+
+    private FrameworkElement BuildTesterRow(string feedId)
+    {
+        var wrap = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
+        wrap.Children.Add(new TextBlock
+        {
+            Text = "TRY A HEADLINE",
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("AccentBrush"),
+            Margin = new Thickness(0, 0, 0, 6),
+        });
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var headline = new TextBox
+        {
+            Width = 320,
+            VerticalAlignment = VerticalAlignment.Center,
+            // A real headline shape, so the field teaches the format rather than
+            // describing it.
+            Tag = "paste a headline to try against your rules",
+            ToolTip = "Nothing is triggered. This reports which rule would match, which is what a real poll would do.",
+        };
+        var test = new Button
+        {
+            Content = "Test",
+            Padding = new Thickness(12, 5, 12, 5),
+            MinHeight = 30,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var result = new TextBlock
+        {
+            Style = (Style)FindResource("Note"),
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+
+        test.Click += async (_, _) => await TestHeadlineAsync(feedId, headline.Text, result);
+
+        row.Children.Add(headline);
+        row.Children.Add(test);
+        wrap.Children.Add(row);
+        wrap.Children.Add(result);
+        return wrap;
+    }
+
+    private async System.Threading.Tasks.Task SetFeedEnabledAsync(string feedId, bool enabled)
+    {
+        // Ignored while the list is being rebuilt: setting IsChecked in code fires the
+        // same event a user would, and echoing that back to the engine as a change is how
+        // a refresh turns into a write.
+        if (_host is null || _loading) return;
+
+        var feeds = await ReadFeedsAsync();
+        if (!FeedRules.SetEnabled(feeds, feedId, enabled))
+        {
+            FeedStatusText.Text = "That feed is no longer in the list.";
+            return;
+        }
+        await PushFeedsAsync(feeds);
+        FeedStatusText.Text = enabled
+            ? "This feed will be checked on its next interval."
+            : "This feed will not be checked.";
+    }
+
+    private async System.Threading.Tasks.Task AddRuleAsync(string feedId, TextBox match, ComboBox picker)
+    {
+        if (_host is null) return;
+
+        var text = match.Text;
+        var anomaly = (picker.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+
+        var feeds = await ReadFeedsAsync();
+        if (!FeedRules.TryAddRule(FeedRules.Find(feeds, feedId), text, anomaly, _effectIds(), out var problem))
+        {
+            FeedStatusText.Text = problem;
+            return;
+        }
+        await PushFeedsAsync(feeds);
+        FeedStatusText.Text =
+            $"Added a rule: a headline containing \u201c{text.Trim()}\u201d now causes {EffectName(anomaly)}.";
+    }
+
+    private async System.Threading.Tasks.Task RemoveRuleAsync(string feedId, int index)
+    {
+        if (_host is null) return;
+        var feeds = await ReadFeedsAsync();
+        if (!FeedRules.RemoveRule(FeedRules.Find(feeds, feedId), index))
+        {
+            FeedStatusText.Text = "That rule is already gone.";
+            return;
+        }
+        await PushFeedsAsync(feeds);
+        FeedStatusText.Text = "Removed the rule.";
+    }
+
+    private async System.Threading.Tasks.Task RemoveFeedAsync(string feedId, string url)
+    {
+        if (_host is null) return;
+        var feeds = await ReadFeedsAsync();
+
+        JsonObject? victim = null;
+        foreach (var node in feeds)
+        {
+            if (node is JsonObject o && o["id"]?.GetValue<string>() == feedId) victim = o;
+        }
+        if (victim is null)
+        {
+            FeedStatusText.Text = "That feed is already gone.";
+            return;
+        }
+        feeds.Remove(victim);
+        await PushFeedsAsync(feeds);
+        FeedStatusText.Text = $"Removed {url}.";
+    }
+
+    /// <summary>
+    /// Answers "which rule would this headline match".
+    ///
+    /// The safe half of the editor: it calls the engine's own matcher, does not trigger
+    /// anything, does not persist anything and does not touch a feed's enabled flag. The
+    /// copy says so, because a button next to a feed could reasonably be expected to fire
+    /// something at it.
+    /// </summary>
+    private async System.Threading.Tasks.Task TestHeadlineAsync(string feedId, string headline, TextBlock result)
+    {
+        if (_host is null) return;
+        if (string.IsNullOrWhiteSpace(headline))
+        {
+            result.Text = "Type a headline to test.";
+            return;
+        }
+        result.Text = "Checking...";
+
+        var json = await _host.EvaluateAsync(
+            $"JSON.stringify(window.__engine.testHeadline({JsonSerializer.Serialize(feedId)}, {JsonSerializer.Serialize(headline)}))");
+        if (_closing) return;
+
+        if (!RendererRead.TryReadObject(json, out var doc, out _))
+        {
+            result.Text = "The engine did not answer.";
+            return;
+        }
+
+        var matched = doc.TryGetProperty("matched", out var m) && m.ValueKind == JsonValueKind.True;
+        if (!matched)
+        {
+            result.Text = "No rule matches that headline, so nothing would happen.";
+            return;
+        }
+        var name = doc.TryGetProperty("effectName", out var n) ? n.GetString() ?? "" : "";
+        var words = doc.TryGetProperty("match", out var w) ? w.GetString() ?? "" : "";
+        result.Text = $"Matches \u201c{words}\u201d, so this headline would cause {name}. Nothing was triggered.";
+    }
+
     /* --------------------------- audio reactivity --------------------------- */
 
     private async Task LoadMediaAsync()
@@ -1184,6 +1835,10 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         public bool ReducedMotion;
   /// Motion level the renderer is actually using, 0..1.
   public double MotionIntensity;
+    /// <summary>The level actually applied, which the reduced-motion cap can lower.
+    /// Absent in a status document from a renderer that predates the field, in which
+    /// case it falls back to the requested level rather than to zero.</summary>
+    public double MotionEffective;
         public bool Paused;
         public int JournalCount;
         public int SecretsFound;
@@ -1196,6 +1851,31 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
         /// The five preferences from the accessibility page, as the engine holds them.
         /// </summary>
         public AccessibilityState Accessibility;
+
+        /// <summary>
+        /// Per-feed health, keyed by feed id, as the renderer's feed client reports it.
+        ///
+        /// A dictionary rather than a struct because the set of feeds is whatever the
+        /// user configured. An absent key means "never checked", which is a real state
+        /// and not the same as zero items read.
+        /// </summary>
+        public Dictionary<string, FeedHealthState> FeedHealth;
+    }
+
+    /// <summary>
+    /// What one feed has actually done, mirrored from the renderer.
+    ///
+    /// Times are milliseconds since the epoch, so the window formats "4 minutes ago"
+    /// against its own clock rather than trusting a preformatted string from the page.
+    /// </summary>
+    private struct FeedHealthState
+    {
+        public long LastPolledMs;
+        public long LastOkMs;
+        public string LastError;
+        public int Items;
+        public int Matched;
+        public int Fired;
     }
 
     /// <summary>
@@ -1217,7 +1897,7 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
     {
         var json = await _host!.EvaluateAsync("JSON.stringify(window.__engine.getStatus())");
         if (string.IsNullOrWhiteSpace(json)) return null;
-        var parsed = JsonNode.Parse(json)?.ToString();
+        var parsed = RendererRead.Unwrap(json);
         if (parsed is null) return null;
         var d = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(parsed);
         if (d is null) return null;
@@ -1247,7 +1927,14 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
             WorldName = S("worldName"),
             FpsLimit = I("fpsLimit"),
             ReducedMotion = B("reducedMotion"),
+            // Falls back to the requested level rather than zero when absent. Defaulting
+            // a *display* to zero for a missing field is what pinned the slider at
+            // "still": the field was missing and the fallback said nothing was moving.
             MotionIntensity = Math.Clamp(Db("motionIntensity"), 0, 1),
+            MotionEffective = d.TryGetValue("motionEffective", out var me) &&
+                              me.TryGetDouble(out var mev)
+                ? Math.Clamp(mev, 0, 1)
+                : Math.Clamp(Db("motionIntensity"), 0, 1),
             Paused = B("paused"),
             JournalCount = I("journalCount"),
             SecretsFound = I("secretsFound"),
@@ -1263,7 +1950,41 @@ private void ReducedMotion_Checked(object sender, RoutedEventArgs e)
                 ScalableUI = NB("accessibility", "scalableUI"),
                 FocusVisible = NB("accessibility", "focusVisible"),
             },
+            FeedHealth = ReadFeedHealth(d),
         };
+    }
+
+    /// <summary>
+    /// Reads the nested per-feed health block.
+    ///
+    /// Returns an empty map for anything that is not the expected shape, so a renderer
+    /// that has never polled simply shows "not checked yet" rather than an error. The
+    /// status document is polled once a second, so this runs often and does no work when
+    /// there is nothing there.
+    /// </summary>
+    private static Dictionary<string, FeedHealthState> ReadFeedHealth(Dictionary<string, JsonElement> status)
+    {
+        var map = new Dictionary<string, FeedHealthState>();
+        if (!status.TryGetValue("feeds", out var feeds) || feeds.ValueKind != JsonValueKind.Object) return map;
+        if (!feeds.TryGetProperty("health", out var health) || health.ValueKind != JsonValueKind.Object) return map;
+
+        foreach (var prop in health.EnumerateObject())
+        {
+            var h = prop.Value;
+            if (h.ValueKind != JsonValueKind.Object) continue;
+            map[prop.Name] = new FeedHealthState
+            {
+                LastPolledMs = h.TryGetProperty("lastPolled", out var lp) && lp.TryGetInt64(out var lpv) ? lpv : 0,
+                LastOkMs = h.TryGetProperty("lastOk", out var lo) && lo.TryGetInt64(out var lov) ? lov : 0,
+                LastError = h.TryGetProperty("lastError", out var le) && le.ValueKind == JsonValueKind.String
+                    ? le.GetString() ?? ""
+                    : "",
+                Items = h.TryGetProperty("items", out var it) && it.TryGetInt32(out var itv) ? itv : 0,
+                Matched = h.TryGetProperty("matched", out var ma) && ma.TryGetInt32(out var mav) ? mav : 0,
+                Fired = h.TryGetProperty("fired", out var fi) && fi.TryGetInt32(out var fiv) ? fiv : 0,
+            };
+        }
+        return map;
     }
 
 private void ApplyStatus(EngineStatus s)
@@ -1308,6 +2029,65 @@ private void ApplyStatus(EngineStatus s)
         MonitorListText.Text = string.Join(Environment.NewLine, Screen.AllScreens.Select(sc =>
             $"{sc.DeviceName} · {sc.Bounds.Width}x{sc.Bounds.Height}" +
             (sc.Primary ? " · primary (wallpaper attaches here)" : "")));
+
+        UpdateFeedHealth(s);
+    }
+
+    /// <summary>
+    /// Writes each feed's health line from the status document.
+    ///
+    /// The card is not rebuilt: it is only rebuilt when the feed list changes, so that a
+    /// half-typed rule survives a poll. This updates the one line that is expected to move.
+    /// </summary>
+    private void UpdateFeedHealth(EngineStatus s)
+    {
+        if (_feedHealthText.Count == 0) return;
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        foreach (var pair in _feedHealthText)
+        {
+            pair.Value.Text = s.FeedHealth is not null && s.FeedHealth.TryGetValue(pair.Key, out var h)
+                ? DescribeFeedHealth(h, nowMs)
+                : "Not checked yet.";
+        }
+    }
+
+    /// <summary>
+    /// One feed's health as a sentence. Everything here is something the engine observed:
+    /// a failure keeps the last success beside it, because "last worked 4 minutes ago,
+    /// failing since" is the pair that says the other end changed.
+    /// </summary>
+    private static string DescribeFeedHealth(FeedHealthState h, long nowMs)
+    {
+        if (h.LastError.Length > 0)
+        {
+            var since = h.LastOkMs > 0 ? $" (last good {Ago(nowMs - h.LastOkMs)})" : "";
+            return $"Last check failed: {h.LastError}{since}";
+        }
+        if (h.LastOkMs == 0)
+        {
+            return h.LastPolledMs > 0 ? "Checked, waiting for an answer..." : "Not checked yet.";
+        }
+
+        var read = h.Items == 0
+            ? "read 0 items"
+            : $"read {h.Items} item{(h.Items == 1 ? "" : "s")}";
+        var match = h.Matched > 0 ? $", {h.Matched} matched" : ", none matched your rules";
+        var fire = h.Fired > 0 ? $"; {h.Fired} caused an effect" : "";
+        return $"Checked {Ago(nowMs - h.LastOkMs)}: {read}{match}{fire}.";
+    }
+
+    private static string Ago(long ms)
+    {
+        if (ms < 0) ms = 0;
+        var seconds = ms / 1000;
+        if (seconds < 45) return "just now";
+        var minutes = seconds / 60;
+        if (minutes < 2) return "a minute ago";
+        if (minutes < 60) return $"{minutes} minutes ago";
+        var hours = minutes / 60;
+        if (hours < 24) return hours == 1 ? "an hour ago" : $"{hours} hours ago";
+        var days = hours / 24;
+        return days == 1 ? "yesterday" : $"{days} days ago";
     }
 
     /// <summary>
@@ -1345,7 +2125,7 @@ private void ApplyStatus(EngineStatus s)
             var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getDisplayWorlds())");
             if (_closing || string.IsNullOrWhiteSpace(json)) return new();
             return JsonSerializer.Deserialize<Dictionary<string, string>>(
-                       JsonNode.Parse(json)?.ToString() ?? "{}")
+                       RendererRead.Unwrap(json) ?? "{}")
                    ?? new();
         }
         catch
@@ -1379,7 +2159,7 @@ private void ApplyStatus(EngineStatus s)
         {
             var json = await _host.EvaluateAsync("JSON.stringify(window.__engine.getWorldDetails())");
             if (_closing || string.IsNullOrWhiteSpace(json)) return;
-            worlds = JsonSerializer.Deserialize<List<WorldRow>>(JsonNode.Parse(json)?.ToString() ?? "[]");
+            worlds = JsonSerializer.Deserialize<List<WorldRow>>(RendererRead.Unwrap(json) ?? "[]");
         }
         catch
         {
