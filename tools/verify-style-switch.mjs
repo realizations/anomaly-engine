@@ -28,7 +28,7 @@ await page.goto('http://localhost:4322/');
 await page.waitForFunction(() => window.__engine !== undefined, { timeout: 20000 });
 
 // Same script string WallpaperHost.SetStyle() hands to ExecuteScriptAsync.
-for (const style of ['flat', 'riso', 'painterly']) {
+for (const style of ['flat', 'painterly']) {
   await page.evaluate((s) => {
     window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: s } }));
   }, style);

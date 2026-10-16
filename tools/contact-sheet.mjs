@@ -29,7 +29,7 @@ const WORLDS = [
   ['the-long-corridor', 'corridor'],
 ];
 const HOURS = [0.5, 6.8, 12, 16.8, 19.4, 21.8];
-const STYLES = ['painterly', 'flat', 'riso'];
+const STYLES = ['painterly', 'flat'];
 const CELL_W = 300;
 
 const mode = process.argv[2] ?? 'world-hour';

@@ -657,7 +657,6 @@ public class WallpaperHost : IEngineBridge, IDisposable
         var safe = style switch
         {
             "flat" => "flat",
-            "riso" => "riso",
             _ => "painterly"
         };
         _logger.Info($"Art style set to {safe}.");
@@ -823,7 +822,7 @@ public class WallpaperHost : IEngineBridge, IDisposable
             $"window.dispatchEvent(new CustomEvent('anomaly:monitors', {{ detail: {{ monitors: {json} }} }}));");
     }
 
-    private static readonly string[] StyleOrder = { "painterly", "flat", "riso" };
+    private static readonly string[] StyleOrder = { "painterly", "flat" };
     private int _styleIndex;
 
     public void CycleStyle()

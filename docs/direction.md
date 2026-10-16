@@ -149,11 +149,8 @@ image:
 
 - **Painterly** — layered atmospheric perspective, baked finish, film grain.
   Currently the strongest across day, night, weather and every world.
-- **Flat** — flat fills and solid ridges, no per-frame readback.
-- **Riso** — a real two-drum halftone separation with spot inks, dot-area
-  coverage and paper showing through. It is a print, not a filter.
 
-All three hold up across the full day and night cycle. The choice between them
+Both hold up across the full day and night cycle. The choice between them
 is still open.
 
 ## Open decisions

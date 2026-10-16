@@ -3,7 +3,7 @@
  *
  * This exists because the performance problem in this engine was invisible to
  * every other check: the suite passed, the build was clean, and the stills
- * looked right while riso ran at seven frames a second. Performance claims in
+ * looked right while a halftone style ran at seven frames a second. Performance claims in
  * this repository are expected to come from running this, not from estimating.
  *
  * IMPORTANT — how to read the output. Headless Chromium rasterises on the CPU
@@ -23,7 +23,7 @@ import { dirname, resolve } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const DEPLOYED = resolve(here, '../src/AnomalyEngine/bin/Debug/net8.0-windows/renderer/index.html');
 
-const STYLES = ['painterly', 'flat', 'riso'];
+const STYLES = ['painterly', 'flat'];
 const SIZES = [[1280, 720], [1920, 1080]];
 /** Let the adaptive scaler settle before sampling. */
 const SETTLE_MS = 3000;

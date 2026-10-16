@@ -616,7 +616,6 @@
                         <ComboBox x:Name="StyleCombo" SelectionChanged="StyleCombo_SelectionChanged" SelectedIndex="0">
                             <ComboBoxItem>Painterly</ComboBoxItem>
                             <ComboBoxItem>Flat</ComboBoxItem>
-                            <ComboBoxItem>Riso print</ComboBoxItem>
                         </ComboBox>
                         <TextBlock Style="{StaticResource Note}"
                                    Text="All three are complete renderer treatments rather than filters over one image, and each is designed to hold up across the whole day and night cycle."/>

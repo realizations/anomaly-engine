@@ -53,7 +53,6 @@ fullscreen game reports the wallpaper as fullscreen and pauses itself.
 
 ```
 draw into an offscreen buffer at renderScale × dpr
-    -> style pass (riso separation, or none)
     -> blit the buffer up to the display canvas
     -> adapt quality from the measured frame time
 ```
@@ -74,16 +73,9 @@ an interior is a landscape produces nonsense.
 
 ### What is cached, and why
 
-Two caches exist because both were measured as too slow without them:
-
-- **The riso print.** A halftone separation is a full-frame readback plus a
-  per-pixel dot test. It ran at 181ms a frame. A screen print is a static
-  object, so the print is cached and re-imposed only when the scene has actually
-  shifted: a quarter-hour step, a weather change, a world or size change, and a
-  long maximum-age refresh so slow drift still eventually prints.
-- **The painterly finish.** The vignette and film grain are properties of the
-  canvas, not of the hour, so they are baked once per resize. What remains per
-  frame is a flat multiply fill.
+The painterly finish is cached because the vignette and film grain are
+properties of the canvas rather than of the hour, so they are baked once per
+resize and what remains per frame is a flat multiply fill.
 
 See [`performance.md`](performance.md) for the measurements and for why
 cost-per-pixel is the honest figure.

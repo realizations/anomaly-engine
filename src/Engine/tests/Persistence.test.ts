@@ -142,11 +142,11 @@ describe('Persistence', () => {
   it('update persists through the local fallback', () => {
     const p = new Persistence(makeBridge());
     p.load();
-    p.update({ worldId: 'the-long-fell', style: 'riso' });
+    p.update({ worldId: 'the-long-fell', style: 'flat' });
     p.save();
     const stored = JSON.parse(window.localStorage.getItem(LS_KEY)!);
     expect(stored.worldId).toBe('the-long-fell');
-    expect(stored.style).toBe('riso');
+    expect(stored.style).toBe('flat');
   });
 
   it('bounds the journal so it cannot grow without limit', () => {

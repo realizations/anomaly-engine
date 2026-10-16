@@ -46,9 +46,8 @@ await page.waitForFunction(() => window.__engine !== undefined, { timeout: 20000
 await page.evaluate(() => {
 window.__engine.setWorld('the-town-that-wasnt-there');
     window.__engine.setStyle('painterly');
-    // Pinned in full: see the note in riso-halftone.mjs. The hour alone leaves the
-    // date real, and a measurement calibrated against one day's sky is not a
-    // measurement.
+ // Pinned in full. The hour alone leaves the frame time too quiet to measure,
+    // and a measurement calibrated against one day's sky is not a measurement.
     window.__engine.setSimulatedMoment('2026-03-21T21:30:00');
   // The beacon only animates while its anomaly is running, so the measurement has
   // to run it. Without this the most flicker-prone element in the scene is not

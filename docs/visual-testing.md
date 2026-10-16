@@ -104,9 +104,6 @@ spread. Answers "why is that shape wrong" rather than "is the direction working"
   levels. Honest about its own limits in its output: in a headless environment the
   figures for the same level vary as much as they do between levels, so it bounds
   flicker rather than resolving the dial.
-- `tools/riso-halftone.mjs` — proves riso prints a dot screen by measuring
-  adjacent-pixel luminance, and that painterly and flat do *not*, so the bars mean
-  something.
 - `tools/perf-gpu.mjs` — real per-frame cost on the GPU, and that the adaptive
   render scale responds to load.
 

@@ -84,21 +84,7 @@ const CASES = [
 
   // A non-painterly style, because the post-processing path is entirely separate
   // and nothing else in this list touches it.
-  //
-  // The seam check is per-style because the styles are built differently, and the
-  // answer is not the same for both. Flat is back under the check: measured clean
-  // at night, dawn, dusk and golden hour. Riso stays out, and the reason is
-  // narrower than it was. The old note here said the check reported 226 of them
-  // for both, which was really the two-span check tripping on the frame at large
-  // rather than on anything riso does. Measured now, riso reports two rows, at
-  // 94% of the height, at golden hour and at midnight but not at dawn or late
-  // evening, and the same state in painterly reports none. That is the
-  // foreground silhouette's boundary landing on a dot-grid quantisation step: a
-  // content edge the medium hardens, not a wash rect with a gradient that starts
-  // where it should not. There is nothing in the riso path for the check to catch,
-  // and the defect it was written for cannot occur in a path that draws no washes.
   { name: 'depth-flat', dir: 'depth', hour: 16.9, weather: 'clear', style: 'flat' },
-  { name: 'depth-flat-riso', dir: 'depth', hour: 16.9, weather: 'clear', style: 'riso', seamCheck: false },
 ];
 
 if (!existsSync(DEPLOYED)) {

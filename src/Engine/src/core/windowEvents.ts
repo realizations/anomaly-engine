@@ -28,7 +28,7 @@ export const WINDOW_EVENTS = {
   pause: 'anomaly:pause',
   /** Host -> renderer: resume rendering. */
   resume: 'anomaly:resume',
-  /** Host -> renderer: switch render style (painterly | flat | riso). */
+  /** Host -> renderer: switch render style (painterly | flat). */
   style: 'anomaly:style',
   /** Host -> renderer: toggle the debug overlay. */
   debug: 'anomaly:debug',

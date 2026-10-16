@@ -36,7 +36,6 @@ await new Promise((r) => server.listen(4321, r));
 const browser = await chromium.launch();
 
 const STYLES = [
-  { id: 'a-riso', style: 'riso', label: 'A: flat + riso print' },
   { id: 'b-flat', style: 'flat', label: 'B: flat, clean' },
   { id: 'c-painterly', style: 'painterly', label: 'C: painterly (current)' },
 ];

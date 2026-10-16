@@ -65,9 +65,9 @@ See `docs/visual-mockups/README.md` for the three variants and the contact sheet
 ## What was left alone
 
 The world definitions, the event and anomaly model, and the palette keyframes are
-intentionally untouched. The flat and riso styles are deliberate authorial styles,
-not bugs — riso quantises luminance rather than each RGB channel, because
-per-channel posterisation destroys hue and a dark blue snaps to magenta.
+intentionally untouched. The flat style is a deliberate authorial style, not a
+bug — it quantises luminance rather than each RGB channel, because per-channel
+posterisation destroys hue and a dark blue snaps to magenta.
 
 The canvas-2D renderer ceiling is real: there is no path to better lighting than the
 current keyframe approach without changing the medium (GPU shader passes), which is

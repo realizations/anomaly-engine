@@ -100,8 +100,8 @@ Events, Field Notes, Displays, Integrations and About.
 - Open the worlds folder
 
 ### Appearance
+- **Art style**: Painterly or Flat Vector
 
-- **Art style**: Painterly, Flat Vector or Riso Print
 - **Motion level**: How much of the scene moves
 - **Follow the Windows reduce-motion setting**: Take the OS preference rather than
   setting it here

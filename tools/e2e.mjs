@@ -48,7 +48,7 @@ const shot = async (name) => {
   return createHash('sha256').update(buf).digest('hex').slice(0, 12);
 };
 
-const STYLES = ['painterly', 'flat', 'riso'];
+const STYLES = ['painterly', 'flat'];
 
 /**
  * A coarse luminance signature of the canvas: a 32x18 grid of mean luma per cell.
@@ -111,11 +111,8 @@ for (const style of STYLES) {
 // engine whose style switch does nothing at all. The hashes stay in the detail
 // string, because they make two archived runs comparable by eye.
 //
-// The threshold is set above riso's frame-to-frame jitter rather than the
-// painterly one, because riso re-quantises its tonal range every frame: its own
-// noise floor is about 6.7 against roughly 0.3 for painterly and flat. The
-// smallest real difference between two styles measures about 29, so 12 sits
-// between the two with room on each side.
+// The threshold sits above the painterly and flat frame-to-frame jitter, which is
+// roughly 0.3, and below the smallest real difference between two finished looks.
 const STYLE_DIVERGENCE = 12;
 const divergences = [];
 for (let i = 0; i < STYLES.length; i++) {
@@ -127,7 +124,7 @@ for (let i = 0; i < STYLES.length; i++) {
     check(
       `"${STYLES[i]}" and "${STYLES[j]}" render visibly differently`,
       d >= STYLE_DIVERGENCE,
-      `luminance divergence ${d.toFixed(2)} (threshold ${STYLE_DIVERGENCE}, riso jitter ~6.7)`
+      `luminance divergence ${d.toFixed(2)} (threshold ${STYLE_DIVERGENCE})`
     );
   }
 }

@@ -87,8 +87,6 @@ const SHOTS = [
   { id: 'head-coast', dir: 'depth', hour: 6.8, weather: 'rain', world: 'the-long-head' },
   // The Long Corridor: the one world with no landscape and no structures at all.
   { id: 'corridor', dir: 'depth', hour: 12.0, weather: 'clear', world: 'the-long-corridor' },
-  // Riso takes a different post path entirely, so it gets its own shot.
-  { id: 'town-riso', dir: 'depth', hour: 16.9, weather: 'clear', world: 'the-town-that-wasnt-there', style: 'riso' },
 ];
 
 if (COMPARE_A && COMPARE_B) {

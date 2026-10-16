@@ -1,4 +1,4 @@
-﻿import { RGB, mixRgb, css, shade, scaleValue, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
+import { RGB, mixRgb, css, shade, scaleValue, mulberry32, ridged1D, fbm1D } from '../render/noise.js';
 import { SkyGrade, gradeForHour, sunPosition, moonPosition, moonPhase } from '../render/palette.js';
 import type { WorldDefinition, WorldStructure, StructureKind } from '../worlds/types.js';
 import {
@@ -80,7 +80,7 @@ const ROAD_DEFAULT: RGB = { r: 122, g: 106, b: 86 };
  * not a copy of one.
  */
 
-export type RenderStyle = 'painterly' | 'flat' | 'riso';
+export type RenderStyle = 'painterly' | 'flat';
 
 /**
  * A region of the screen, normalised to the viewport.
@@ -156,23 +156,6 @@ export interface MonitorViewport {
 
 
 /**
- * Default risograph ink pair and stock.
- *
- * Two spot inks only, because that is the constraint the medium actually
- * imposes. A risograph separates the image across a small number of drums, so
- * anything asking for more colours than this is not riso, it is a filter. The
- * inks are bright and saturated rather than dark: a screen print is mostly
- * paper, and even a fully flooded area of a *light* ink still reads as a
- * printed colour rather than as a black hole.
- */
-const RISO_WARM: RGB = { r: 208, g: 74, b: 62 };
-const RISO_COOL: RGB = { r: 46, g: 132, b: 142 };
-const RISO_PAPER: RGB = { r: 244, g: 238, b: 222 };
-
-/** Dumps the pre-separation riso buffer to `__risoSource` for offline review. */
-const DEBUG_RISO_DUMP = false;
-
-/**
  * How far a lightning strike may brighten in one frame, and how many frames its
  * attack takes.
  *
@@ -219,16 +202,6 @@ export class WorldRenderer {
   /** One entry per attached display. Empty means "assume one full-screen view". */
   private _viewports: MonitorViewport[] = [];
 
-  /** Cached riso print. The separation is far too expensive to run per frame. */
-  private _risoCache: HTMLCanvasElement | null = null;
-  private _risoCacheValid = false;
-  private _risoCacheAge = 0;
-  /** Frames to hold the cache before re-checking the scene. */
-  private _risoCacheHold = 6;
-  /** Frames after which the cache is refreshed even if nothing changed, so
-   *  slow drift like weather and cloud motion eventually prints. */
-  private _risoCacheMaxAge = 90;
-  private _risoBucket = -1;
   private _weatherTick = 0;
 
   /** Active art direction. Each direction is a different finished look on the same scene. */
@@ -323,7 +296,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   private _mouse = { x: -1, y: -1, px: 0, py: 0 };
   private _grade: SkyGrade = gradeForHour(12);
   private _style: RenderStyle;
-  private _inks: HTMLCanvasElement | null = null;
 
   constructor(canvas: HTMLCanvasElement, style: RenderStyle = 'painterly') {
     this._canvas = canvas;
@@ -331,7 +303,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     this._ctx = canvas.getContext('2d', { alpha: false })!;
     this._outCtx = this._ctx;
     this._buildFeatures();
-    this._buildPaper();
     this._bindPointer();
   }
   getStyle(): RenderStyle {
@@ -471,40 +442,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       dt
     );
   }
-
-  private _buildPaper(): void {
-    const size = 512;
-    const c = document.createElement('canvas');
-    c.width = size;
-    c.height = size;
-    const g = c.getContext('2d')!;
-    const rnd = mulberry32(4242);
-
-    g.fillStyle = '#f2ece0';
-    g.fillRect(0, 0, size, size);
-
-    for (let i = 0; i < 9000; i++) {
-      const x = rnd() * size;
-      const y = rnd() * size;
-      const v = rnd();
-      g.fillStyle = v > 0.5 ? 'rgba(120,108,92,0.05)' : 'rgba(255,252,244,0.07)';
-      g.fillRect(x, y, 1 + rnd() * 2, 1 + rnd() * 2);
-    }
-
-    for (let i = 0; i < 220; i++) {
-      const x = rnd() * size;
-      const y = rnd() * size;
-      g.strokeStyle = 'rgba(150,138,118,0.035)';
-      g.lineWidth = 0.7;
-      g.beginPath();
-      g.moveTo(x, y);
-      g.lineTo(x + (rnd() - 0.5) * 90, y + (rnd() - 0.5) * 90);
-      g.stroke();
-    }
-
-    this._inks = c;
-  }
-
 
   /**
    * Builds a sub-LSB dither tile.
@@ -815,8 +752,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // Everything sized to the canvas has to be rebuilt.
     this._buffer = null;
     this._finish = null;
-    this._risoCache = null;
-    this._risoCacheValid = false;
   }
 
   getViewportCount(): number {
@@ -836,8 +771,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
 
     // restarts rather than averaging across the change.
 
-    this._risoCacheValid = false;
-
     this._finish = null;
 
     this._frameAccum = 0;
@@ -850,13 +783,11 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       // A real change of condition invalidates the print; the tick also lets
       // the cache re-check the scene so a shift eventually prints.
       this._weatherTick++;
-      this._risoCacheValid = false;
     }
     this._weather = w;
   }
 
   setStyle(style: RenderStyle): void {
-    if (style !== this._style) this._risoCacheValid = false;
     this._style = style;
   }
 
@@ -886,7 +817,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // same location with different wallpaper.
     this._uncanny = new UncannyLayer(this._world);
     this._liminal = this._world.biome === 'liminal-interior' ? new LiminalInterior(this._world) : null;
-    this._risoCacheValid = false;
   }
 
   /**
@@ -1134,7 +1064,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // The finish layer is cached per size and the direction changes how that cache
     // should read, so rebuild it.
     this._finish = null;
-    this._risoCacheValid = false;
   }
   getDirection(): Direction {
     return this._direction;
@@ -1513,7 +1442,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       this._drawVignette();
       this._drawGrain();
     } else {
-      this._applyStylePost(hour);
     }
     mark('post');
 
@@ -1942,8 +1870,9 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       if (flat) {
         g.fillStyle = css(col);
         g.fill();
-        // The crest rim is a flat-illustration affordance. Under riso the
-        // per-channel offset turns it into coloured fringing on every ridge.
+        // The crest rim is a flat-illustration affordance: it gives the ridge a
+        // drawn edge instead of a soft silhouette, which is the whole difference
+        // between the flat treatment and the painterly one.
         if (this._style === 'flat') {
           g.save();
           g.clip();
@@ -4420,307 +4349,6 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     // Baked into the finish layer. See _buildFinish.
   }
 
-  private _applyStylePost(hour: number): void {
-    // Flat is produced by drawing natively, so it needs no pixel pass. Riso is
-    // the only style that needs a readback.
-    if (this._style !== 'riso') {
-      this._risoCacheValid = false;
-      return;
-    }
-
-    // The separation costs a full-frame readback plus a per-pixel halftone
-    // over every dot cell, which measured at 181ms a frame: seven frames a
-    // second, and the only thing in the engine that was genuinely too slow.
-    //
-    // It does not need to run every frame. A screen print is a static object;
-    // what changes between frames is the weather and the scan bar, none of
-    // which move a dot by a visible amount. So the separation is cached and
-    // only recomputed when the scene has actually shifted enough to matter,
-    // with a short minimum lifetime so precipitation and drifting cloud still
-    // get printed onto the sheet.
-    if (this._risoCacheValid) {
-      this._risoCacheAge += 1;
-      if (this._risoCacheAge < this._risoCacheHold) {
-        this._blitRisoCache();
-        return;
-      }
-    }
-
-    if (!this._sceneChanged(hour) && this._risoCacheValid && this._risoCacheAge < this._risoCacheMaxAge) {
-      this._risoCacheAge += 1;
-      this._blitRisoCache();
-      return;
-    }
-
-    this._applyRisoSeparation();
-    this._risoCacheValid = true;
-    this._risoCacheAge = 0;
-  }
-
-  /**
-   * Whether the scene has drifted far enough to be worth re-printing.
-   *
-   * Compared in steps rather than continuously, because a printed image that
-   * updates a little all the time reads as noise, and one that updates only on
-   * the hour reads as broken. A small step every couple of seconds is the
-   * behaviour a real drum printer would have.
-   */
-  private _sceneChanged(hour: number): boolean {
-    // A quarter-hour step. The sun moves slowly enough that finer buckets only
-    // cost frames.
-    const bucket = Math.floor(hour * 4) + this._weatherTick;
-    if (bucket !== this._risoBucket) {
-      this._risoBucket = bucket;
-      return true;
-    }
-    return false;
-  }
-
-  private _blitRisoCache(): void {
-    const g = this._ctx;
-    if (!this._risoCache) return;
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.drawImage(this._risoCache, 0, 0);
-    g.restore();
-  }
-
-  /** Ink pair for the active world, so each place prints in its own colours. */
-  private _risoInks(): { warm: RGB; cool: RGB; paper: RGB } {
-    const pal = this._world.palette;
-    return {
-      warm: pal?.risoWarm ?? RISO_WARM,
-      cool: pal?.risoCool ?? RISO_COOL,
-      paper: pal?.risoPaper ?? RISO_PAPER,
-    };
-  }
-
-  /**
-   * Risograph separation.
-   *
-   * The previous version posterised luminance into seven levels and then laid a
-   * uniform diagonal hatch over the whole frame. That is not how a risograph
-   * works, and it looked it: quantising a smooth sky produced hard horizontal
-   * steps, the hatch landed on sky, mountain and ground with equal weight so it
-   * read as a filter rather than as printing, and because luminance carried no
-   * hue information the result collapsed into undifferentiated pastel.
-   *
-   * This separates the frame into two spot inks chosen by the warmth of the
-   * source colour, and screens each ink on its own rotated dot grid with dot
-   * area driven by local darkness. Tonal variation becomes a halftone screen
-   * instead of a staircase, and the two inks stay legible as two inks.
-   */
-  private _applyRisoSeparation(): void {
-    const w = this._buffer?.width ?? this._canvas.width;
-    const h = this._buffer?.height ?? this._canvas.height;
-    if (w < 2 || h < 2) return;
-
-    const src = document.createElement('canvas');
-    src.width = w;
-    src.height = h;
-    const sg = src.getContext('2d', { alpha: false })!;
-    sg.drawImage(this._buffer ?? this._canvas, 0, 0);
-
-    const data = sg.getImageData(0, 0, w, h);
-    const px = data.data;
-    const ink = this._risoInks();
-
-    if (DEBUG_RISO_DUMP) {
-      const dbg = document.createElement('canvas');
-      dbg.width = w;
-      dbg.height = h;
-      dbg.getContext('2d')!.putImageData(data, 0, 0);
-      (globalThis as unknown as Record<string, unknown>).__risoSource = dbg.toDataURL('image/png');
-    }
-
-    // Measure the sheet. A riso is a print: the lightest tones stay as bare
-    // paper and only the deepest shadows approach solid ink. Anchoring the
-    // range to the frame's own percentiles is what keeps a dusk scene printing
-    // as mostly paper with dark accents, instead of turning the whole sky into
-    // a field of colour. Using raw min/max was the mistake: a single near-black
-    // foreground pixel dragged the floor down and flooded everything above it.
-    const hist = new Uint32Array(256);
-    for (let i = 0; i < px.length; i += 4) {
-      const l = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
-      hist[l]++;
-    }
-    const total = w * h;
-    // Anchor the tonal range to the frame's own distribution.
-    //
-    // The window matters more than the curve. At 4th-to-88th percentile the
-    // window is so wide that almost the entire frame lands in the middle of the
-    // range and receives almost the same mid coverage: the result was a sheet of
-    // uniform screen with no tonal structure, which is not a print of anything.
-    //
-    // Tightening it means the two populations that actually carry a riso image
-    // get pushed apart. Bare paper belongs to the lit end and shadows get to go
-    // solid, and the midtones in between become the drawing. Clamped so a
-    // nearly-flat frame still has a usable range.
-    let acc = 0, lo = 0, hi = 255;
-    for (let l = 0; l < 256; l++) {
-      acc += hist[l];
-      if (acc >= total * 0.2) { lo = l; break; }
-    }
-    acc = 0;
-    for (let l = 255; l >= 0; l--) {
-      acc += hist[l];
-      if (acc >= total * 0.03) { hi = l; break; }
-    }
-    const range = Math.max(24, hi - lo);
-    // Riso is a light medium and the paper is the subject, so even the deepest
-    // shadow keeps some screen in it rather than flooding to a solid block.
-    const floorTone = 0.1;
-
-    // Screen geometry. Each drum lays its own halftone at a different angle so
-    // the two dot grids interleave instead of moiring into a checkerboard.
-    //
-    // The cell has to be large enough that the eye resolves individual dots. At
-    // four pixels the screen is correct but too fine to read as printing: it
-    // looks like film grain or sensor noise, and a viewer cannot tell a halftone
-    // from a slightly textured gradient. A riso is a hand-pulled print with a
-    // coarse screen, so the cell is sized off the frame rather than fixed.
-    const cell = Math.max(4, Math.round(Math.min(w, h) / 72));
-    const a1 = (15 * Math.PI) / 180;
-    const a2 = (72 * Math.PI) / 180;
-    const c1 = Math.cos(a1);
-    const s1 = Math.sin(a1);
-    const c2 = Math.cos(a2);
-    const s2 = Math.sin(a2);
-    // Dot radius, in CELL units.
-    //
-    // fx and fy are both divided by the cell size, so they only ever range over
-    // plus or minus a half. This was previously `cell * 0.4`, which is about
-    // 1.8, larger than the entire cell: every pixel in the frame then satisfied
-    // the dot test, so the screen flooded to solid ink and the style rendered as
-    // a flat wash with no dots at all. A radius above 0.5 is meaningless here,
-    // and it has to stay below 0.5 anyway so that paper keeps showing between
-    // the dots, which is what makes it read as a screen rather than as a fill.
-    const maxR = 0.42;
-    const maxR2 = maxR * maxR;
-
-    const pr = ink.paper.r, pg = ink.paper.g, pb = ink.paper.b;
-    const wr = ink.warm.r, wg = ink.warm.g, wb = ink.warm.b;
-    const cr = ink.cool.r, inkCg = ink.cool.g, cb = ink.cool.b;
-
-    for (let y = 0; y < h; y++) {
-      const row1y = y * s1;
-      const row2y = y * s2;
-      for (let x = 0; x < w; x++) {
-        const i = (y * w + x) * 4;
-        const r = px[i], g = px[i + 1], b = px[i + 2];
-
-        // Print tone: 0 is bare paper, 1 is solid ink. Riso is a light medium:
-        // the paper is the subject and the ink is the drawing. The sky is the
-        // brightest large area and has to land as open paper, so tone only ramps
-        // up through the shadows. A gamma past 1 keeps midtones light and
-        // reserves ink for the real dark masses.
-        let tone = 1 - (r * 0.299 + g * 0.587 + b * 0.114 - lo) / range;
-        if (tone < 0) tone = 0;
-        else if (tone > 1) tone = 1;
-        tone = Math.pow(tone, 1.6) * (1 - floorTone) + floorTone;
-
-        // Ink share: a smooth crossfade between the two drums. The previous
-        // per-pixel warm/cool switch turned any gradient that crossed the
-        // threshold into a hard horizontal seam straight across the frame.
-        let warmShare = (r - b) / 255 + (g - b) / 380;
-        if (warmShare < 0) warmShare = 0;
-        else if (warmShare > 1) warmShare = 1;
-        warmShare = warmShare * warmShare * (3 - 2 * warmShare);
-
-        // Tint strength. At high coverage the full ink lands, but at low
-        // coverage the dot only mixes the paper a little way toward the ink, so
-        // a dusk sky reads as a pale wash rather than a saturated field. This
-        // is what keeps the upper half from becoming one solid teal block.
-        const strength = 0.32 + tone * 0.68;
-
-        // Key drum: cool ink carries the structure and the shadows.
-        const coolCov = tone * (1 - warmShare * 0.88);
-        // Spot drum: warm ink rides over the lit areas and the horizon.
-        const warmCov = tone * warmShare * 0.92;
-
-        let outR = pr, outG = pg, outB = pb;
-
-        if (coolCov > 0.05) {
-          const rad2 = coolCov * maxR2;
-          const rx = (x * c1 + row1y) / cell;
-          const ry = (y * c1 - x * s1) / cell;
-          const fx = rx - Math.floor(rx) - 0.5;
-          const fy = ry - Math.floor(ry) - 0.5;
-          if (fx * fx + fy * fy < rad2) {
-            outR = outR + ((cr * strength - outR) * coolCov);
-            outG = outG + ((inkCg * strength - outG) * coolCov);
-            outB = outB + ((cb * strength - outB) * coolCov);
-          }
-        }
-
-        if (warmCov > 0.05) {
-          const rad2 = warmCov * maxR2;
-          const rx = (x * c2 + row2y) / cell;
-          const ry = (y * c2 - x * s2) / cell;
-          const fx = rx - Math.floor(rx) - 0.5;
-          const fy = ry - Math.floor(ry) - 0.5;
-          if (fx * fx + fy * fy < rad2) {
-            outR = outR + ((wr * strength - outR) * warmCov);
-            outG = outG + ((wg * strength - outG) * warmCov);
-            outB = outB + ((wb * strength - outB) * warmCov);
-          }
-        }
-
-        px[i] = outR;
-        px[i + 1] = outG;
-        px[i + 2] = outB;
-      }
-    }
-
-    sg.putImageData(data, 0, 0);
-
-    const g = this._ctx;
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, w, h);
-    g.drawImage(src, 0, 0);
-    this._risoPaperFinish(w, h);
-    g.restore();
-
-    // Keep the print so the next frames can blit it instead of re-running the
-    // whole halftone separation. It has to be captured from the *buffer*, which
-    // is where the separated output actually lands; the display canvas still
-    // holds the previous frame at this point, so capturing that caches a
-    // stale, unprinted image and the style silently loses its dots.
-    if (!this._risoCache || this._risoCache.width !== w || this._risoCache.height !== h) {
-      this._risoCache = document.createElement('canvas');
-      this._risoCache.width = w;
-      this._risoCache.height = h;
-    }
-    const cacheCtx = this._risoCache.getContext('2d', { alpha: false })!;
-    cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
-    cacheCtx.clearRect(0, 0, w, h);
-    cacheCtx.drawImage(this._buffer ?? this._canvas, 0, 0, w, h);
-  }
-
-  /** Paper fibre and a light press vignette, applied after the ink is down. */
-  private _risoPaperFinish(w: number, h: number): void {
-    const g = this._ctx;
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    if (this._inks) {
-      g.globalCompositeOperation = 'multiply';
-      g.globalAlpha = 0.07;
-      const pat = g.createPattern(this._inks, 'repeat');
-      if (pat) {
-        g.fillStyle = pat;
-        g.fillRect(0, 0, w, h);
-      }
-    }
-    g.globalAlpha = 1;
-    g.globalCompositeOperation = 'multiply';
-    const vg = g.createRadialGradient(w / 2, h / 2, h * 0.42, w / 2, h / 2, h * 1.15);
-    vg.addColorStop(0, 'rgba(255,255,255,1)');
-    vg.addColorStop(1, 'rgba(226,216,196,1)');
-    g.fillStyle = vg;
-    g.fillRect(0, 0, w, h);
-    g.restore();
-  }
 
   dispose(): void {
     this._anomalies = [];

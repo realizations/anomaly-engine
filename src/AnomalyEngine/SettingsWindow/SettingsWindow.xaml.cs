@@ -136,7 +136,6 @@ public partial class SettingsWindow : Window
             StyleCombo.SelectedIndex = status.Value.Style switch
             {
                 "flat" => 1,
-                "riso" => 2,
                 _ => 0,
             };
             FpsCombo.SelectedIndex = status.Value.FpsLimit switch
@@ -658,7 +657,7 @@ public partial class SettingsWindow : Window
     private void StyleCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading) return;
-        var styles = new[] { "painterly", "flat", "riso" };
+        var styles = new[] { "painterly", "flat" };
         var i = StyleCombo.SelectedIndex;
         if (i < 0 || i >= styles.Length) return;
         _host?.SetArtStyle(styles[i]);

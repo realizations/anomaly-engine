@@ -30,7 +30,6 @@ if (!existsSync(DEPLOYED)) {
 const STYLES = [
   { id: 'painterly', label: 'Painterly', blurb: 'Soft atmospheric depth. Gradient sky, haze, grain, vignette.' },
   { id: 'flat', label: 'Flat Vector', blurb: 'Banded sky, solid silhouettes, per-layer value separation.' },
-  { id: 'riso', label: 'Riso Print', blurb: 'Hue-safe tonal quantisation, 1px channel misregistration, halftone.' },
 ];
 
 const TIMES = [
@@ -247,7 +246,7 @@ const html = `<!doctype html>
   .intro { color:var(--dim); margin-bottom:26px; max-width:820px; }
   h3 { font-size:14px; font-weight:600; margin:26px 0 2px; display:flex; align-items:center; gap:9px; }
   .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
-  .dot-painterly { background:#7aa2f7; } .dot-flat { background:#6ee7a8; } .dot-riso { background:#e0b341; }
+  .dot-painterly { background:#7aa2f7; } .dot-flat { background:#6ee7a8; }
   .blurb { color:var(--dim); font-size:13px; margin-bottom:12px; padding-left:18px; }
   .row { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; padding-left:18px; }
   figure { background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }

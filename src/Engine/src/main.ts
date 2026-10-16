@@ -1053,7 +1053,7 @@ const firstWorld = this._worlds.getAll()[0];
     window.addEventListener(WINDOW_EVENTS.style, (e) => {
       const detail = (e as CustomEvent<{ style?: string }>).detail;
       const style = detail?.style;
-      if (style === 'painterly' || style === 'flat' || style === 'riso') this.setStyle(style);
+      if (style === 'painterly' || style === 'flat') this.setStyle(style);
     });
     // The wallpaper never holds keyboard focus, so window key listeners never
     // fire in the real host. Debug/creator toggles are driven from the tray.
@@ -1575,7 +1575,7 @@ const firstWorld = this._worlds.getAll()[0];
   }
 
   setStyle(style: string): void {
-    this._renderer.setStyle((style as 'painterly' | 'flat' | 'riso') ?? 'painterly');
+    this._renderer.setStyle((style as 'painterly' | 'flat') ?? 'painterly');
     this._persistence?.update({ style: this._renderer.getStyle() });
   }
 
@@ -1965,7 +1965,7 @@ const firstWorld = this._worlds.getAll()[0];
    * `setSimulatedHour` substitutes the hour into *today*, which leaves the date real, and
    * the date is what drives season, moon phase and the weather seed. Three pixel-
    * comparing tools pinned only the hour, so their expected output moved with the
-   * calendar: `riso renders a halftone`, `flicker is bounded` and `per-monitor layouts`
+ * calendar: `flicker is bounded` and `per-monitor layouts`
    * all passed on the day they were written and failed on a later one, with no change to
    * any code. A gate whose result depends on what day it is run is not a gate.
    *
@@ -2131,7 +2131,10 @@ const firstWorld = this._worlds.getAll()[0];
   private _applyRestoredState(): void {
     const s = this._persistence.get();
     if (s.worldId && this._worlds.has(s.worldId)) this._worlds.activate(s.worldId);
-    if (s.style === 'painterly' || s.style === 'flat' || s.style === 'riso') {
+    // A state file written before the risograph style was removed still carries it.
+    // `riso` fails this check and is simply ignored, leaving the painterly default
+    // rather than leaving the scene on a style the engine no longer has.
+    if (s.style === 'painterly' || s.style === 'flat') {
       this._renderer.setStyle(s.style);
     }
     if (s.reducedMotion !== null) {

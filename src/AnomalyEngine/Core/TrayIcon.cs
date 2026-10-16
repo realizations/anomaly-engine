@@ -99,7 +99,6 @@ public class TrayIcon : IDisposable
         {
             ("painterly", "Painterly (Recommended)"),
             ("flat", "Flat Vector"),
-            ("riso", "Riso Print"),
         };
 
         _activeStyleId = "painterly";

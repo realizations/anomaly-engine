@@ -71,7 +71,6 @@ steps.push(await run('debug overlay reports the running engine', ['debug-overlay
 steps.push(await run('a local audio track reaches the running engine', ['audio-reactive-live.mjs']));
 steps.push(await run('per-monitor layouts', ['per-monitor.mjs']));
 steps.push(await run('per-display worlds', ['per-display-worlds.mjs']));
-steps.push(await run('riso renders a halftone', ['riso-halftone.mjs']));
 steps.push(await run('renderer performance on the real GPU', ['perf-gpu.mjs']));
 steps.push(await run('motion model present, oscillators routed', ['motion-oscillators.mjs']));
 steps.push(await run('flicker is bounded', ['flicker.mjs']));

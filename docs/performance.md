@@ -45,10 +45,8 @@ CPU-rasterised (SwiftShader), adaptive quality enabled — a floor, not a foreca
 |---|---|---|---|---|---|
 | 1280x720 | painterly | 18 | 48.2 | 52 | 0.90 |
 | 1280x720 | flat | 17 | 40.0 | 43 | 0.80 |
-| 1280x720 | riso | 29 | 35.1 | 38 | 0.75 |
 | 1920x1080 | painterly | 11 | 102.2 | 49 | 1.00 |
 | 1920x1080 | flat | 9 | 81.4 | 39 | 0.90 |
-| 1920x1080 | riso | 22 | 6.8 | 3 | 0.80 |
 
 GPU-composited (ANGLE, AMD Radeon 5500M, OpenGL 4.5), 1920x1080, painterly:
 
@@ -116,18 +114,6 @@ The floor is now 0.34 rather than 0.5, so genuinely weak hardware has somewhere
 to go.
 
 ## What was fixed
-
-**Riso was running at seven frames a second.** 181ms a frame, against 5-6ms for
-the other styles. The cause was the halftone separation: a full-frame readback
-plus a per-pixel dot test across every screen cell, every frame. A screen print
-is a static object, and what moves between frames is weather and a scan bar,
-none of which shift a dot by a visible amount, so the print is now cached and
-re-imposed only when the scene has actually shifted — on a quarter-hour step, on
-a change of weather condition, on a world or size change, and on a long
-maximum-age refresh so slow drift still eventually prints.
-
-Riso went from 181ms to roughly 4ms: about a 42x improvement, and from the
-slowest style to the fastest.
 
 **Painterly was compositing four full-screen passes per frame** — an `overlay`
 warm cast, a `multiply` exposure ramp, a radial vignette, and an `overlay` film

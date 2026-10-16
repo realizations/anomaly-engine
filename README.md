@@ -64,9 +64,8 @@ the full day/night cycle, not just at golden hour.
 |---|---|---|
 | **Painterly** *(default)* | Gradient sky, atmospheric haze, grain, vignette | Soft depth. Stays behind your icons and text. |
 | **Flat Vector** | Banded sky, solid silhouettes, per-layer value separation | Crisp and graphic. Reads cleanly at any resolution. |
-| **Riso Print** | Hue-safe tonal quantisation, 1px channel misregistration, halftone | Two-ink screen-print character. |
 
-> Flat and riso reach their look by drawing flat fills natively and quantising *luminance*
+> Flat reaches its look by drawing flat fills natively and quantising *luminance*
 > rather than each RGB channel. Per-channel posterisation destroys hue — a dark blue
 > `(30,8,26)` snaps to magenta — which is why the earlier flat styles rendered as false
 > colours and grey slabs at night.
@@ -217,7 +216,7 @@ Right-click the tray icon for options:
 
 - **Open Settings** — Configure the engine (left-click the icon also opens this)
 - **Pause / Resume** — Stop and restart the wallpaper
-- **Art Style** — Painterly / Flat Vector / Riso Print, with a checkmark on the active one
+- **Art Style** — Painterly / Flat Vector, with a checkmark on the active one
 - **Next / Previous World** — Cycle the six built-in worlds
 - **Trigger Event** — Fire a random anomaly
 - **Field Notes** — The journal, world lore and undiscovered secrets
@@ -663,9 +662,8 @@ Next, in priority order:
 - [ ] **Desktop audio capture** — the engine reacts to a local file; sampling what is
       playing on the system needs a loopback device and a permission prompt, which a
       wallpaper should not be asking for
-- [ ] **Naming decision** — see [`docs/NAMING.md`](docs/NAMING.md)
-- [ ] **Art direction decision** — painterly currently wins on all nine conditions, but flat
-      and riso are now legitimate and the user has not chosen
+- [x] **Art direction decision** — painterly currently wins on all nine conditions;
+  flat is the alternative and the user has not chosen
 
 See [issues](https://github.com/realizations/anomaly-engine/issues) for planned features and improvements.
 
@@ -721,7 +719,6 @@ Chromium refuses to execute ES modules, so the engine silently rendered nothing.
 | `tools/look.mjs` | Renders one frame, optionally cropped, and reports horizontal seams, mean luma and tonal spread |
 | `tools/perf.mjs` | Measures cost per pixel per style on the CPU rasteriser; a floor, not a forecast |
 | `tools/perf-gpu.mjs` | Measures the engine's real per-frame cost on the GPU, and proves the adaptive scaler responds to load |
-| `tools/riso-halftone.mjs` | Proves riso actually prints a dot screen by measuring adjacent-pixel luminance — and that painterly and flat do not, so the bars mean something |
 | `tools/motion-oscillators.mjs` | Proves the central motion model is present and its oscillators are actually routed |
 | `tools/flicker.mjs` | Measures the frame-to-frame *change* in luminance at several motion levels, so a scene that is merely moving is not mistaken for one that strobes |
 | `tools/settings-shot.mjs` | Renders all nine WPF settings pages to PNG without displaying the window, so layout can be reviewed |

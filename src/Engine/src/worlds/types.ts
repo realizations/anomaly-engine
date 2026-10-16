@@ -62,12 +62,6 @@ export interface WorldPalette {
   saturation?: number;
   /** Overall value multiplier applied after grading. */
   exposure?: number;
-  /** Riso ink used for warm pixels. Falls back to the engine default. */
-  risoWarm?: RGB8;
-  /** Riso ink used for cool pixels. Falls back to the engine default. */
-  risoCool?: RGB8;
-  /** Riso paper stock. Falls back to the engine default. */
-  risoPaper?: RGB8;
 }
 
 export interface TerrainProfile {
