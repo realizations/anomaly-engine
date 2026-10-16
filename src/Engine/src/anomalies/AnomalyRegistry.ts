@@ -47,6 +47,7 @@ export class AnomalySystem {
   private _definitions: Map<string, AnomalyDefinition> = new Map();
   private _active: ActiveAnomaly | null = null;
   private _cooldowns: Map<string, number> = new Map();
+  private _anomalyRate = 1;
   private _prerequisitesMet: Set<string> = new Set();
   private _listeners: ((anomaly: ActiveAnomaly) => void)[] = [];
   private _endListeners: ((anomaly: ActiveAnomaly) => void)[] = [];
@@ -129,6 +130,23 @@ export class AnomalySystem {
     return fitting[Math.floor(Math.random() * fitting.length)];
   }
 
+  /**
+   * Scales every cooldown, so a place that has been paid attention to is louder.
+   *
+   * Passed in as a multiplier rather than as an escalation level so this module keeps
+   * no idea what attention is. The rule for how much attention is worth, and the rule
+   * for how much louder a place gets, live together in one place; this is only the
+   * consequence.
+   *
+   * Default 1. A value of 0 is treated as 1 rather than allowed through, because a zero
+   * multiplier would make every anomaly permanently on cooldown and silently switch the
+   * engine off -- and a bug that turns the product off is much worse than one that
+   * makes it slightly too loud.
+   */
+  setAnomalyRate(multiplier: number): void {
+    this._anomalyRate = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  }
+
   trigger(id: string, seed?: number): boolean {
     const definition = this._definitions.get(id);
     if (!definition) return false;
@@ -143,7 +161,7 @@ export class AnomalySystem {
     };
 
     this._active = anomaly;
-    this._cooldowns.set(id, now + definition.cooldown * 1000);
+    this._cooldowns.set(id, now + definition.cooldown * 1000 * this._anomalyRate);
 
     this._listeners.forEach(fn => fn(anomaly));
     return true;

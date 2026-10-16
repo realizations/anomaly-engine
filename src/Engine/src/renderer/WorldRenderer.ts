@@ -827,6 +827,25 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
     this._uncanny?.triggerSurreal();
   }
 
+  /**
+   * Pushes a line onto the terminal.
+   *
+   * The terminal is the engine's only text surface, and it lives here rather than in
+   * the composition root because it is composited into the scene and needs the scene's
+   * grade to light its bezel. That made it unreachable from outside, which is why
+   * nothing the player did could ever appear on it: the one surface built to report
+   * back could only be written by code already inside the renderer.
+   *
+   * Creating the terminal here rather than assuming it exists is deliberate. It is
+   * otherwise only built on the first rendered frame, so a line pushed before the
+   * first frame would otherwise be silently dropped, and the earliest thing worth
+   * reporting is what happened when the player clicked the very first thing they saw.
+   */
+  terminalPush(text: string, opts: { warn?: boolean } = {}): void {
+    this._crt ??= new CrtTerminal(this._seed);
+    this._crt.push(text, opts);
+  }
+
   hasSurreal(): boolean {
     return this._uncanny?.hasSurreal() ?? false;
   }

@@ -190,6 +190,20 @@ export interface PersistedState {
    * on load rather than accumulating.
    */
   displayWorlds: Record<string, string>;
+  /**
+   * How each place has been treated, and what it has become because of it.
+   *
+   * This is the only field in the state file that changes what the engine *is* rather
+   * than what it looks like: attention and escalation decide how often anomalies fire,
+   * and they survive a restart, so a place you have been attending is a different place
+   * from the one you started with.
+   *
+   * Held as an opaque blob and re-validated by `reconcileAttention` rather than being
+   * typed here for the same reason `customWorlds` is `unknown[]`: the file is editable
+   * by hand, and the rules for what a valid escalation is live with the rules that use
+   * it rather than here where they would only be documentation.
+   */
+  attention: unknown;
 }
 
 const VERSION = 1;
@@ -231,6 +245,7 @@ export function emptyState(): PersistedState {
     customWorlds: [],
     displayWorlds: {},
     worldDigests: {},
+    attention: null,
   };
 }
 
@@ -305,6 +320,10 @@ export function reconcile(raw: unknown): PersistedState {
       }
       return out;
     })(),
+    // Passed through raw on purpose. `reconcileAttention` owns the rules for a valid
+    // attention record, and duplicating them here would be a second place to forget
+    // to clamp something the first place clamps.
+    attention: s.attention ?? null,
   };
 }
 

@@ -51,6 +51,18 @@ import { describeZones } from './systems/landmarkZones.js';
 import { EGG_EFFECTS } from './systems/eggEffects.js';
 import { advanceStreak, INITIAL_STREAK, type StreakState } from './systems/staringStreak.js';
 import { dateKey as dateKeyOf } from './events/ClockSource.js';
+import {
+  emptyAttention,
+  observe,
+  settle,
+  settleAll,
+  escalationOf,
+  anomalyRateMultiplier,
+  conclude,
+  observationCount,
+  reconcileAttention,
+  type AttentionState,
+} from './systems/Attention.js';
 import type { StoryBeat } from './renderer/storyBeat.js';
 
 /**
@@ -615,6 +627,7 @@ const firstWorld = this._worlds.getAll()[0];
       this._particles.render(this._canvas.getContext('2d')!, this._canvas.width, this._canvas.height);
       this._entities.update(16);
       this._updateFps();
+      this._tickAttention(performance.now());
     }
 
     const frameTime = performance.now() - frameStart;
@@ -2137,6 +2150,11 @@ const firstWorld = this._worlds.getAll()[0];
     if (s.style === 'painterly' || s.style === 'flat') {
       this._renderer.setStyle(s.style);
     }
+    // Restored with everything else, and for the same reason: attention is the only
+    // state in the file that changes what the engine *is*, so reading it late would
+    // leave the first minutes of every launch running on a stale escalation.
+    this._attention = reconcileAttention(s.attention);
+    this._pushAnomalyRate();
     if (s.reducedMotion !== null) {
       this._accessibility.setConfig({ reducedMotion: s.reducedMotion });
     }
@@ -2214,7 +2232,7 @@ const firstWorld = this._worlds.getAll()[0];
         cursor: desc.cursor,
         hint: desc.hint,
         dwellMs: desc.dwellMs,
-        onClick: () => this._bridge.sendLog(`zones:click:${desc.id}`, { zone: desc.id }),
+        onClick: () => this._onZoneClicked(desc),
         onDwell: () => {
           // Whatever the zone declares, not one hard-coded zone.
           //
@@ -2228,6 +2246,134 @@ const firstWorld = this._worlds.getAll()[0];
         },
       });
     }
+  }
+
+  /**
+   * Clicking a landmark does something.
+   *
+   * It used to write a log line, which is the whole reason this felt like a wallpaper:
+   * the interaction system was complete, every landmark had a zone, and the click
+   * callback's entire body was `this._bridge.sendLog(...)`. Hovering found secrets and
+   * clicking did nothing, so the one gesture the fiction invites -- go and look at that
+   * -- cost the player nothing and gave them nothing.
+   *
+   * Now a click pays attention to this place, which is persistent, decays, and turns
+   * into escalation. It is also written to the journal, because an observation the
+   * terminal can see but the journal cannot is a secret instead of a finding.
+   *
+   * Dwell keeps its own meaning: dwelling is noticing something by accident, and
+   * noticing is worth less than going and looking. They are deliberately separate so
+   * that leaning on the mouse for thirty seconds is not a substitute for clicking.
+   */
+  private _onZoneClicked(desc: { id: string; name: string }): void {
+    const worldId = this._worlds.getActiveId();
+    if (!worldId) return;
+
+    const day = dateKeyOf(new Date(this._effectiveDate()));
+    const now = Date.now();
+    const result = observe(this._attention, worldId, desc.id, day, now);
+    this._attention = result.state;
+
+    // Settle first, then read, so the escalation reported back is the one the click
+    // produced rather than the one from the last frame.
+    this._attention = settle(this._attention, worldId, now);
+    const escalation = escalationOf(this._attention, worldId);
+
+    this._persistence?.update({ attention: this._attention });
+    this._bridge.sendLog('zones:click', {
+      zone: desc.id,
+      paid: result.paid,
+      escalation,
+    });
+
+    // The terminal is the readout, so it has to hear about it.
+    this._renderer.terminalPush(
+      `ATTENTION PAID: ${desc.name.toUpperCase()}   ESC ${escalation}`,
+      { warn: escalation > 0 },
+    );
+
+    if (!result.paid) return;
+
+    // Deliberately not the journal. The journal records anomalies and runs them through
+    // the world's flavour table, so an observation pushed into it would be named as
+    // though it were one of the six effects. The observation has a home already: the
+    // attention record, which is persistent and countable, and the terminal, which is
+    // where a player would look for it.
+    void result.paid;
+  }
+
+  /**
+   * Tells the anomaly system how loud this place currently is.
+   *
+   * The one mechanical consequence of escalation: a place you have been paying
+   * attention to fires more often, and one you have stopped visiting goes quiet. Called
+   * after every settle and every click rather than once at boot, because escalation
+   * moves while the engine is running and a rate set at launch would be wrong by the
+   * time the first neglect threshold passed.
+   */
+  private _pushAnomalyRate(): void {
+    const worldId = this._worlds.getActiveId();
+    if (!worldId) return;
+    this._anomalies.setAnomalyRate(
+      anomalyRateMultiplier(escalationOf(this._attention, worldId)),
+    );
+  }
+
+  /**
+   * Settles every place against the clock and pushes the consequence.
+   *
+   * Called from the render loop rather than on a timer because the render loop is the
+   * only thing guaranteed to be running, and because settling is pure arithmetic over a
+   * small object: one pass over at most eight worlds.
+   */
+  private _tickAttention(nowMs: number): void {
+    // Once every ten minutes is far finer than anything here can express: the shortest
+    // period in the rules is a day, so anything more often is arithmetic for its own
+    // sake on a desktop that renders sixty frames a second.
+    if (nowMs - this._attentionTick < 600_000) return;
+    this._attentionTick = nowMs;
+
+    const before = this._attention;
+    const settled = settleAll(this._attention, nowMs);
+    if (settled === before) return;
+    this._attention = settled;
+    this._persistence?.update({ attention: settled });
+    this._pushAnomalyRate();
+  }
+
+  private _attentionTick = 0;
+
+  /**
+   * Records that the player has linked two observations.
+   *
+   * The public door for the terminal's conclusion mechanic. It is here rather than on
+   * the terminal because the conclusion has to be persisted and the terminal does not
+   * know about persistence; it is here rather than inline because the tests need to be
+   * able to call it without a canvas.
+   *
+   * Returns whether the conclusion was new. A repeat is not an error and not a reward:
+   * re-linking the same pair is the easiest way to make a deduction system a scoring
+   * system by accident.
+   */
+  drawConclusion(conclusionId: string): boolean {
+    if (typeof conclusionId !== 'string' || conclusionId.length === 0) return false;
+    const next = conclude(this._attention, conclusionId);
+    if (next === this._attention) return false;
+    this._attention = next;
+    this._persistence?.update({ attention: next });
+    this._bridge.sendLog('attention:conclusion', { id: conclusionId });
+    return true;
+  }
+
+  /** What the terminal and the settings window show about the active place. */
+  getAttentionReport(): { escalation: number; observations: number; rate: number } {
+    const worldId = this._worlds.getActiveId() ?? '';
+    const escalation = escalationOf(this._attention, worldId);
+    return {
+      escalation,
+      observations: observationCount(this._attention, worldId),
+      rate: anomalyRateMultiplier(escalation),
+    };
   }
 
   /**
@@ -2267,6 +2413,15 @@ const firstWorld = this._worlds.getAll()[0];
   }
 
   private _streak: StreakState = INITIAL_STREAK;
+
+  /**
+   * What each place knows about how it has been treated.
+   *
+   * Read once from the state file and written on every click, so it survives a
+   * restart -- which is the whole point. An attention model that reset on launch would
+   * be indistinguishable from the collectibles it replaces.
+   */
+  private _attention: AttentionState = emptyAttention();
 
   /**
    * The date the scene should be read at, honouring a simulated hour.
