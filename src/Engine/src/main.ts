@@ -8,7 +8,7 @@ import { StateManager } from './core/StateManager.js';
 import { ClockSource } from './events/ClockSource.js';
 import { RandomSource } from './events/RandomSource.js';
 import { NetworkSource } from './events/NetworkSource.js';
-import { WorldRenderer } from './renderer/WorldRenderer.js';
+import { WorldRenderer, type ScreenRect } from './renderer/WorldRenderer.js';
 import type { AnomalyKind, EffectInfo } from './anomalies/effects.js';
 import { REGISTERED_EFFECTS, isAnomalyKind, effectInfo, effectName } from './anomalies/effects.js';
 import { NativeBridge } from './platform/NativeBridge.js';
@@ -2314,9 +2314,10 @@ const firstWorld = this._worlds.getAll()[0];
   private _pushAnomalyRate(): void {
     const worldId = this._worlds.getActiveId();
     if (!worldId) return;
-    this._anomalies.setAnomalyRate(
-      anomalyRateMultiplier(escalationOf(this._attention, worldId)),
-    );
+    const escalation = escalationOf(this._attention, worldId);
+    const rate = anomalyRateMultiplier(escalation);
+    this._anomalies.setAnomalyRate(rate);
+    this._renderer.setAttentionReport(escalation, rate);
   }
 
   /**
@@ -2363,6 +2364,11 @@ const firstWorld = this._worlds.getAll()[0];
     this._persistence?.update({ attention: next });
     this._bridge.sendLog('attention:conclusion', { id: conclusionId });
     return true;
+  }
+
+  /** Where the terminal is drawn, for the gates that measure it. */
+  getTerminalRect(): ScreenRect | null {
+    return this._renderer.getTerminalRect();
   }
 
   /** What the terminal and the settings window show about the active place. */

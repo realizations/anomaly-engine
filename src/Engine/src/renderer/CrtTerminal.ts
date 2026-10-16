@@ -80,6 +80,21 @@ export interface TerminalState {
   /** Uptime of the engine in seconds. */
   uptime: number;
   /**
+   * How escalated this place currently is, 0..5.
+   *
+   * On the standing readout rather than pushed as a one-off line, because it is not an
+   * event: it is the standing condition of the place, and the whole point of it is
+   * that a player can watch it move.
+   */
+  escalation?: number | undefined;
+  /**
+   * How often anomalies may fire here, as a fraction of the un-escalated rate.
+   *
+   * Shown next to the escalation because the escalation is otherwise invisible: nothing
+   * about a strange sky tells you it is strange *because of something you did*.
+   */
+  rate?: number | undefined;
+  /**
    * Lines pushed once on arrival, describing what changed while the engine was
    * off. Shown instead of the standing readout for a few seconds, then the
    * terminal returns to idling. Empty on a short gap.
@@ -95,6 +110,7 @@ export interface TerminalState {
    */
   beatMessage?: string[] | undefined;
 }
+
 
 /** One line queued to be typed out. */
 interface Line {
@@ -120,6 +136,22 @@ export class CrtTerminal {
   /** boot progress, 0..1, plays once on first appearance */
   private _boot = 0;
   private _booted = false;
+
+  // The bezel, the scanlines and the glass, baked and blitted.
+  //
+  // None of these move. The bezel is lit by the time of day, the scanlines are a fixed
+  // pitch, and the glass sheen is fixed geometry over a slowly changing light -- all
+  // three change on a scale of minutes. Redrawing them sixty times a second was the
+  // single largest cost in the terminal and bought nothing: enlarging the tube until it
+  // was legible took the frame from inside the 16.7ms budget to 21.8ms, and the extra
+  // 5ms was spent redrawing identical bezel pixels.
+  //
+  // The text and the instruments are still drawn live every frame, because those are
+  // the parts that carry information.
+  private _staticLayer: HTMLCanvasElement | null = null;
+  private _staticKey = '';
+  /** Scanlines and glass, which belong *over* the text. See `_blitStatic`. */
+  private _overlayLayer: HTMLCanvasElement | null = null;
 
   /** last state we rendered, so we only rewrite the readout when it changes */
   private _lastSignature = '';
@@ -156,6 +188,39 @@ export class CrtTerminal {
    * @param state what the terminal has to report
    * @param dt   seconds since the last frame
    */
+  /**
+ * Where the terminal sits, in viewport pixels.
+ *
+ * Exported rather than computed inline because three separate gates were measuring a
+ * hard-coded corner of the screen for it. Each one was correct about its own subject
+ * and wrong about where the subject was, and the failure mode was uniform and
+ * expensive: moving the terminal made two beats and the end-to-end check all report
+ * "nothing was drawn" while the terminal was plainly on screen. A measurement pinned
+ * to a screen position reports a moved subject as a broken one.
+ *
+ * So both sides name this function.
+ */
+layout(w: number, h: number): { boxW: number; boxH: number; bx: number; by: number } {
+    const linePx = Math.max(13, Math.min(19, h * 0.032));
+    const wantedH = linePx * 7 * 2.1;
+    const boxH = Math.min(h * 0.52, Math.max(h * 0.3, wantedH));
+    const boxW = Math.min(w * 0.42, boxH / 0.7);
+
+    // Bottom-right rather than bottom-left.
+    //
+    // It was bottom-left, which put it over the busiest part of every frame: the
+    // treeline runs the full width, the watcher appears at about a fifth of the way
+    // across, and the cabin sits low-left in the town. A terminal large enough to
+    // actually be read covers all three -- and it was only large enough to cover
+    // them once it was legible, so the two problems were the same problem.
+    //
+    // The right side of the ground plane is empty in every world that has a
+    // landscape, so the terminal sits there and the subjects stay visible.
+    const bx = w - boxW - w * 0.045;
+    const by = h - boxH - h * 0.05;
+    return { boxW, boxH, bx, by };
+  }
+
   render(
     g: CanvasRenderingContext2D, w: number, h: number,
     grade: SkyGrade, state: TerminalState, dt: number
@@ -189,19 +254,24 @@ export class CrtTerminal {
     // lines, and capped so that on a tall or short screen it cannot grow larger
     // than a real terminal would, and cannot overflow on small screens, where the
     // scene has to remain the subject.
-    const boxW = Math.min(
-      Math.max(360, w * 0.24),
-      460,
-      Math.max(280, (h * 0.52) / 0.7)
-    );
-    const boxH = boxW * 0.7;
-    // Sits low-left, in the ground region, where a real terminal would stand.
-    const bx = w * 0.045;
-    const by = h - boxH - h * 0.05;
+    // Sized to be read, not to be tasteful.
+    //
+    // This used to cap at 460px wide and 24% of the viewport, which is a piece of
+    // equipment-sized object: correct as a thing standing in a landscape, and
+    // illegible as the only place in the product that says anything back. The
+    // readout is six short lines of small monospace, so a 460px tube on a 1920px
+    // desktop is text at roughly half the size of the file path in the same taskbar
+    // two inches below it. You could see that there was a terminal. You could not
+    // read it, which is the same as there not being one.
+    //
+    // So it is sized off the *text*, not off the picture: the box is derived from
+    // the line height needed for the readout to be comfortable at arm's length,
+    // then clamped so it still reads as an object in the scene and never eats the
+    // landscape on a small screen. The cap is on the height rather than the width,
+    // because height is what determines legibility.
+    const { boxW, boxH, bx, by } = this.layout(w, h);
 
     g.save();
-
-    this._drawBezel(g, bx, by, boxW, boxH, grade);
 
     // Screen interior, inset past the bezel lip.
     const pad = boxW * 0.045;
@@ -209,6 +279,19 @@ export class CrtTerminal {
     const sy = by + pad;
     const sw = boxW - pad * 2;
     const sh = boxH - pad * 2;
+
+    // Two baked layers, and the order is the whole design.
+    //
+    // The bezel is opaque and the glass is a translucent overlay, so they cannot share
+    // one cache: baking them together and blitting after the text painted an opaque
+    // bezel over the readout and every terminal check failed at once with the terminal
+    // plainly on screen. The bezel goes under, the glass goes over.
+    this._bake(boxW, boxH, grade);
+
+    // The bezel goes down first. It is baked with its screen area punched out, because
+    // a bezel is a frame: the opaque interior it fills in has to be removed or the
+    // readout ends up underneath a grey rectangle.
+    if (this._staticLayer) g.drawImage(this._staticLayer, bx, by);
 
     g.save();
     g.beginPath();
@@ -222,11 +305,72 @@ export class CrtTerminal {
     g.clip();
 
     this._drawScreen(g, sx, sy, sw, sh, state, dt);
-    this._drawScanlines(g, sx, sy, sw, sh);
-    this._drawGlass(g, sx, sy, sw, sh, grade);
 
     g.restore();
+    if (this._overlayLayer) g.drawImage(this._overlayLayer, bx, by);
     g.restore();
+  }
+
+  /**
+   * Bakes the bezel and the glass overlay when the size or the light has moved.
+   *
+   * The key is the box size plus a coarse signature of the light. Coarse on purpose:
+   * rounding the ambient term to four places means the layers re-bake at most a few
+   * times across a whole day, and in between a bezel that is a shade out of date is
+   * invisible on an object that flickers anyway.
+   */
+  private _bake(w: number, h: number, grade: SkyGrade): void {
+    const key =
+      `${Math.round(w)}x${Math.round(h)}|${grade.ambient.toFixed(4)}|` +
+      `${grade.lightColor.r}|${grade.lightColor.g}|${grade.lightColor.b}`;
+    if (this._staticKey === key && this._staticLayer && this._overlayLayer) return;
+
+    const pad = w * 0.045;
+    const sx = pad;
+    const sy = pad;
+    const sw = w - pad * 2;
+    const sh = h - pad * 2;
+
+    const bezel = document.createElement('canvas');
+    bezel.width = Math.max(1, Math.ceil(w));
+    bezel.height = Math.max(1, Math.ceil(h));
+    const bg = bezel.getContext('2d')!;
+    this._drawBezel(bg, 0, 0, w, h, grade);
+
+    // Punch the screen out of the bezel layer.
+    //
+    // `_drawBezel` fills the whole box, screen area included, which is right when it
+    // is the only thing being drawn and wrong the moment it becomes a cached layer
+    // that goes under the readout: an opaque grey rectangle, exactly the colour of a
+    // dead terminal, painted over six lines of green text. `destination-out` removes
+    // the alpha rather than painting over it, so the frame survives and the middle
+    // becomes a hole.
+    bg.save();
+    bg.globalCompositeOperation = 'destination-out';
+    bg.fillRect(sx, sy, sw, sh);
+    bg.restore();
+
+    this._staticLayer = bezel;
+
+    const overlay = document.createElement('canvas');
+    overlay.width = bezel.width;
+    overlay.height = bezel.height;
+    const o = overlay.getContext('2d')!;
+    o.save();
+    o.beginPath();
+    o.moveTo(sx + sw * 0.03, sy);
+    o.lineTo(sx + sw * 0.97, sy);
+    o.quadraticCurveTo(sx + sw, sy + sh * 0.5, sx + sw * 0.97, sy + sh);
+    o.lineTo(sx + sw * 0.03, sy + sh);
+    o.quadraticCurveTo(sx, sy + sh * 0.5, sx + sw * 0.03, sy);
+    o.closePath();
+    o.clip();
+    this._drawScanlines(o, sx, sy, sw, sh);
+    this._drawGlass(o, sx, sy, sw, sh, grade);
+    o.restore();
+    this._overlayLayer = overlay;
+
+    this._staticKey = key;
   }
 
   private _drawBezel(
@@ -321,7 +465,11 @@ const lit = 0.25 + grade.ambient * 0.75;
 
     const padX = w * 0.07;
     const padY = h * 0.09;
-    let fs = Math.max(8, Math.round(h * 0.075));
+    // Floored at 10px rather than 6. Shrinking a line to fit is the right instinct and
+    // the wrong answer for this surface: a 6px readout is not a tight fit, it is
+    // unreadable, and the lines that get shrunk are the long ones carrying the
+    // arrival summary -- which are exactly the ones a player is meant to read.
+    let fs = Math.max(10, Math.round(h * 0.075));
 
     // The readout is a stable block: every line is drawn every frame, and only
     // the single line that changed is re-typed. Re-typing the whole block on
@@ -347,11 +495,18 @@ const lit = 0.25 + grade.ambient * 0.75;
     // clipped, because the lost words would be the unsettling ones.
     g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     g.textBaseline = 'top';
-    const inner = w - padX * 2;
+    // 0.94, not 1.0, because the fit is measured against the *clip*.
+    //
+    // The screen is a barrel: the clip runs from 3% in at each edge and bulges in the
+    // middle, so a line measured as exactly fitting the box is being clipped at both
+    // ends by the curve that draws it. That is how "SITE THE TOWN THAT WASNT THERE"
+    // rendered as "SITE THE TOWN" with the measure-to-fit check reporting it fit. The
+    // measurement has to be against the shape the text is actually painted inside.
+    const inner = (w - padX * 2) * 0.94;
     let longest = 0;
     for (const row of shown) longest = Math.max(longest, g.measureText(row.text).width);
     if (longest > inner && longest > 0) {
-      fs = Math.max(6, Math.floor(fs * (inner / longest)));
+      fs = Math.max(10, Math.floor(fs * (inner / longest)));
       g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     }
     const lineH = fs * 1.5;
@@ -361,11 +516,18 @@ const lit = 0.25 + grade.ambient * 0.75;
     // The cursor blinks on the current row regardless of typing state.
     const cursorVisible = Math.floor(this._flicker * 1.6) % 2 === 0;
 
+    // One blurred pass, not six cheap ones.
+    //
+    // Faking the bloom with several offset copies was tried first and was worse: six
+    // `fillText` calls per line cost 22.7ms against 18.3ms for a single `shadowBlur`.
+    // The blur is expensive because its cost scales with radius times glyph area, so
+    // the lever is the radius, not the number of passes. At a third of the type size it
+    // still reads as a lit tube and costs about a fifth of what a half-size radius did.
     shown.forEach((row, i) => {
       const col = row.warn ? PHOSPHOR_WARN : PHOSPHOR;
       g.fillStyle = css(col, this._boot * 0.92);
       g.shadowColor = css(col, 0.7);
-      g.shadowBlur = fs * 0.55;
+      g.shadowBlur = fs * 0.3;
       g.fillText(row.text, x + padX, y + padY + i * lineH);
       g.shadowBlur = 0;
     });
@@ -501,7 +663,8 @@ const lit = 0.25 + grade.ambient * 0.75;
             `  ${state.clock}  ${state.weather}${state.temperature ? `  ${state.temperature}` : ''}`,
             `  SITE ${state.worldName.toUpperCase()}`,
             `  LOG ${state.observations} OBS / ${state.secrets} RECOVERED`,
-            `  LINK ${up}  ::  NOMINAL`,
+            `  ATTN ${state.escalation ?? 0}/5  RATE ${Math.round((state.rate ?? 1) * 100)}%`,
+            `  LINK ${up}  ::  ${(state.escalation ?? 0) > 2 ? 'DISTURBED' : 'NOMINAL'}`,
           ];
 
     if (!state.beatMessage?.length && state.anomalyActive) {

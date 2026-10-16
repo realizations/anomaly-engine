@@ -196,6 +196,19 @@ export function nextAudioImpulse(previous: number, impulse: number): number {
 export class WorldRenderer {
   private _canvas: HTMLCanvasElement;
   private _crt: CrtTerminal | null = null;
+
+  /**
+   * What the engine last reported about this place, for the terminal's readout.
+   *
+   * Held here rather than passed into `render` because the terminal is composited here
+   * and built from scene state; threading two more numbers through every call site to
+   * reach a readout that only this class draws would be a worse arrangement than one
+   * field. Defaulted rather than required so the terminal is still correct on its own:
+   * a renderer that has never been told about escalation reads zero, which is the
+   * truth for a place nobody has attended.
+   */
+  private _escalation = 0;
+  private _anomalyRate = 1;
   private _liminal: LiminalInterior | null = null;
   private _uncanny: UncannyLayer | null = null;
 
@@ -436,6 +449,8 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         anomalyActive: !!anomaly,
         anomalyName: anomaly?.type,
         uptime: (performance.now() - this._startedAt) / 1000,
+        escalation: this._escalation,
+        rate: this._anomalyRate,
         returnSummary: this._returnSummary ?? undefined,
         beatMessage: message ?? undefined,
       },
@@ -844,6 +859,41 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
   terminalPush(text: string, opts: { warn?: boolean } = {}): void {
     this._crt ??= new CrtTerminal(this._seed);
     this._crt.push(text, opts);
+  }
+
+  /**
+   * Records how escalated the active place is, so the terminal can report it.
+   *
+   * The terminal is the only text surface in the product, so anything the player needs
+   * to know has to reach it. Escalation is standing state rather than an event, which
+   * is why it is a setter and not a `push`: it belongs on the readout where it moves,
+   * not in the queue where it would type itself out once and be missed.
+   */
+  setAttentionReport(escalation: number, rate: number): void {
+    this._escalation = Number.isFinite(escalation) ? Math.max(0, escalation) : 0;
+    this._anomalyRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
+  }
+
+  /**
+   * Where the terminal is drawn, or null when it is too small to draw at all.
+   *
+   * Read by the gates rather than having each of them remember a corner of the screen.
+   * Three of them had their own hard-coded box for it and all three reported "the
+   * terminal vanished" the moment it moved, which is a measurement that cannot tell the
+   * difference between a subject that broke and a subject that relocated.
+   */
+  getTerminalRect(): ScreenRect | null {
+    // Created on demand, exactly as `terminalPush` does, rather than read off the
+    // existing instance. `layout` is a pure function of the viewport, but calling it
+    // needs an instance, and a caller asking where the terminal is -- before the first
+    // frame, or in a world whose first frames have not reached the draw path -- should
+    // get the real answer rather than null standing in for "not built yet".
+    this._crt ??= new CrtTerminal(this._seed);
+    const layout = this._crt.layout(this._w, this._h);
+    // Same guard the draw path uses, so a rect is never reported for a terminal that
+    // would not have been painted.
+    if (this._w < 420 || this._h < 260) return null;
+    return { x: layout.bx, y: layout.by, width: layout.boxW, height: layout.boxH };
   }
 
   hasSurreal(): boolean {
@@ -2674,12 +2724,25 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         const wxx = x + wx;
         const wyy = baseY - h * 0.66;
         const ww = w * 0.16;
-        const glow = g.createRadialGradient(wxx, wyy, 0, wxx, wyy, ww * 4.2);
-        glow.addColorStop(0, `rgba(255,196,104,${0.4 * winAlpha})`);
+        // The glow radius was `ww * 4.2` against a window that is 16% of the frame,
+        // which made it about 67% of the scene width: not a light in a window but a
+        // warm wash across the whole frame, drawn twice, additively. It was the single
+        // largest contributor to the town looking flat and hazy at dusk, because it was
+        // lifting every dark value in the picture by the same amount and destroying
+        // the silhouettes it sat in front of.
+        //
+        // A lamp reads as a lamp because its falloff is fast and its core is small. The
+        // radius is now a fixed multiple of the window and the intensity falls off
+        // steeply, so the window is the brightest thing and the wall around it is only
+        // slightly lifted.
+        const glowR = ww * 1.5;
+        const glow = g.createRadialGradient(wxx, wyy, 0, wxx, wyy, glowR);
+        glow.addColorStop(0, `rgba(255,214,150,${0.62 * winAlpha})`);
+        glow.addColorStop(0.35, `rgba(255,190,116,${0.22 * winAlpha})`);
         glow.addColorStop(1, 'rgba(255,180,90,0)');
         g.fillStyle = glow;
         g.beginPath();
-        g.arc(wxx, wyy, ww * 4.2, 0, Math.PI * 2);
+        g.arc(wxx, wyy, glowR, 0, Math.PI * 2);
         g.fill();
       }
       g.restore();

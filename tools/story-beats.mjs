@@ -204,7 +204,16 @@ async function regionBox(region) {
         h: (m.height + padY * 2) * src.height,
       };
     } else if (r === 'terminal') {
-      box = { x: 0, y: src.height * 0.55, w: src.width * 0.4, h: src.height * 0.45 };
+      // From the engine, not from a remembered corner.
+      //
+      // It was bottom-left and the box below was written to match: a hard-coded
+      // 40%-wide patch in the left half. Moving the terminal made both terminal beats
+      // report "changed nothing" while the terminal was plainly on screen. The
+      // measurement was right and the diagnosis was wrong, which is the useful case: a
+      // window pinned to a screen position reports a relocated subject as a broken one.
+      const tr = window.__engine.getTerminalRect?.();
+      if (!tr) return { error: 'the engine reported no terminal rect' };
+      box = { x: tr.x, y: tr.y, w: tr.width, h: tr.height };
     } else {
       const l = surfaces.landmarks.find((x) => x.kind === r);
       if (!l) return { error: `no ${r} landmark in this world` };

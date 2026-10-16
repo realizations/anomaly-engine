@@ -419,17 +419,29 @@ void beforeBad;
 // buffer is reallocated on resize and on a monitor-layout change, so a retained
 // context silently pointed at an orphaned canvas and the terminal stopped
 // appearing at all. Nothing else would have caught it, because every other
-// check still passed. This looks for the terminal's bright phosphor pixels in
-// the bottom-left of the frame, where it is drawn.
+// check still passed. This looks for the terminal's bright phosphor pixels where
+// the engine says the terminal actually is.
+//
+// The sample box used to be a hard-coded bottom-left corner. When the terminal moved
+// to the right, this reported that it had stopped being drawn -- while it was plainly
+// on screen -- because a measurement pinned to a screen position cannot tell a broken
+// subject from a relocated one. It asks now.
 const terminal = await page.evaluate(async () => {
   window.dispatchEvent(new CustomEvent('anomaly:monitors', {
     detail: { monitors: [{ x: 0, y: 0, w: 1280, h: 720 }] },
   }));
   await new Promise((r) => setTimeout(r, 1200));
+  const r = window.__engine.getTerminalRect();
+  if (!r) return { phosphor: 0, sampled: 0, note: ' - the engine reported no terminal rect' };
   const cv = document.getElementById('wallpaper-canvas');
   const g = cv.getContext('2d');
-  // The tube occupies roughly x 58..290, y 540..700 at 1280x720.
-  const region = g.getImageData(50, 520, 260, 190).data;
+  // Padded, because the phosphor sits inside the bezel.
+  const pad = Math.round(r.width * 0.04);
+  const x = Math.max(0, Math.round(r.x) - pad);
+  const y = Math.max(0, Math.round(r.y) - pad);
+  const w = Math.max(1, Math.min(cv.width - x, Math.round(r.width) + pad * 2));
+  const h = Math.max(1, Math.min(cv.height - y, Math.round(r.height) + pad * 2));
+  const region = g.getImageData(x, y, w, h).data;
   let phosphor = 0;
   for (let i = 0; i < region.length; i += 4) {
     // Phosphor is a green-dominant colour; count pixels where green clearly
@@ -440,7 +452,7 @@ const terminal = await page.evaluate(async () => {
 });
 check('the observatory terminal is drawn on the canvas',
   terminal.phosphor > 40,
-  `${terminal.phosphor} phosphor pixels of ${terminal.sampled} sampled`);
+  `${terminal.phosphor} phosphor pixels of ${terminal.sampled} sampled${terminal.note ?? ''}`);
 
 // --- quality scaling ---
 const scaleInfo = await page.evaluate(() => {
