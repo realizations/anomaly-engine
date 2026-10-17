@@ -61,8 +61,19 @@ import {
   conclude,
   observationCount,
   reconcileAttention,
+  conclusionId,
   type AttentionState,
 } from './systems/Attention.js';
+
+/**
+ * How long two looks can be apart and still read as one deduction.
+ *
+ * Twelve seconds is long enough to walk the cursor across the scene and short enough
+ * that a look this morning and a look this afternoon are not a conclusion. Exported
+ * from the module rather than written here so the tests can state the window instead
+ * of approximating it.
+ */
+const LINK_WINDOW_MS = 12_000;
 import type { StoryBeat } from './renderer/storyBeat.js';
 
 /**
@@ -2276,10 +2287,9 @@ const firstWorld = this._worlds.getAll()[0];
 
     // Settle first, then read, so the escalation reported back is the one the click
     // produced rather than the one from the last frame.
-    this._attention = settle(this._attention, worldId, now);
+    this._settleAndPush(worldId, now);
     const escalation = escalationOf(this._attention, worldId);
 
-    this._persistence?.update({ attention: this._attention });
     this._bridge.sendLog('zones:click', {
       zone: desc.id,
       paid: result.paid,
@@ -2292,14 +2302,72 @@ const firstWorld = this._worlds.getAll()[0];
       { warn: escalation > 0 },
     );
 
-    if (!result.paid) return;
-
     // Deliberately not the journal. The journal records anomalies and runs them through
     // the world's flavour table, so an observation pushed into it would be named as
     // though it were one of the six effects. The observation has a home already: the
     // attention record, which is persistent and countable, and the terminal, which is
     // where a player would look for it.
-    void result.paid;
+
+    // The link attempt happens whether or not the observation paid. Looking at the same
+    // landmark twice in a row and then somewhere else is still two different things
+    // being looked at, and refusing to draw a link because the first of the pair was a
+    // repeat would make the mechanic depend on whether you happened to look twice.
+    this._tryLink(desc, worldId, now);
+  }
+
+  /**
+   * The last landmark looked at, and when, so a second look can be read as a link.
+   *
+   * Two different landmarks clicked in sequence is how a conclusion is drawn. It reuses
+   * the verb the player already has and needs no panel, no drag and no modifier: the
+   * gesture is "go and look at that, then look at *that*", which is exactly the
+   * gesture an investigation is made of.
+   *
+   * Twelve seconds is long enough to walk the cursor across the scene and short enough
+   * that a look at the treeline this morning and a look at the tower this afternoon are
+   * not a deduction.
+   */
+  private _lastLook: { zoneId: string; at: number } | null = null;
+
+  private _tryLink(desc: { id: string; name: string }, worldId: string, now: number): void {
+    const previous = this._lastLook;
+    this._lastLook = { zoneId: desc.id, at: now };
+    if (!previous) return;
+
+    const stale = now - previous.at > LINK_WINDOW_MS;
+    if (stale || previous.zoneId === desc.id) return;
+
+    const id = conclusionId(previous.zoneId, desc.id);
+    const next = conclude(this._attention, id, worldId);
+    if (next === this._attention) {
+      this._renderer.terminalPush('NO NEW CORRELATION', { pace: 1.6 });
+      return;
+    }
+
+    this._attention = next;
+    this._settleAndPush(worldId, now);
+
+    const report = this.getAttentionReport();
+    this._renderer.terminalPush(
+      `CORRELATION ${previous.zoneId.toUpperCase()} / ${desc.id.toUpperCase()}`,
+      { pace: 1.2 },
+    );
+    this._renderer.terminalPush(
+      `ATTN NOW ${report.escalation}  OBS ${report.observations}  RATE ${Math.round(report.rate * 100)}%`,
+      { pace: 1.2 },
+    );
+    this._bridge.sendLog('attention:conclusion', {
+      a: previous.zoneId,
+      b: desc.id,
+      escalation: report.escalation,
+    });
+  }
+
+  /** Settles one place and pushes the consequence, persisting if anything moved. */
+  private _settleAndPush(worldId: string, now: number): void {
+    this._attention = settle(this._attention, worldId, now);
+    this._persistence?.update({ attention: this._attention });
+    this._pushAnomalyRate();
   }
 
   /**

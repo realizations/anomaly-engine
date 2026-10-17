@@ -90,6 +90,23 @@ export const MAX_OBSERVATIONS = 60;
 /** Ceiling on stored conclusions. */
 export const MAX_CONCLUSIONS = 24;
 
+/**
+ * How much attention a conclusion takes out of a place.
+ *
+ * This is the reason a conclusion is worth drawing, and the reason the loop closes.
+ * Attention only ever goes up on its own, and a number that only goes up is a score.
+ * Linking two observations is the one act that *spends* it: you have worked out
+ * something, so the place is less strange than it was an hour ago. Without this,
+ * escalation is a one-way ratchet and there is nothing to do about a place once it
+ * has gone loud.
+ */
+export const CONCLUSION_RELIEF = 1;
+
+/** The conclusion id for a pair of zones, order-independent. */
+export function conclusionId(zoneA: string, zoneB: string): string {
+  return [zoneA, zoneB].sort().join('|');
+}
+
 const DAY_MS = 86_400_000;
 
 export function emptyAttention(): AttentionState {
@@ -223,12 +240,35 @@ export function anomalyRateMultiplier(escalation: number): number {
  * Records a conclusion drawn by linking two observations.
  *
  * Returns the state unchanged if the conclusion is already recorded, so a player cannot
- * farm escalation by re-linking the same pair.
+ * farm relief by re-linking the same pair -- which matters now that linking has a
+ * mechanical cost, and not only because re-linking is dull.
+ *
+ * The world's attention drops by the relief. Escalation deliberately does not: having
+ * explained one thing about a place does not make the place forget, and a place whose
+ * escalation fell back would let a player undo weeks of neglect with one good guess.
  */
-export function conclude(state: AttentionState, conclusionId: string): AttentionState {
+export function conclude(
+  state: AttentionState,
+  conclusionId: string,
+  worldId?: string,
+): AttentionState {
   if (state.conclusions.includes(conclusionId)) return state;
+
+  let worlds = state.worlds;
+  const current = worldId ? state.worlds[worldId] : undefined;
+  if (current) {
+    worlds = {
+      ...state.worlds,
+      [worldId!]: {
+        ...current,
+        attention: Math.max(0, current.attention - CONCLUSION_RELIEF),
+      },
+    };
+  }
+
   return {
     ...state,
+    worlds,
     conclusions: [...state.conclusions, conclusionId].slice(-MAX_CONCLUSIONS),
   };
 }

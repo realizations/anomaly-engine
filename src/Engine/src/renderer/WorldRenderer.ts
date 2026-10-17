@@ -856,7 +856,10 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * first frame would otherwise be silently dropped, and the earliest thing worth
    * reporting is what happened when the player clicked the very first thing they saw.
    */
-  terminalPush(text: string, opts: { warn?: boolean } = {}): void {
+  terminalPush(
+    text: string,
+    opts: { warn?: boolean; pace?: number } = {},
+  ): void {
     this._crt ??= new CrtTerminal(this._seed);
     this._crt.push(text, opts);
   }

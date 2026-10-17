@@ -10,6 +10,7 @@ import {
   observationId,
   observationCount,
   reconcileAttention,
+  conclusionId,
   ATTENTION_CEILING,
   MAX_ESCALATION,
   NEGLECT_DAYS,
@@ -161,6 +162,53 @@ describe('conclusions', () => {
     s = conclude(s, 'a');
     s = conclude(s, 'b');
     expect(s.conclusions).toEqual(['a', 'b']);
+  });
+
+  it('a conclusion takes attention out of the place', () => {
+    let s = observe(emptyAttention(), 'town', 'forest', 'd1', T0).state;
+    s = observe(s, 'town', 'observatory', 'd2', T0 + DAY).state;
+    expect(s.worlds.town.attention).toBe(2);
+    s = conclude(s, 'forest|observatory', 'town');
+    expect(s.worlds.town.attention).toBe(1);
+  });
+
+  it('relief cannot drive attention below zero', () => {
+    const seen = observe(emptyAttention(), 'town', 'forest', 'd1', T0).state;
+    const after = conclude(seen, 'a', 'town');
+    expect(after.worlds.town.attention).toBe(0);
+  });
+
+  it('relief is not repeatable for the same pair', () => {
+    let s = observe(emptyAttention(), 'town', 'forest', 'd1', T0).state;
+    s = conclude(s, 'a|b', 'town');
+    expect(s.worlds.town.attention).toBe(0);
+    // The state is returned unchanged, so there is nothing to farm.
+    expect(conclude(s, 'a|b', 'town')).toBe(s);
+  });
+
+  it('a conclusion does not lower escalation', () => {
+    // Neglect drove this place loud. Working one thing out does not make it forget.
+    const seen = observe(emptyAttention(), 'town', 'forest', 'd1', T0).state;
+    const loud = settle(seen, 'town', T0 + 20 * DAY);
+    const earned = escalationOf(loud, 'town');
+    const after = conclude(loud, 'a|b', 'town');
+    expect(escalationOf(after, 'town')).toBe(earned);
+  });
+
+  it('a conclusion for an unknown place is still recorded', () => {
+    const s = conclude(emptyAttention(), 'a|b', 'never-visited');
+    expect(s.conclusions).toEqual(['a|b']);
+    expect(s.worlds['never-visited']).toBeUndefined();
+  });
+});
+
+describe('conclusionId', () => {
+  it('is the same pair whichever order it is drawn in', () => {
+    expect(conclusionId('forest', 'observatory')).toBe(conclusionId('observatory', 'forest'));
+  });
+
+  it('distinguishes different pairs', () => {
+    expect(conclusionId('a', 'b')).not.toBe(conclusionId('a', 'c'));
   });
 });
 
