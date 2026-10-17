@@ -1591,19 +1591,66 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
 
   private _drawSkyFlat(grade: SkyGrade): void {
     const g = this._ctx;
-    // A real gradient, not a stack of hard strips. Six visible steps across a
-    // smooth ramp is exactly what a broken gradient looks like, which is what
-    // the banded version read as.
     const horizonY = this._h * this._horizonFrac() + 2;
-    const grd = g.createLinearGradient(0, 0, 0, horizonY);
-    grd.addColorStop(0, css(grade.skyTop));
-    grd.addColorStop(0.34, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.22)));
-    grd.addColorStop(0.62, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.6)));
-    grd.addColorStop(0.84, css(mixRgb(grade.skyTop, grade.skyHorizon, 0.9)));
-    grd.addColorStop(1, css(grade.skyHorizon));
-    g.fillStyle = grd;
-    g.fillRect(0, 0, this._w, horizonY);
+
+    // A flat sky is built from a few distinct shapes with hard edges between them.
+    //
+    // It used to be a five-stop gradient with slightly different stops from the
+    // painterly one, which is the whole reason the two styles looked identical: a
+    // gradient and a gradient with different stops are the same picture, and the only
+    // thing that made this function exist was the name.
+    //
+    // What makes a poster read as printed is that the value steps are *decided*
+    // rather than sampled, and that the boundaries are shapes rather than lines. So
+    // five bands, each a flat fill, each boundary bowed toward the horizon light, and
+    // the mixes pushed further apart than the smooth ramp they replace -- a flat style
+    // that is exactly as contrasty as the painterly one is still a gradient.
+    const STEPS = [0, 0.3, 0.53, 0.73, 0.88, 1];
+    // Held back from a pure `skyHorizon` at the bottom. At dusk that colour is a
+    // saturated red, and taking it all the way made the last band read as a fault
+    // rather than as a colour. A printed sky still has some of the upper light in it.
+    const MIXES = [0, 0.16, 0.4, 0.62, 0.8, 0.92];
+
+    for (let i = 0; i < STEPS.length - 1; i++) {
+      const y0 = STEPS[i] * horizonY;
+      const y1 = STEPS[i + 1] * horizonY;
+      g.fillStyle = css(mixRgb(grade.skyTop, grade.skyHorizon, MIXES[i]));
+
+      g.beginPath();
+      g.moveTo(0, y0);
+      this._bandEdge(g, y0, STEPS[i]);
+      g.lineTo(this._w, y1);
+      this._bandEdge(g, y1, STEPS[i + 1], true);
+      g.closePath();
+      g.fill();
+    }
+
+    // Kept, but faint. Hard bands have no contouring to dissolve, so this is here for
+    // the opposite reason: a completely clean gradient-free sky reads as vector clip
+    // art rather than as a drawn one, and a little grain is what makes the edges sit
+    // in the picture instead of on top of it.
     this._ditherRegion(0, 0, this._w, horizonY, grade);
+  }
+
+  /**
+   * Traces one bowed band boundary left to right, or right to left when reversed.
+   *
+   * The bow widens toward the top of the frame, so the bands read as a single swept
+   * form opening out of the light rather than as a bar chart drawn across the sky.
+   */
+  private _bandEdge(g: CanvasRenderingContext2D, y: number, at: number, reverse = false): void {
+    const step = 20;
+    // Sinusoidal in the band's own height, so the bow is zero at the top of the frame
+    // and zero again at the horizon and strongest through the middle. Scaling it by
+    // `(1 - at)` instead -- the first attempt -- put the deepest bow on the topmost
+    // band, which cut a curved black lens out of the top of every dusk sky.
+    const depth = this._h * this._horizonFrac() * 0.028 * Math.sin(at * Math.PI);
+    for (let i = 0; i <= this._w; i += step) {
+      const t = i / this._w;
+      const bow = Math.sin(t * Math.PI) * depth;
+      if (reverse) g.lineTo(this._w - i, y + bow);
+      else g.lineTo(i, y + bow);
+    }
   }
 
   /** Overlays the cached dither tile to dissolve gradient contouring. */
@@ -3242,6 +3289,48 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
         ];
 
     for (const L of layers) {
+      const hard = this._style === 'flat';
+
+      // A flat illustration separates planes with an edge, not with a fade.
+      //
+      // Painterly feathers every layer into the one behind it, which is exactly what
+      // makes it read as depth. Doing the same here is what made the two styles render
+      // as one picture: a feathered band is a gradient, and a gradient is what the other
+      // style already was.
+      //
+      // So under flat the layer is a solid shape with a drawn edge. The silhouette still
+      // undulates, so the boundary follows the terrain, but it stops dissolving into it
+      // -- which is the whole difference between a printed plane and an airbrush, and
+      // it is legible from across a desk.
+      if (hard) {
+        const fill = shade(base, L.delta * d);
+        g.fillStyle = css(fill);
+        g.beginPath();
+        g.moveTo(0, this._h);
+        for (let px = 0; px <= this._w; px += 4) {
+          const n = fbm1D(px * L.freq, L.seed, 4);
+          g.lineTo(px, L.y * this._h - (n - 0.5) * L.amp * this._h);
+        }
+        g.lineTo(this._w, this._h);
+        g.closePath();
+        g.fill();
+
+        // A single darker lip along the top edge, which is how a printed layer reads
+        // as being *in front of* the one behind it rather than mixed into it.
+        g.strokeStyle = css(shade(base, L.delta * d - 0.2), 0.5);
+        g.lineWidth = 1.5;
+        g.beginPath();
+        for (let px = 0; px <= this._w; px += 4) {
+          const n = fbm1D(px * L.freq, L.seed, 4);
+          const y = L.y * this._h - (n - 0.5) * L.amp * this._h;
+          if (px === 0) g.moveTo(px, y);
+          else g.lineTo(px, y);
+        }
+        g.stroke();
+        g.lineWidth = 1;
+        continue;
+      }
+
       // Feathered edges, so a layer dissolves into the ground rather than
       // terminating in a visible step.
       const yTop = L.y * this._h - this._h * 0.03;

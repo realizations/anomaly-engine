@@ -112,8 +112,15 @@ for (const style of STYLES) {
 // string, because they make two archived runs comparable by eye.
 //
 // The threshold sits above the painterly and flat frame-to-frame jitter, which is
-// roughly 0.3, and below the smallest real difference between two finished looks.
-const STYLE_DIVERGENCE = 12;
+// roughly 0.3, and well above the 24 the two finished styles measure.
+//
+// 12 was set when "flat" was a gradient with slightly different stops from the
+// painterly one, so the two styles differ by about as much as two gradients of the
+// same sky are allowed to -- which passed, while the picker offered a choice the
+// product did not contain. Raising the bar is the only thing that keeps them honest:
+// flat is now built from hard-edged bands rather than a ramp, and it measures 24.
+// A threshold that accepted 12 would happily accept that regression back.
+const STYLE_DIVERGENCE = 20;
 const divergences = [];
 for (let i = 0; i < STYLES.length; i++) {
   for (let j = i + 1; j < STYLES.length; j++) {
