@@ -63,6 +63,8 @@ import {
   reconcileAttention,
   conclusionId,
   correlationFor,
+  correlationMarkFor,
+  resolvedIn,
   type AttentionState,
 } from './systems/Attention.js';
 
@@ -2387,13 +2389,27 @@ const firstWorld = this._worlds.getAll()[0];
    * moves while the engine is running and a rate set at launch would be wrong by the
    * time the first neglect threshold passed.
    */
-  private _pushAnomalyRate(): void {
+private _pushAnomalyRate(): void {
     const worldId = this._worlds.getActiveId();
     if (!worldId) return;
     const escalation = escalationOf(this._attention, worldId);
     const rate = anomalyRateMultiplier(escalation);
     this._anomalies.setAnomalyRate(rate);
     this._renderer.setAttentionReport(escalation, rate);
+
+    // The permanent marks are re-derived from the resolved list rather than tracked
+    // separately, so a mark can never exist without the conclusion that made it and
+    // can never be lost while the conclusion is still there.
+    const marks: string[] = [];
+    for (const entry of resolvedIn(this._attention, worldId)) {
+      // `worldId/pairId` -> the structure the pair leaves marked.
+      const pair = entry.slice(worldId.length + 1);
+      const parts = pair.split('|');
+      const mark =
+        parts.length === 2 ? correlationMarkFor(parts[0], parts[1]) : null;
+      if (mark) marks.push(mark);
+    }
+    this._renderer.setResolvedMarks(marks);
   }
 
   /**

@@ -209,6 +209,59 @@ export class WorldRenderer {
    */
   private _escalation = 0;
   private _anomalyRate = 1;
+
+  /**
+   * Structures the player has resolved a correlation about, and which stay lit.
+   *
+   * The one permanent consequence in the game. A resolved correlation leaves its
+   * structure marked, and the mark survives restarts -- so a place you have worked
+   * out is visibly different from a place you have not, and stays that way.
+   *
+   * Deliberately a light and nothing else. A light on is deniable in the way this
+   * whole fiction is built to be deniable: it could be a bulb, a fault, a reflector.
+   * Anything more would break the contract that the player is always able to decide
+   * they imagined it.
+   */
+  private _resolvedMarks = new Set<string>();
+
+  setResolvedMarks(ids: string[]): void {
+    this._resolvedMarks = new Set(Array.isArray(ids) ? ids : []);
+  }
+
+  /**
+   * The lamp a resolved structure carries, drawn after the structures so it sits on
+   * top of them rather than behind.
+   *
+   * Positioned from the renderer's own landmark geometry rather than from hand-typed
+   * fractions: the landmarks are already computed for the interaction zones, and a
+   * mark at a guessed position is a mark that drifts the first time a scene moves.
+   */
+  private _drawResolvedMarks(grade: SkyGrade): void {
+    if (this._resolvedMarks.size === 0) return;
+    const night = Math.max(0, 1 - grade.ambient);
+    // Invisible in daylight, which is correct: it is a lamp, not a glow.
+    const strength = Math.min(1, night * 1.6);
+    if (strength <= 0.02) return;
+
+    const g = this._ctx;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    for (const l of this.getLandmarkRects()) {
+      if (!this._resolvedMarks.has(l.kind)) continue;
+      const cx = (l.x + l.width / 2) * this._w;
+      const cy = (l.y + l.height * 0.34) * this._h;
+      const r = Math.max(5, this._h * 0.012);
+      const grd = g.createRadialGradient(cx, cy, 0, cx, cy, r * 6);
+      grd.addColorStop(0, `rgba(255,236,196,${0.9 * strength})`);
+      grd.addColorStop(0.22, `rgba(255,214,150,${0.42 * strength})`);
+      grd.addColorStop(1, 'rgba(255,200,130,0)');
+      g.fillStyle = grd;
+      g.beginPath();
+      g.arc(cx, cy, r * 6, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
   private _liminal: LiminalInterior | null = null;
   private _uncanny: UncannyLayer | null = null;
 
@@ -1454,6 +1507,17 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
       this._drawForestMid();
       this._drawFog(grade);
       this._drawForestNear();
+      // After the trees, not before them.
+      //
+      // It was drawn straight after the structures, which put the cabin's lamp inside the
+      // treeline band and underneath it -- the forest is drawn after the structures, so a
+      // glow behind the trees is simply a glow nobody sees. It measured as a feature that
+      // did nothing on one structure and worked on another, which is the worst kind of
+      // bug: correct on the tall things, invisible on the ones in the wood.
+      //
+      // Light belongs late. Additively drawn and after the fog, a lamp still reads as
+      // being behind the branches rather than painted over them.
+      this._drawResolvedMarks(grade);
       // Atmospheric light sits above the near forest but below the foreground,
       // because a shaft crossing in front of the closest plane would read as a
       // projection rather than as air in the valley.

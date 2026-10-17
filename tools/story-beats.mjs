@@ -31,7 +31,7 @@
  */
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -543,6 +543,196 @@ await settle();
     if (wide) console.log(`       whole frame: ${wide.count} px at ${wide.where}`);
   }
   if (!ok) failures++;
+}
+
+/**
+ * The permanent mark, driven through the real click path.
+ *
+ * Everything above is driven by eggs -- a discovered trigger previewing a story beat. This
+ * one is not, because a correlation is not an egg: it comes from clicking two landmarks
+ * in order within the link window, and the only way to know the whole chain works is to
+ * click them the way a player would and look at the pixels afterwards.
+ *
+ * So: real `click` events on the window (which is what InteractionSystem listens to),
+ * at the centres the renderer's own geometry reports. If the attention rule, the link
+ * window, the correlation table, the state write or the renderer all worked, a lamp is
+ * now on that building.
+ */
+const marked = await (async () => {
+  // Night, so a lamp is visible at all -- `lights-on-day` exists for the opposite reason.
+  //
+  // Reloaded first, and that is not tidiness. By this point the page has been clicked all
+  // run long -- `observatory-door` is a triple-click, and a triple-click on one landmark
+  // followed by any other is enough to resolve a correlation. So the cabin was already
+  // marked before the check began, the before-snapshot already had a lamp in it, and the
+  // measurement correctly reported that clicking the cabin changed nothing: the lamp had
+  // been on for thirty seconds.
+  //
+  // A green run over a feature that was never exercised is worse than a failure, so the
+  // page is reloaded and the engine is asked to earn its mark from two fresh clicks.
+  await page.reload();
+  await page.waitForFunction(() => window.__engine, null, { timeout: 30000 });
+  await page.evaluate(() => {
+    window.__engine.setWorld('the-town-that-wasnt-there');
+    window.__engine.setSimulatedHour(1.4);
+    window.__engine.setSimulatedWeather('clear');
+  });
+  await page.waitForTimeout(1100);
+
+  const clean = await page.evaluate(() => ({
+    resolved: window.__engine._attention?.resolved ?? [],
+    marks: [...(window.__engine._renderer._resolvedMarks ?? [])],
+  }));
+  if (clean.resolved.length > 0 || clean.marks.length > 0) {
+    return { ok: false, reason: 'a fresh page still carries a resolved correlation' };
+  }
+
+  // Both ends of *some* curated pair, chosen from what this world actually has.
+  //
+  // Hardcoding `cabin`+`forest` was wrong: not every world has both, so the check
+  // failed on a world that could never have shown it, which is a failure about the
+  // harness rather than about the feature. The mark belongs to whichever structure a
+  // pair is about, so any pair proves it.
+  //
+  // The third element is the structure the pair leaves marked, which is not always the
+  // first: `observatory|radio-tower` marks the tower. Measuring the wrong end would
+  // report no change for a mark that is plainly on screen a few hundred pixels away.
+  const PAIRS = [
+    ['cabin', 'forest', 'cabin'],
+    ['lighthouse', 'radio-tower', 'lighthouse'],
+    ['moon', 'observatory', 'observatory'],
+    ['observatory', 'radio-tower', 'radio-tower'],
+  ];
+  const found = await page.evaluate((pairs) => {
+    const engine = window.__engine;
+    const s = engine._renderer.getInteractionSurfaces(engine._effectiveDate());
+    const landmarks = new Map(s.landmarks.map((l) => [l.kind, l]));
+    // `forest` is a band across the frame and `moon` is a disc, not landmarks, so they
+    // have to be asked for separately or no pair in a coastal world would ever match.
+    const at = (k) => {
+      if (k === 'moon') {
+        return s.moon
+          ? { kind: 'moon', x: s.moon.x + s.moon.width / 2, y: s.moon.y + s.moon.height / 2 }
+          : null;
+      }
+      if (k === 'forest') {
+        return {
+          kind: 'forest',
+          x: s.forest.x + s.forest.width / 2,
+          y: s.forest.y + s.forest.height * 0.55,
+        };
+      }
+      const l = landmarks.get(k);
+      return l ? { kind: k, x: l.x + l.width / 2, y: l.y + l.height / 2 } : null;
+    };
+    for (const [a, b, mark] of pairs) {
+      const A = at(a);
+      const B = at(b);
+      if (A && B && landmarks.has(mark)) return { pair: [A, B], mark, a, b };
+    }
+    return {
+      error: `no curated pair is present here; landmarks are ${[...landmarks.keys()].join(', ')}`,
+    };
+  }, PAIRS);
+
+  if (found.error) return { ok: false, reason: found.error };
+
+const kind = found.mark;
+
+  // Before, at the structure that will be marked.
+  const box = await regionBox(kind);
+  if (box.error) return { ok: false, reason: box.error };
+  await page.evaluate((b) => {
+    window.__markBefore = b;
+  }, (await readPixels(box)).arr);
+  if ((await page.evaluate(() => window.__markBefore?.length ?? 0)) !== box.w * box.h) {
+    return { ok: false, reason: 'the before-snapshot did not reach the page intact' };
+  }
+
+  for (const c of found.pair) {
+    await page.mouse.click(c.x * W, c.y * H);
+    await page.waitForTimeout(160);
+  }
+  await page.waitForTimeout(700);
+
+  const state = await page.evaluate(() => {
+    const engine = window.__engine;
+    return {
+      resolved: engine._attention?.resolved ?? [],
+      marks: [...(engine._renderer._resolvedMarks ?? [])],
+      escalation: engine.getAttentionReport().escalation,
+    };
+  });
+
+  // Measured as "how many pixels of this structure got brighter", which took two wrong
+  // attempts to arrive at.
+  //
+  // Counting pixels that moved at all was zero: a control pass records what changes
+  // between frames anyway, and the tower's beacon is blinking, so the lamp's own pixels
+  // were classified as noise and subtracted. Peak luminance was also zero, but for the
+  // opposite reason -- the cabin's windows are already brighter than the lamp being
+  // added, so the brightest pixel in the region does not move however clearly the glow
+  // is visible in the frame.
+  //
+  // "A lamp is now on" is: a cluster of pixels got brighter. A glow is additive so this
+  // counts a lot of them; a beacon that blinks is as likely to go dark as bright, so it
+  // contributes a handful.
+  //
+  // The margin is 8 luma, not 25. The glow is a soft gradient roughly 110px across, so
+  // almost none of its area is more than 25 brighter -- only the very core is, and the
+  // core of the cabin's lamp is already behind its own lit windows. At 25 the check
+  // reported nothing on the cabin and passed on the radio tower, which is the measurement
+  // deciding that the feature works only on the structures it happens to suit.
+  const LIT = await page.evaluate(
+    async ({ x0, y0, w, h }) => {
+      const gl = document.getElementById('wallpaper-canvas').getContext('2d', {
+        willReadFrequently: true,
+      });
+      // Held on the page rather than passed in as an argument. A Float32Array handed to
+      // `page.evaluate` and back does not reliably survive, and when it does not, every
+      // comparison is against undefined -- which counts zero pixels every single run and
+      // looks exactly like a feature that draws nothing.
+      const before = window.__markBefore;
+      if (!before || before.length !== w * h) return { error: 'no usable before-snapshot' };
+      const d = gl.getImageData(x0, y0, w, h).data;
+      let brighter = 0;
+      for (let i = 0, j = 0; j < before.length; i += 4, j++) {
+        // Both sides in luma. The first version compared an after-RGB sum against a
+        // threshold built from a before-luma, which is two different units and counts
+        // nothing at all: a night sky pixel scores 72 against a bar of 147, and a lit
+        // lamp pixel scores 381 against a bar of 456. Both fail, always.
+        const luma = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+        if (luma > before[j] + 8) brighter++;
+      }
+      return { brighter };
+    },
+    box
+  );
+  await page.screenshot({ path: join(OUT, 'beat-resolved-mark.png') });
+
+  const lit = LIT.error ? 0 : LIT.brighter;
+  const reason =
+    LIT.error
+      ? LIT.error
+      : state.resolved.length === 0
+        ? 'the clicks drew no correlation'
+        : !state.marks.includes(kind)
+          ? `resolved, but marked ${state.marks.join(', ') || 'nothing'} rather than ${kind}`
+          : lit < 400
+            ? `mark recorded, but only ${lit} pixels of the ${kind} brightened (region ${box.label})`
+            : '';
+
+  return { ok: reason === '', reason, lit, state, found, box };
+})();
+
+if (marked.ok) {
+  console.log(
+    `PASS  resolved-mark: clicking ${marked.found.a} then ${marked.found.b} left a lamp on the ` +
+      `${marked.found.mark} (${marked.lit} px brightened)`
+  );
+} else {
+  console.log(`FAIL  resolved-mark: ${marked.reason}`);
+  failures++;
 }
 
 // Zone inspection: the point of the M1 registry was to make this possible, so it is

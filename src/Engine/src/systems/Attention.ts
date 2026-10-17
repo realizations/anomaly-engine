@@ -55,6 +55,14 @@ export interface AttentionState {
    * linked.
    */
   conclusions: string[];
+  /**
+   * The subset of `conclusions` that were real correlations.
+   *
+   * Kept separately because this is the only part with a permanent consequence: a
+   * resolved correlation marks its structure, and the mark survives restarts and is
+   * visible in the scene from then on. Everything else in this file decays.
+   */
+  resolved: string[];
 }
 
 /** Ceiling on a place's attention. Above this, more looking changes nothing. */
@@ -121,22 +129,53 @@ export function conclusionId(zoneA: string, zoneB: string): string {
  * is finding a real connection, not being penalised for not spotting it, because a
  * mechanic that punishes exploring is a mechanic that stops you exploring.
  */
-export const CORRELATIONS: Readonly<Record<string, string>> = {
-  'cabin|forest': 'THE SMOKE IS FROM THE CABIN. NOTHING EVER COMES OUT OF IT.',
-  'lighthouse|radio-tower': 'THE SAME INTERVAL, TWICE. NEITHER ANSWERS.',
-  'moon|observatory': 'THE DISH FOLLOWS THE MOON. IT HAS DONE FOR A WHILE.',
-  'observatory|radio-tower': 'TWO TRANSMITTERS ON ONE HILL. ONE SILENCE.',
+/**
+ * The real correlations: pairs that mean something to each other, and what each one
+ * leaves behind.
+ *
+ * One table, deliberately. The insight and the mark are the same discovery, so
+ * splitting them across two structures would allow a correlation that says something
+ * and marks nothing, which is exactly the sort of half-finished fiction this file is
+ * supposed to be the answer to.
+ *
+ * `mark` is a landmark kind, which is how a sentence in a log becomes a light on a
+ * building that stays on.
+ */
+export const CORRELATIONS: Readonly<
+  Record<string, { insight: string; mark: string }>
+> = {
+  'cabin|forest': {
+    insight: 'THE SMOKE IS FROM THE CABIN. NOTHING EVER COMES OUT OF IT.',
+    mark: 'cabin',
+  },
+  'lighthouse|radio-tower': {
+    insight: 'THE SAME INTERVAL, TWICE. NEITHER ANSWERS.',
+    mark: 'lighthouse',
+  },
+  'moon|observatory': {
+    insight: 'THE DISH FOLLOWS THE MOON. IT HAS DONE FOR A WHILE.',
+    mark: 'observatory',
+  },
+  'observatory|radio-tower': {
+    insight: 'TWO TRANSMITTERS ON ONE HILL. ONE SILENCE.',
+    mark: 'radio-tower',
+  },
 };
 
 /** What linking these two means, or null if they mean nothing to each other. */
 export function correlationFor(zoneA: string, zoneB: string): string | null {
-  return CORRELATIONS[conclusionId(zoneA, zoneB)] ?? null;
+  return CORRELATIONS[conclusionId(zoneA, zoneB)]?.insight ?? null;
+}
+
+/** The structure a resolved correlation leaves lit, or null if the pair means nothing. */
+export function correlationMarkFor(zoneA: string, zoneB: string): string | null {
+  return CORRELATIONS[conclusionId(zoneA, zoneB)]?.mark ?? null;
 }
 
 const DAY_MS = 86_400_000;
 
 export function emptyAttention(): AttentionState {
-  return { worlds: {}, conclusions: [] };
+  return { worlds: {}, conclusions: [], resolved: [] };
 }
 
 function blankWorld(): WorldAttention {
@@ -302,7 +341,18 @@ export function conclude(
     ...state,
     worlds,
     conclusions: [...state.conclusions, conclusionId].slice(-MAX_CONCLUSIONS),
+    // Namespaced by world, because a mark belongs to a place: resolving the dish and
+    // the moon is something that happened in *this* valley, and it must not follow the
+    // player to a salt flat that has never heard of it.
+    resolved: insight && worldId
+      ? [...state.resolved, `${worldId}/${conclusionId}`].slice(-MAX_CONCLUSIONS)
+      : state.resolved,
   };
+}
+
+/** The correlation ids resolved in this world, for the permanent mark. */
+export function resolvedIn(state: AttentionState, worldId: string): string[] {
+  return state.resolved.filter((id) => id.startsWith(`${worldId}/`));
 }
 
 /** How many observations a place has, for the terminal's readout. */
@@ -350,6 +400,12 @@ export function reconcileAttention(raw: unknown): AttentionState {
   if (Array.isArray(source.conclusions)) {
     out.conclusions = source.conclusions
       .filter((c): c is string => typeof c === 'string')
+      .slice(-MAX_CONCLUSIONS);
+  }
+
+  if (Array.isArray(source.resolved)) {
+    out.resolved = source.resolved
+      .filter((r): r is string => typeof r === 'string')
       .slice(-MAX_CONCLUSIONS);
   }
 

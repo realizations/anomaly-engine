@@ -13,6 +13,7 @@ import {
   conclusionId,
   correlationFor,
   CORRELATIONS,
+  resolvedIn,
   ATTENTION_CEILING,
   MAX_ESCALATION,
   NEGLECT_DAYS,
@@ -252,6 +253,68 @@ describe('correlations', () => {
     const resolved = conclude(paid, 'x|y', 'town', correlationFor('cabin', 'forest'));
     expect(bare.worlds.town.attention).toBe(1);
     expect(resolved.worlds.town.attention).toBe(0);
+  });
+});
+
+describe('the permanent mark', () => {
+  it('a real correlation marks its structure; a bare link marks nothing', () => {
+    const bare = conclude(emptyAttention(), 'cabin|forest', 'town', null);
+    const real = conclude(
+      emptyAttention(),
+      'cabin|forest',
+      'town',
+      correlationFor('cabin', 'forest'),
+    );
+    expect(bare.resolved).toEqual([]);
+    expect(real.resolved).toEqual(['town/cabin|forest']);
+  });
+
+  it('every correlation marks a landmark the player can actually click', () => {
+    // A mark on a landmark that does not exist is a reward with no picture, which is
+    // the failure mode this assertion exists to catch.
+    const KINDS = new Set(['cabin', 'lighthouse', 'observatory', 'radio-tower']);
+    for (const key of Object.keys(CORRELATIONS)) {
+      const mark = CORRELATIONS[key].mark;
+      expect(KINDS.has(mark), `${key} marks "${mark}", which is not a structure`).toBe(true);
+    }
+  });
+
+  it('a mark belongs to the place where it was found', () => {
+    // Resolving the dish and the moon is something that happened in this valley.
+    // It must not follow the player to a salt flat that has never heard of it.
+    const s = conclude(
+      emptyAttention(),
+      'moon|observatory',
+      'town',
+      correlationFor('moon', 'observatory'),
+    );
+    expect(resolvedIn(s, 'town')).toEqual(['town/moon|observatory']);
+    expect(resolvedIn(s, 'coast')).toEqual([]);
+  });
+
+  it('survives a save and load', () => {
+    // The whole point of a permanent consequence is that it is still there tomorrow.
+    const s = conclude(
+      emptyAttention(),
+      'cabin|forest',
+      'town',
+      correlationFor('cabin', 'forest'),
+    );
+    expect(resolvedIn(reconcileAttention(s as never), 'town')).toEqual(['town/cabin|forest']);
+  });
+
+  it('a repeated correlation does not stack marks', () => {
+    let s = emptyAttention();
+    s = conclude(s, 'cabin|forest', 'town', correlationFor('cabin', 'forest'));
+    s = conclude(s, 'cabin|forest', 'town', correlationFor('cabin', 'forest'));
+    expect(resolvedIn(s, 'town')).toHaveLength(1);
+  });
+
+  it('a saved file with no resolved field loads instead of failing', () => {
+    // State written before this existed has no `resolved` key at all.
+    const old = { ...emptyAttention() } as Record<string, unknown>;
+    delete old.resolved;
+    expect(reconcileAttention(old as never).resolved).toEqual([]);
   });
 });
 
