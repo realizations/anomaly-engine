@@ -62,6 +62,7 @@ import {
   observationCount,
   reconcileAttention,
   conclusionId,
+  correlationFor,
   type AttentionState,
 } from './systems/Attention.js';
 
@@ -2338,7 +2339,8 @@ const firstWorld = this._worlds.getAll()[0];
     if (stale || previous.zoneId === desc.id) return;
 
     const id = conclusionId(previous.zoneId, desc.id);
-    const next = conclude(this._attention, id, worldId);
+    const insight = correlationFor(previous.zoneId, desc.id);
+    const next = conclude(this._attention, id, worldId, insight);
     if (next === this._attention) {
       this._renderer.terminalPush('NO NEW CORRELATION', { pace: 1.6 });
       return;
@@ -2348,10 +2350,15 @@ const firstWorld = this._worlds.getAll()[0];
     this._settleAndPush(worldId, now);
 
     const report = this.getAttentionReport();
-    this._renderer.terminalPush(
-      `CORRELATION ${previous.zoneId.toUpperCase()} / ${desc.id.toUpperCase()}`,
-      { pace: 1.2 },
-    );
+    if (insight) {
+      this._renderer.terminalPush('CORRELATION RESOLVED', { warn: true, pace: 1.1 });
+      this._renderer.terminalPush(insight, { pace: 1.4 });
+    } else {
+      this._renderer.terminalPush(
+        `CORRELATION ${previous.zoneId.toUpperCase()} / ${desc.id.toUpperCase()}`,
+        { pace: 1.2 },
+      );
+    }
     this._renderer.terminalPush(
       `ATTN NOW ${report.escalation}  OBS ${report.observations}  RATE ${Math.round(report.rate * 100)}%`,
       { pace: 1.2 },
@@ -2359,6 +2366,7 @@ const firstWorld = this._worlds.getAll()[0];
     this._bridge.sendLog('attention:conclusion', {
       a: previous.zoneId,
       b: desc.id,
+      resolved: !!insight,
       escalation: report.escalation,
     });
   }

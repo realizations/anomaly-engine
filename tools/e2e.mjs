@@ -63,6 +63,26 @@ const luminanceSignature = (pg) => pg.evaluate(() => {
   const px = g.getImageData(0, 0, canvas.width, canvas.height).data;
   const GX = 32;
   const GY = 18;
+  // The terminal is excluded, and it has to be.
+  //
+  // This signature answers "are these two art styles different pictures", and the
+  // terminal is not art: it is the same grey box with the same green lines in both.
+  // Enlarging it to be legible made it cover a quarter of the frame, and a quarter of
+  // the frame that never varies dilutes the real difference until two genuinely
+  // different skies measure 16 apart -- which is how a finished-looking measurement
+  // starts failing for a reason that has nothing to do with the thing it measures.
+  //
+  // Excluded by asking the engine where it is, not by hard-coding a corner.
+  const term = window.__engine.getTerminalRect();
+  const skip = (x, y) => {
+    if (!term) return false;
+    const sx = canvas.width / (canvas.clientWidth || canvas.width);
+    const t = {
+      x0: term.x * sx, y0: term.y * sx,
+      x1: (term.x + term.width) * sx, y1: (term.y + term.height) * sx,
+    };
+    return x >= t.x0 - 8 && x <= t.x1 + 8 && y >= t.y0 - 8 && y <= t.y1 + 8;
+  };
   const sig = [];
   for (let cy = 0; cy < GY; cy++) {
     for (let cx = 0; cx < GX; cx++) {
@@ -74,12 +94,16 @@ const luminanceSignature = (pg) => pg.evaluate(() => {
       const y1 = Math.floor(((cy + 1) * canvas.height) / GY);
       for (let y = y0; y < y1; y += 4) {
         for (let x = x0; x < x1; x += 4) {
+          if (skip(x, y)) continue;
           const i = (y * canvas.width + x) * 4;
           sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
           n++;
         }
       }
-      sig.push(sum / n);
+      // A cell entirely inside the excluded rect contributes nothing. Pushing a
+      // zero-width average would be a number; pushing NaN would poison the whole
+      // signature, and the divergence is a mean over every cell.
+      if (n > 0) sig.push(sum / n);
     }
   }
   return sig;
@@ -88,6 +112,22 @@ const luminanceSignature = (pg) => pg.evaluate(() => {
 // --- style switching, exactly as the tray dispatches it ---
 const styleHashes = {};
 const styleSignatures = {};
+// Pinned before the loop, and pinned deliberately.
+//
+// The two styles differ in the sky, so how far apart they measure depends entirely on
+// the hour: at dusk the sky is most of the frame and they differ by around 24, and
+// deep in the night it is a thin band above the horizon and they differ by about 15.
+// Nothing changed between those two numbers -- only the clock.
+//
+// A gate whose result depends on when it is run is not a gate, and this repository has
+// already had that argument written down about a different tool. So the scene is fixed:
+// dusk, clear, which is the hour the two looks are most meant to be compared at.
+await page.evaluate(() => {
+  window.__engine.setSimulatedHour(18.6);
+  window.__engine.setSimulatedWeather('clear');
+});
+await page.waitForTimeout(1200);
+
 for (const style of STYLES) {
   await page.evaluate((s) => {
     window.dispatchEvent(new CustomEvent('anomaly:style', { detail: { style: s } }));

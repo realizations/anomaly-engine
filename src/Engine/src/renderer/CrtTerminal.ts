@@ -509,9 +509,30 @@ const lit = 0.25 + grade.ambient * 0.75;
       fs = Math.max(10, Math.floor(fs * (inner / longest)));
       g.font = `${fs}px 'Plex Mono', Consolas, monospace`;
     }
+
+    // Ellipsis anything still too long for the tube at the floor size.
+    //
+    // Shrinking stops at 10px, which is as small as the readout is allowed to be, and
+    // past that the options are a clipped word or a shorter line. A clipped word looks
+    // broken; "SITE THE TOWN THAT WASNT THE" stops mid-word with no marker, which is
+    // worse than either.
+    //
+    // Done as a character budget rather than a per-candidate `measureText` loop. That
+    // loop was measurably wrong: it walked a 31-character line down to a single "S",
+    // because the budget it was measuring against and the width it was measuring with
+    // disagreed, and a loop that can be wrong by that much is not a loop worth keeping.
+    // One measurement of one character, one division, no iteration.
+    //
+    // The return summary is exempt. It is the one thing that must never lose words,
+    // because the words that would be lost are the unsettling ones.
+    const budget = Math.max(8, Math.floor(inner / (fs * 0.62)));
+    const ellipsised = shown.map((row) =>
+      row.text.length > budget ? { text: `${row.text.slice(0, budget - 3).trimEnd()}...`, warn: row.warn } : row,
+    );
+
     const lineH = fs * 1.5;
     const maxRows = Math.floor((h - padY * 2) / lineH);
-    while (shown.length > maxRows) shown.shift();
+    while (ellipsised.length > maxRows) ellipsised.shift();
 
     // The cursor blinks on the current row regardless of typing state.
     const cursorVisible = Math.floor(this._flicker * 1.6) % 2 === 0;
@@ -523,7 +544,7 @@ const lit = 0.25 + grade.ambient * 0.75;
     // The blur is expensive because its cost scales with radius times glyph area, so
     // the lever is the radius, not the number of passes. At a third of the type size it
     // still reads as a lit tube and costs about a fifth of what a half-size radius did.
-    shown.forEach((row, i) => {
+    ellipsised.forEach((row, i) => {
       const col = row.warn ? PHOSPHOR_WARN : PHOSPHOR;
       g.fillStyle = css(col, this._boot * 0.92);
       g.shadowColor = css(col, 0.7);
@@ -534,16 +555,16 @@ const lit = 0.25 + grade.ambient * 0.75;
 
 // Cursor block.
     if (this._current && cursorVisible) {
-      const idx = shown.length - 1;
+      const idx = ellipsised.length - 1;
       if (idx >= 0) {
-        const text = shown[idx].text;
+        const text = ellipsised[idx].text;
         const cw = g.measureText(text).width;
         g.fillStyle = css(this._current.warn ? PHOSPHOR_WARN : PHOSPHOR, this._boot * 0.8);
         g.fillRect(x + padX + cw + 1, y + padY + idx * lineH, fs * 0.55, fs * 1.05);
       }
     }
 
-    this._drawInstruments(g, x, y, w, h, padX, shown.length * lineH + padY, state);
+    this._drawInstruments(g, x, y, w, h, padX, ellipsised.length * lineH + padY, state);
   }
 
   /**

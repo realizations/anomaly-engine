@@ -107,6 +107,32 @@ export function conclusionId(zoneA: string, zoneB: string): string {
   return [zoneA, zoneB].sort().join('|');
 }
 
+/**
+ * Pairs that genuinely mean something, and what they mean.
+ *
+ * A deduction layer needs a thing to be *right* about, and there is no honest way to
+ * get that by making every pair equally valid -- then linking anything is as good as
+ * linking everything and the mechanic is a click. So the correlations are curated:
+ * four pairs of things that actually relate in this fiction, written as the terminal
+ * would report them.
+ *
+ * Deliberately *not* punishing to miss one. A pair that is not in this table still
+ * draws a conclusion and still costs attention; it just gives nothing back. The reward
+ * is finding a real connection, not being penalised for not spotting it, because a
+ * mechanic that punishes exploring is a mechanic that stops you exploring.
+ */
+export const CORRELATIONS: Readonly<Record<string, string>> = {
+  'cabin|forest': 'THE SMOKE IS FROM THE CABIN. NOTHING EVER COMES OUT OF IT.',
+  'lighthouse|radio-tower': 'THE SAME INTERVAL, TWICE. NEITHER ANSWERS.',
+  'moon|observatory': 'THE DISH FOLLOWS THE MOON. IT HAS DONE FOR A WHILE.',
+  'observatory|radio-tower': 'TWO TRANSMITTERS ON ONE HILL. ONE SILENCE.',
+};
+
+/** What linking these two means, or null if they mean nothing to each other. */
+export function correlationFor(zoneA: string, zoneB: string): string | null {
+  return CORRELATIONS[conclusionId(zoneA, zoneB)] ?? null;
+}
+
 const DAY_MS = 86_400_000;
 
 export function emptyAttention(): AttentionState {
@@ -241,7 +267,7 @@ export function anomalyRateMultiplier(escalation: number): number {
  *
  * Returns the state unchanged if the conclusion is already recorded, so a player cannot
  * farm relief by re-linking the same pair -- which matters now that linking has a
- * mechanical cost, and not only because re-linking is dull.
+ * mechanical cost, rather than only being a record.
  *
  * The world's attention drops by the relief. Escalation deliberately does not: having
  * explained one thing about a place does not make the place forget, and a place whose
@@ -251,8 +277,14 @@ export function conclude(
   state: AttentionState,
   conclusionId: string,
   worldId?: string,
+  insight: string | null = null,
 ): AttentionState {
   if (state.conclusions.includes(conclusionId)) return state;
+
+  // A real correlation takes twice as much out of the place as a link that means
+  // nothing, which is what makes the curated table worth reading rather than
+  // decorative.
+  const relief = insight ? CONCLUSION_RELIEF * 2 : CONCLUSION_RELIEF;
 
   let worlds = state.worlds;
   const current = worldId ? state.worlds[worldId] : undefined;
@@ -261,7 +293,7 @@ export function conclude(
       ...state.worlds,
       [worldId!]: {
         ...current,
-        attention: Math.max(0, current.attention - CONCLUSION_RELIEF),
+        attention: Math.max(0, current.attention - relief),
       },
     };
   }

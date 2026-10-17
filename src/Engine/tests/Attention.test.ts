@@ -11,6 +11,8 @@ import {
   observationCount,
   reconcileAttention,
   conclusionId,
+  correlationFor,
+  CORRELATIONS,
   ATTENTION_CEILING,
   MAX_ESCALATION,
   NEGLECT_DAYS,
@@ -209,6 +211,47 @@ describe('conclusionId', () => {
 
   it('distinguishes different pairs', () => {
     expect(conclusionId('a', 'b')).not.toBe(conclusionId('a', 'c'));
+  });
+});
+
+describe('correlations', () => {
+  it('a curated pair means something, in either order', () => {
+    expect(correlationFor('cabin', 'forest')).toBeTruthy();
+    expect(correlationFor('forest', 'cabin')).toBe(correlationFor('cabin', 'forest'));
+  });
+
+  it('an unrelated pair means nothing', () => {
+    expect(correlationFor('cabin', 'lighthouse')).toBeNull();
+  });
+
+  it('every curated key is a sorted pair of two zones that exist', () => {
+    // A typo in a key would be an insight that could never fire, which is a secret
+    // written and never reachable -- the exact failure this table is here to avoid.
+    const ZONES = new Set(['observatory', 'radio-tower', 'cabin', 'lighthouse', 'moon', 'forest']);
+    for (const key of Object.keys(CORRELATIONS)) {
+      const parts = key.split('|');
+      expect(parts).toHaveLength(2);
+      expect([...parts]).toEqual([...parts].sort());
+      for (const p of parts) expect(ZONES.has(p), `${key} names unknown zone ${p}`).toBe(true);
+    }
+  });
+
+  it('every pair of zones that correlates is discoverable from the zone list', () => {
+    // Four pairs out of fifteen is the whole point: a mechanic where almost
+    // everything links is a mechanic with nothing to find.
+    expect(Object.keys(CORRELATIONS).length).toBeGreaterThan(0);
+    expect(Object.keys(CORRELATIONS).length).toBeLessThan(15);
+  });
+
+  it('a resolved correlation takes twice the relief of a bare link', () => {
+    const base = observe(emptyAttention(), 'town', 'cabin', 'd1', T0).state;
+    const paid = observe(base, 'town', 'forest', 'd2', T0 + DAY).state;
+    expect(paid.worlds.town.attention).toBe(2);
+
+    const bare = conclude(paid, 'x|y', 'town', null);
+    const resolved = conclude(paid, 'x|y', 'town', correlationFor('cabin', 'forest'));
+    expect(bare.worlds.town.attention).toBe(1);
+    expect(resolved.worlds.town.attention).toBe(0);
   });
 });
 
