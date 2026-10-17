@@ -3584,7 +3584,95 @@ private _rain: Array<{ x: number; y: number; len: number; sp: number }> = [];
    * a snowfield or a salt flat is what made the alpine world read as wrong, so
    * each biome gets the surface it should actually have.
    */
+  /**
+   * Geography for the ground plane itself, before any biome detail goes on top.
+   *
+   * The plane was one flat fill from the treeline to the bottom of the frame, and the
+   * only thing on it was grass that is invisible at night -- which is most of the time,
+   * and every hour the game is meant to be played at. The result was a wide dark band
+   * across the bottom third of every scene: not a foreground, not a midground, just the
+   * absence of one.
+   *
+   * Two layers, both derived from the seed, both deliberately low-contrast:
+   *
+   *  - Soft patches of shifted tone, so the plane has weather and geography in it rather
+   *    than being one value. This is what actually removes the flatness; a scatter of
+   *    objects on a flat plane still reads as objects on a flat plane.
+   *  - Stones and low scrub, which give the plane a size to be measured against and put
+   *    something between the treeline and the foreground grass.
+   *
+   * Both are attenuated by how much light there is. A patch that stays the same strength
+   * at noon is a stain in daylight; a patch that vanishes entirely is the bug again.
+   */
+  private _drawGroundGeography(grade: SkyGrade, base: RGB): void {
+    const g = this._ctx;
+    const y0 = this._h * this._horizonFrac();
+    if (y0 >= this._h) return;
+    const rnd = mulberry32(this._seed + 7717);
+    const flat = this._style === 'flat';
+
+    // Distance fog eats the far plane, so patches there are fainter as well as smaller.
+    const depthFade = (t: number) => (1 - t * 0.62) * (0.35 + grade.ambient * 0.65);
+
+    if (!flat) {
+      for (let i = 0; i < 30; i++) {
+        const t = Math.pow(rnd(), 0.5);
+        const px = rnd() * this._w;
+        const py = y0 + this._h * (0.015 + t * 0.94);
+        const rw = this._w * (0.045 + t * 0.17);
+        const rh = rw * (0.13 + t * 0.06);
+        const tint = rnd() < 0.5 ? shade(base, 1.1) : shade(base, 0.82);
+        const grd = g.createRadialGradient(px, py, 0, px, py, rw);
+        const a = 0.34 * depthFade(t);
+        grd.addColorStop(0, css(tint, a));
+        grd.addColorStop(0.62, css(tint, a * 0.4));
+        grd.addColorStop(1, css(tint, 0));
+        g.fillStyle = grd;
+        g.beginPath();
+        g.ellipse(px, py, rw, rh, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+    } else {
+      // Flat is hard-edged on purpose, so the same idea is bands rather than gradients.
+      // Keeping the treatment honest to the style is the point of the style: a soft
+      // airbrushed patch would be the painterly look leaking into flat.
+      for (let i = 0; i < 14; i++) {
+        const t = rnd();
+        const py = y0 + this._h * (0.02 + t * 0.95);
+        const ph = this._h * (0.012 + rnd() * 0.03);
+        g.fillStyle = css(rnd() < 0.5 ? shade(base, 0.86) : shade(base, 1.08), 0.2 * depthFade(t));
+        g.fillRect(rnd() * this._w * 0.4, py, this._w * (0.35 + rnd() * 0.6), ph);
+      }
+    }
+
+    // Stones and scrub. Sparse, low, and darker than the ground so they read as
+    // silhouettes rather than as highlights.
+    const marks = flat ? 34 : 46;
+    for (let i = 0; i < marks; i++) {
+      const t = Math.pow(rnd(), 0.6);
+      const px = rnd() * this._w;
+      const py = y0 + this._h * (0.03 + t * 0.92);
+      const w = this._w * (0.006 + t * 0.026);
+      const h = w * (0.5 + rnd() * 0.55);
+      const scrub = rnd() < 0.45;
+      g.fillStyle = css(shade(base, 0.52), 0.78 * depthFade(t));
+      g.beginPath();
+      if (scrub) {
+        // A low clump of several blades: three overlapping ellipses read as a bush
+        // where a single one reads as a smudge.
+        for (let b = 0; b < 3; b++) {
+          const ox = px + (b - 1) * w * 0.6;
+          g.ellipse(ox, py - h * 0.18, w * (0.62 - b * 0.1), h * (0.7 - b * 0.14), 0, 0, Math.PI * 2);
+        }
+      } else {
+        g.ellipse(px, py, w, h, 0, 0, Math.PI * 2);
+      }
+      g.fill();
+    }
+  }
+
   private _drawGroundDetail(grade: SkyGrade, base: RGB): void {
+    this._drawGroundGeography(grade, base);
     switch (this._world.biome) {
       case 'temperate-forest':
         this._drawGrass(grade, base);
